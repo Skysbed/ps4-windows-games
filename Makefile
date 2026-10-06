@@ -71,6 +71,7 @@ EBOOT := $(INTDIR)/eboot.bin
 SFO := $(PACKAGE_ROOT)/sce_sys/param.sfo
 PACKAGE_EBOOT := $(PACKAGE_ROOT)/eboot.bin
 GP4 := $(PACKAGE_ROOT)/$(CONTENT_ID).gp4
+GP4_PATCHER := tools/pcps4_patch_gp4.py
 PKG := $(PACKAGE_ROOT)/$(CONTENT_ID).pkg
 
 # Files every OpenOrbis package needs, matching the toolchain's own samples:
@@ -260,13 +261,16 @@ $(PACKAGE_ROOT)/sce_sys/icon0.png: $(OO_ICON)
 	@mkdir -p "$(dir $@)"
 	cp "$<" "$@"
 
-$(GP4): $(SFO) $(PACKAGE_EBOOT) $(PACKAGE_SUPPORT) package-game
+$(GP4): $(SFO) $(PACKAGE_EBOOT) $(PACKAGE_SUPPORT) package-game $(GP4_PATCHER)
 	@test -x "$(CREATE_GP4)" || (echo "ERROR: $(CREATE_GP4) not found."; exit 1)
 	cd "$(PACKAGE_ROOT)" && \
 	  "$(CREATE_GP4)" \
 	    -out "$(notdir $@)" \
 	    --content-id="$(CONTENT_ID)" \
-	    --path "."
+	    --files "$(PACKAGE_FILES)" && \
+	  if [ -d game ]; then \
+	    python3 "$(CURDIR)/$(GP4_PATCHER)" "$(notdir $@)" game --target-root game; \
+	  fi
 $(PKG): $(GP4)
 	@test -x "$(PKGTOOL)" || (echo "ERROR: $(PKGTOOL) not found."; exit 1)
 	cd "$(PACKAGE_ROOT)" && "$(PKGTOOL)" pkg_build "$(notdir $<)" .

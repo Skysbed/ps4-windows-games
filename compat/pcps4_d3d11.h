@@ -227,6 +227,8 @@ public:
     pcps4_gnm_renderer_t *gnm_renderer;
     uint32_t refs;
     uint64_t frame_id;
+    uint32_t width;
+    uint32_t height;
 
     IDXGISwapChain(pcps4_gpu_device_t *device_value,
                    pcps4_gpu_context_t *context_value,
@@ -237,7 +239,9 @@ public:
           graphics(graphics_value),
           gnm_renderer(gnm_renderer_value),
           refs(1),
-          frame_id(1) {}
+          frame_id(1),
+          width(0),
+          height(0) {}
 
     HRESULT Present(UINT SyncInterval, UINT Flags);
     HRESULT GetBuffer(UINT Buffer, ID3D11Texture2D **Resource);
@@ -284,13 +288,17 @@ public:
     pcps4_gpu_device_t *native;
     pcps4_gpu_context_t *context;
     pcps4_gfx_context_t *graphics;
+    pcps4_gnm_renderer_t *gnm_renderer;
     uint32_t refs;
 
     ID3D11Device(pcps4_gpu_device_t *device_value,
                  pcps4_gpu_context_t *context_value,
                  pcps4_gfx_context_t *graphics_value)
-        : native(device_value), context(context_value),
-          graphics(graphics_value), refs(1) {}
+        : native(device_value),
+          context(context_value),
+          graphics(graphics_value),
+          gnm_renderer(NULL),
+          refs(1) {}
 
     HRESULT CreateBuffer(const D3D11_BUFFER_DESC *pDesc,
                          const D3D11_SUBRESOURCE_DATA *pInitialData,

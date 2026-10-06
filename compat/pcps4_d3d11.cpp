@@ -199,10 +199,7 @@ HRESULT IDXGISwapChain::Present(UINT SyncInterval, UINT Flags)
     if (context == NULL)
         return E_FAIL;
 
-    uint64_t current_frame =
-        gnm_renderer != NULL
-            ? context->gnm_frame_id
-            : frame_id++;
+    uint64_t current_frame = frame_id++;
 
     return pcps4_gpu_context_present(
                context,
@@ -230,8 +227,8 @@ HRESULT IDXGISwapChain::GetBuffer(
         texture = pcps4_gpu_texture_create_gnm_backbuffer(
             device,
             gnm_renderer,
-            1280,
-            720);
+            width,
+            height);
     } else
 #endif
     {
@@ -846,10 +843,14 @@ HRESULT pcps4_d3d11_create_device_and_swap_chain(
     uint32_t height = swap_chain_desc->BufferDesc.Height;
     uint32_t buffers = swap_chain_desc->BufferCount;
 
-    if (width == 0) width = 1280;
-    if (height == 0) height = 720;
-    if (buffers < 2) buffers = 2;
-    if (buffers > 3) buffers = 3;
+    if (width == 0)
+        width = 1280;
+    if (height == 0)
+        height = 720;
+    if (buffers < 2)
+        buffers = 2;
+    if (buffers > 3)
+        buffers = 3;
 
     pcps4_gpu_device_t *gpu =
         pcps4_gpu_device_create();
@@ -938,7 +939,9 @@ HRESULT pcps4_d3d11_create_device_and_swap_chain(
         return E_OUTOFMEMORY;
     }
 
+#if PCPS4_ENABLE_OPENGNM
     d3d_device->gnm_renderer = gnm_renderer;
+#endif
 
     IDXGISwapChain *d3d_swap =
         new (std::nothrow) IDXGISwapChain(
@@ -952,62 +955,17 @@ HRESULT pcps4_d3d11_create_device_and_swap_chain(
         return E_OUTOFMEMORY;
     }
 
-    if (graphics == NULL) {
-        pcps4_gpu_context_destroy(gpu_context);
-        pcps4_gpu_device_destroy(gpu);
-        return E_OUTOFMEMORY;
-    }
-
-    int gfx_rc = pcps4_gfx_init(
-        graphics,
-        width,
-        height,
-        buffers);
-
-    if (gfx_rc != PCPS4_GFX_OK) {
-        delete graphics;
-        pcps4_gpu_context_destroy(gpu_context);
-        pcps4_gpu_device_destroy(gpu);
-        return E_FAIL;
-    }
-
-    if (pcps4_gpu_context_attach_graphics(
-            gpu_context,
-            graphics) != PCPS4_GPU_OK) {
-        pcps4_gfx_shutdown(graphics);
-        delete graphics;
-        pcps4_gpu_context_destroy(gpu_context);
-        pcps4_gpu_device_destroy(gpu);
-        return E_FAIL;
-    }
-
-    ID3D11Device *d3d_device =
-        new (std::nothrow) ID3D11Device(
-            gpu,
-            gpu_context,
-            graphics);
-
-    if (d3d_device == NULL) {
-        pcps4_gfx_shutdown(graphics);
-        delete graphics;
-        pcps4_gpu_context_destroy(gpu_context);
-        pcps4_gpu_device_destroy(gpu);
-        return E_OUTOFMEMORY;
-    }
-
-    IDXGISwapChain *d3d_swap =
-        new (std::nothrow) IDXGISwapChain(
-            gpu,
-            graphics);
-
-    if (d3d_swap == NULL) {
-        d3d_device->Release();
-        return E_OUTOFMEMORY;
-    }
+    d3d_swap->width = width;
+    d3d_swap->height = height;
 
     if (feature_level != NULL)
         *feature_level = D3D_FEATURE_LEVEL_11_0;
 
+    /*
+     * Keep the immediate context creation consistent with D3D11: callers
+     * may request it via GetImmediateContext(), so the out pointer stays
+     * NULL here.
+     */
     *device = d3d_device;
     *swap_chain = d3d_swap;
     *context = NULL;

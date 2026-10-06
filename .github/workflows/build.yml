@@ -44,13 +44,27 @@ jobs:
             -fno-stack-protector \
             -fno-asynchronous-unwind-tables \
             -nostdlib \
+            -fno-builtin \
             -Wl,--entry=WinMainCRTStartup \
             -Wl,--subsystem,windows \
             -Wl,--section-alignment,0x4000 \
             -Wl,--file-alignment,0x200 \
             -o build/win_d3d11_smoke.exe \
             tests/win_d3d11_smoke.c \
-            -ld3d11 -lkernel32
+            -ld3d11 -lkernel32 -lws2_32 -lxinput -lmsvcrt
+
+      - name: Inspect native Windows smoke import surface
+        run: |
+          x86_64-w64-mingw32-objdump -p build/win_d3d11_smoke.exe |
+            sed -n '/The Import Tables/,+140p'
+          for dll in KERNEL32.dll d3d11.dll WS2_32.dll XINPUT1_4.dll MSVCRT.dll; do
+            x86_64-w64-mingw32-objdump -p build/win_d3d11_smoke.exe |
+              grep -qi "$dll" || {
+                echo "ERROR: expected smoke import $dll is missing"
+                exit 1
+              }
+          done
+
 
       - name: Verify OpenOrbis installation and packaging tools
         run: |

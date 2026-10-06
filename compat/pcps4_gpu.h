@@ -91,7 +91,7 @@ typedef struct {
     uint32_t aligned_byte_offset;
     uint32_t format;
     uint32_t semantic_index;
-    uint32_t semantic_kind; /* 1 = POSITION, 2 = COLOR */
+    uint32_t semantic_kind; /* 1 = POSITION, 2 = COLOR, 3 = TEXCOORD */
 } pcps4_gpu_vertex_element_t;
 
 pcps4_gpu_device_t *pcps4_gpu_device_create(void);

@@ -11,6 +11,7 @@
 void pcps4_runtime_demo(char *buffer, size_t buffer_size);
 int pcps4_gnm_smoke_run(void);
 int pcps4_d3d11_smoke_test(void);
+int pcps4_d3d11_game_run(void);
 int pcps4_pe_exec_smoke(void);
 
 void pcps4_status_begin(void);
@@ -55,7 +56,16 @@ int main(void)
     pcps4_status_report("D3D11 -> GNM smoke", pcps4_d3d11_smoke_test() == 0);
 #endif
 
-    /* Stay on the result screen; never return from main. */
+#if PCPS4_RUN_GAME
+    /*
+     * Enter the real interactive path after the compatibility tests. The
+     * demo is intentionally ordinary PC-style D3D11 + XInput source so the
+     * translator and runtime are exercised together.
+     */
+    (void)pcps4_d3d11_game_run();
+#endif
+
+    /* Stay on the result screen if the game path is disabled or returns. */
     pcps4_status_finish_forever();
     return 0;
 }

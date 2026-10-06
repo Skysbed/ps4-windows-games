@@ -20,6 +20,21 @@ typedef struct pcps4_module_handle {
 
 static pcps4_pe_resolver *g_resolver = NULL;
 
+static void win_SetLastError(DWORD value);
+static HMODULE win_LoadLibraryA(LPCSTR name);
+static HMODULE win_LoadLibraryW(LPCWSTR name);
+static HMODULE win_GetModuleHandleA(LPCSTR name);
+static HMODULE win_GetModuleHandleW(LPCWSTR name);
+static DWORD win_GetEnvironmentVariableA(
+    LPCSTR name,
+    LPSTR buffer,
+    DWORD size);
+static DWORD win_GetEnvironmentVariableW(
+    LPCWSTR name,
+    LPWSTR buffer,
+    DWORD size);
+
+
 static int module_name_normalize(
     const char *input,
     char *output,
@@ -501,4 +516,4 @@ void pcps4_winapi_build_resolver(pcps4_pe_resolver *resolver)
     register_ucrt(resolver, "api-ms-win-crt-runtime-l1-1-0.dll");
     register_ucrt(resolver, "api-ms-win-crt-string-l1-1-0.dll");
     register_ucrt(resolver, "api-ms-win-crt-heap-l1-1-0.dll");
-\n}
+}

@@ -300,6 +300,17 @@ void pcps4_gpu_texture_destroy(pcps4_gpu_texture_t *texture)
     free(texture);
 }
 
+int pcps4_gpu_texture_get_desc(
+    const pcps4_gpu_texture_t *texture,
+    pcps4_gpu_texture_desc_t *desc)
+{
+    if (!valid_texture(texture) || desc == NULL)
+        return PCPS4_GPU_ERR_ARGUMENT;
+
+    *desc = texture->desc;
+    return PCPS4_GPU_OK;
+}
+
 int pcps4_gpu_texture_update_rgba8(pcps4_gpu_texture_t *texture,
                                    const void *data,
                                    size_t row_pitch,

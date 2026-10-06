@@ -28,15 +28,19 @@ void ID3D11Texture2D::GetDesc(
     if (desc == NULL || native == NULL)
         return;
 
+    pcps4_gpu_texture_desc_t native_desc = {};
+    if (pcps4_gpu_texture_get_desc(native, &native_desc) != PCPS4_GPU_OK)
+        return;
+
     memset(desc, 0, sizeof(*desc));
-    desc->Width = native->width;
-    desc->Height = native->height;
-    desc->MipLevels = native->mip_levels;
+    desc->Width = native_desc.width;
+    desc->Height = native_desc.height;
+    desc->MipLevels = native_desc.mip_levels;
     desc->ArraySize = 1;
-    desc->Format = (DXGI_FORMAT)native->format;
+    desc->Format = (DXGI_FORMAT)native_desc.format;
     desc->SampleDesc.Count = 1;
     desc->Usage = D3D11_USAGE_DEFAULT;
-    desc->BindFlags = native->bind_flags;
+    desc->BindFlags = native_desc.bind_flags;
 }
 
 ID3D11VertexShader::~ID3D11VertexShader()
@@ -256,8 +260,8 @@ void ID3D11DeviceContext::UpdateSubresource(
         pDstResource->native,
         pSrcData,
         SrcRowPitch,
-        pDstResource->width,
-        pDstResource->height);
+        ({ pcps4_gpu_texture_desc_t d = {}; pcps4_gpu_texture_get_desc(pDstResource->native, &d); d.width; }),
+        ({ pcps4_gpu_texture_desc_t d = {}; pcps4_gpu_texture_get_desc(pDstResource->native, &d); d.height; }));
 }
 
 void ID3D11DeviceContext::Flush()

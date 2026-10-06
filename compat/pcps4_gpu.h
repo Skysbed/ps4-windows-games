@@ -107,6 +107,9 @@ int pcps4_gpu_texture_update_rgba8(pcps4_gpu_texture_t *texture,
                                    size_t row_pitch,
                                    uint32_t width,
                                    uint32_t height);
+int pcps4_gpu_texture_get_desc(
+    const pcps4_gpu_texture_t *texture,
+    pcps4_gpu_texture_desc_t *desc);
 
 pcps4_gpu_shader_t *pcps4_gpu_shader_create(
     pcps4_gpu_device_t *device,

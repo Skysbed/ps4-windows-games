@@ -56,6 +56,7 @@ typedef struct pcps4_vm_region {
 static pcps4_vm_region_t *vm_regions;
 static volatile int vm_regions_lock;
 static __thread uint32_t current_thread_id;
+static int native_game_root;
 
 extern int32_t sceKernelMmap(void *addr, size_t len, int32_t prot,
                              int32_t flags, int32_t fd, off_t offset,
@@ -217,6 +218,11 @@ static int pcps4_path_is_absolute_unix(const char *path)
     return path != NULL && path[0] == '/';
 }
 
+void pcps4_sys_set_native_game_root(int enabled)
+{
+    native_game_root = enabled ? 1 : 0;
+}
+
 static int pcps4_path_has_drive(const char *path)
 {
     return path != NULL &&
@@ -229,7 +235,7 @@ static int pcps4_path_has_drive(const char *path)
  * Translate ordinary Windows game paths into the PS4 application layout.
  * Reads resolve against /app0; writes resolve against /data/pcps4.
  */
-static int pcps4_translate_path(
+int pcps4_sys_translate_path(
     const char *path,
     int writing,
     char *out,
@@ -253,13 +259,17 @@ static int pcps4_translate_path(
         cursor = path + 2;
         while (*cursor == '/' || *cursor == 92)
             ++cursor;
-        root = writing ? "/data/pcps4" : "/app0";
+        root = writing
+            ? "/data/pcps4"
+            : (native_game_root ? "/app0/game" : "/app0");
     } else if (pcps4_path_is_absolute_unix(path)) {
         cursor = path;
         root = writing ? "/data/pcps4" : "";
     } else {
         cursor = path;
-        root = writing ? "/data/pcps4" : "/app0";
+        root = writing
+            ? "/data/pcps4"
+            : (native_game_root ? "/app0/game" : "/app0");
     }
 
     while (*cursor != '\0' && n + 1 < sizeof(normalized)) {
@@ -393,7 +403,7 @@ pcps4_os_handle_t *pcps4_sys_file_open(const char *path,
     writing = (desired_access & 0x40000000u) != 0 ||
               creation_disposition != 3u;
 
-    if (pcps4_translate_path(
+    if (pcps4_sys_translate_path(
             path, writing, translated_path, sizeof(translated_path)) != 0)
         return NULL;
 

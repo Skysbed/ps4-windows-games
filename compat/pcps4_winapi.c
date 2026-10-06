@@ -719,7 +719,7 @@ static PCPS4_MS_ABI BOOL win_HeapFree(HANDLE heap, DWORD flags, LPVOID memory)
     return TRUE;
 }
 
-static PCPS4_MS_ABI SIZE_T win_HeapSize(HANDLE heap, DWORD flags, LPCVOID memory)
+static PCPS4_MS_ABI SIZE_T win_HeapSize(HANDLE heap, DWORD flags, const void *memory)
 {
     SIZE_T size = (SIZE_T)-1;
     int slot;
@@ -735,7 +735,7 @@ static PCPS4_MS_ABI SIZE_T win_HeapSize(HANDLE heap, DWORD flags, LPCVOID memory
     return size;
 }
 
-static PCPS4_MS_ABI BOOL win_HeapValidate(HANDLE heap, DWORD flags, LPCVOID memory)
+static PCPS4_MS_ABI BOOL win_HeapValidate(HANDLE heap, DWORD flags, const void *memory)
 {
     int slot;
     (void)flags;

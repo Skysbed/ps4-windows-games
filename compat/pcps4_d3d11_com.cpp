@@ -1,6 +1,7 @@
 #include "pcps4_d3d11_com.h"
 #include "pcps4_abi.h"
 #include "pcps4_fault.h"  /* pcps4_fault_stage: crash breadcrumb */
+#include "pcps4_dxgi.h"
 
 #include <new>
 #include <stdlib.h>
@@ -355,6 +356,19 @@ static PCPS4_MS_ABI HRESULT com_device_query(
         ++self->refs;
         *out = self;
         return S_OK;
+    }
+
+    /*
+     * A number of D3D11 applications query the device for IDXGIDevice to
+     * inspect the adapter or create DXGI resources.
+     */
+    {
+        PCPS4Guid iid_dxgi_device = {
+            0x54ec77fau,0x1377u,0x44e6u,
+            {0x8c,0x32,0x88,0xfd,0x5f,0x44,0xc8,0x4c}
+        };
+        if (pcps4_guid_equal(riid, &iid_dxgi_device))
+            return pcps4_dxgi_create_device(riid, out);
     }
 
     return E_NOINTERFACE;

@@ -27,7 +27,7 @@ int main(void)
     printf("Value: %d\n", (int)demo_value);
     printf("Buffer: %s\n", buffer);
 
-#ifdef PCPS4_ENABLE_OPENGNM
+#if PCPS4_ENABLE_OPENGNM
     printf("Starting real GNM graphics smoke...\n");
     return pcps4_gnm_smoke_run();
 #else

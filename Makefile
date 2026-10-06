@@ -10,6 +10,7 @@ TOOLCHAIN     := $(OO_PS4_TOOLCHAIN)
 PCPS4_ENABLE_OPENGNM ?= 0
 PCPS4_GRAPHICS_ROOT ?= external/ps4-graphics
 PCPS4_OPENGNM_DIR := $(PCPS4_GRAPHICS_ROOT)/opengnm
+GNM_RENDERER_OBJ := $(INTDIR)/pcps4_gnm_renderer.o
 INTDIR        := build
 GENERATED     := $(INTDIR)/generated
 PACKAGE_ROOT  := $(INTDIR)/package
@@ -115,7 +116,7 @@ $(GNM_OBJ): compat/pcps4_gnm.c compat/pcps4_gnm.h
 
 $(GNM_RENDERER_OBJ): compat/pcps4_gnm_renderer.c compat/pcps4_gnm_renderer.h
 	@mkdir -p "$(dir $@)"
-	$(CC) $(CFLAGS) -DPCPS4_ENABLE_OPENGNM=$(PCPS4_ENABLE_OPENGNM) -o "$@" "$<"
+	$(CC) $(CFLAGS) -o "$@" "$<"
 
 $(GPU_OBJ): compat/pcps4_gpu.c compat/pcps4_gpu.h compat/pcps4_gfx.h
 	@mkdir -p "$(dir $@)"

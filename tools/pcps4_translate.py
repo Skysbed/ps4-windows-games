@@ -108,6 +108,7 @@ TOKEN_RULES = [
     ("CHAR", r'\bCHAR\b', 'char'),
     ("WCHAR", r'\bWCHAR\b', 'uint16_t'),
     ("LPCSTR", r'\bLPCSTR\b', 'const char *'),
+    ("LPCWSTR", r'\bLPCWSTR\b', 'const uint16_t *'),
     ("LPSTR", r'\bLPSTR\b', 'char *'),
     ("LPVOID", r'\bLPVOID\b', 'void *'),
     ("PVOID", r'\bPVOID\b', 'void *'),
@@ -129,9 +130,8 @@ BLOCKER_RULES = [
     ("Windows socket API", r'\b(?:WSAIoctl|WSAEventSelect|WSARecv|WSASend|WSAWaitForMultipleEvents|ioctlsocket)\s*\('),
     ("Windows DLL loader", r'\b(?:LoadLibrary(?:A|W)?|FreeLibrary|GetProcAddress)\s*\('),
     ("Windows registry API", r'\b(?:RegOpenKey(?:Ex)?|RegCloseKey|RegQueryValue(?:Ex)?|RegSetValue(?:Ex)?)\s*\('),
-    ("Win32 file API", r'\b(?:FindFirstFile(?:A|W)?|FindNextFile(?:A|W)?|GetFileAttributes(?:A|W)?|CreateDirectoryW)\s*\('),
+    ("Win32 file API", r'\b(?:FindFirstFile(?:A|W)?|FindNextFile(?:A|W)?|GetFileAttributes(?:A|W)?)\s*\('),
     ("Win32 synchronization API", r'\b(?:WaitForMultipleObjects|ReleaseSemaphore|CreateSemaphore(?:A|W)?)\s*\('),
-    ("Unsupported Win32 wide API", r'\b(?:CreateFileW|CreateMutexW)\s*\('),
     ("Unsupported D3D11 API", r'\b(?:D3D11CreateDevice)\s*\('),
 ]
 

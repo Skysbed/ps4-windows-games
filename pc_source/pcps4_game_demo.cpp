@@ -133,6 +133,8 @@ extern "C" int pcps4_d3d11_game_run(void)
     ID3D11BlendState *blend_state = NULL;
     ID3D11DepthStencilState *depth_state = NULL;
 
+#define PCPS4_DEMO_RELEASE_RESOURCES()     do {         if (depth_state != NULL) depth_state->Release();         if (blend_state != NULL) blend_state->Release();         if (raster_state != NULL) raster_state->Release();         if (dsv != NULL) dsv->Release();         if (depth_texture != NULL) depth_texture->Release();         if (constant_buffer != NULL) constant_buffer->Release();         if (sampler != NULL) sampler->Release();         if (srv != NULL) srv->Release();         if (texture != NULL) texture->Release();     } while (0)
+
     const uint8_t texture_pixels[16] = {
         255, 255, 255, 255,  40, 180, 255, 255,
         255,  80,  80, 255,  80, 255, 120, 255
@@ -155,7 +157,7 @@ extern "C" int pcps4_d3d11_game_run(void)
         &texture_desc, &texture_data, &texture);
     if (FAILED(hr) || texture == NULL) {
         hr = E_FAIL;
-        goto resource_cleanup;
+        PCPS4_DEMO_RELEASE_RESOURCES(); return -6;
     }
 
     D3D11_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
@@ -164,7 +166,7 @@ extern "C" int pcps4_d3d11_game_run(void)
     hr = device->CreateShaderResourceView(texture, &srv_desc, &srv);
     if (FAILED(hr) || srv == NULL) {
         hr = E_FAIL;
-        goto resource_cleanup;
+        PCPS4_DEMO_RELEASE_RESOURCES(); return -6;
     }
 
     D3D11_SAMPLER_DESC sampler_desc = {};
@@ -177,7 +179,7 @@ extern "C" int pcps4_d3d11_game_run(void)
     hr = device->CreateSamplerState(&sampler_desc, &sampler);
     if (FAILED(hr) || sampler == NULL) {
         hr = E_FAIL;
-        goto resource_cleanup;
+        PCPS4_DEMO_RELEASE_RESOURCES(); return -6;
     }
 
     D3D11_BUFFER_DESC constant_desc = {};
@@ -189,7 +191,7 @@ extern "C" int pcps4_d3d11_game_run(void)
         &constant_desc, NULL, &constant_buffer);
     if (FAILED(hr) || constant_buffer == NULL) {
         hr = E_FAIL;
-        goto resource_cleanup;
+        PCPS4_DEMO_RELEASE_RESOURCES(); return -6;
     }
 
     D3D11_MAPPED_SUBRESOURCE constant_map = {};
@@ -197,7 +199,7 @@ extern "C" int pcps4_d3d11_game_run(void)
         constant_buffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &constant_map);
     if (FAILED(hr) || constant_map.pData == NULL) {
         hr = E_FAIL;
-        goto resource_cleanup;
+        PCPS4_DEMO_RELEASE_RESOURCES(); return -6;
     }
     memset(constant_map.pData, 0, 64);
     context->Unmap(constant_buffer, 0);
@@ -219,7 +221,7 @@ extern "C" int pcps4_d3d11_game_run(void)
         &depth_desc, NULL, &depth_texture);
     if (FAILED(hr) || depth_texture == NULL) {
         hr = E_FAIL;
-        goto resource_cleanup;
+        PCPS4_DEMO_RELEASE_RESOURCES(); return -6;
     }
 
     D3D11_DEPTH_STENCIL_VIEW_DESC depth_view_desc = {};
@@ -228,7 +230,7 @@ extern "C" int pcps4_d3d11_game_run(void)
         depth_texture, &depth_view_desc, &dsv);
     if (FAILED(hr) || dsv == NULL) {
         hr = E_FAIL;
-        goto resource_cleanup;
+        PCPS4_DEMO_RELEASE_RESOURCES(); return -6;
     }
 
     D3D11_RASTERIZER_DESC raster_desc = {};
@@ -238,7 +240,7 @@ extern "C" int pcps4_d3d11_game_run(void)
     hr = device->CreateRasterizerState(&raster_desc, &raster_state);
     if (FAILED(hr) || raster_state == NULL) {
         hr = E_FAIL;
-        goto resource_cleanup;
+        PCPS4_DEMO_RELEASE_RESOURCES(); return -6;
     }
 
     D3D11_BLEND_DESC blend_desc = {};
@@ -253,7 +255,7 @@ extern "C" int pcps4_d3d11_game_run(void)
     hr = device->CreateBlendState(&blend_desc, &blend_state);
     if (FAILED(hr) || blend_state == NULL) {
         hr = E_FAIL;
-        goto resource_cleanup;
+        PCPS4_DEMO_RELEASE_RESOURCES(); return -6;
     }
 
     D3D11_DEPTH_STENCIL_DESC depth_state_desc = {};
@@ -264,7 +266,7 @@ extern "C" int pcps4_d3d11_game_run(void)
         &depth_state_desc, &depth_state);
     if (FAILED(hr) || depth_state == NULL) {
         hr = E_FAIL;
-        goto resource_cleanup;
+        PCPS4_DEMO_RELEASE_RESOURCES(); return -6;
     }
 
     context->OMSetRenderTargets(1, &rtv, dsv);
@@ -375,16 +377,8 @@ extern "C" int pcps4_d3d11_game_run(void)
     XINPUT_VIBRATION vibration = {0, 0, 0, 0};
     (void)XInputSetState(0, &vibration);
 
-resource_cleanup:
-    if (depth_state != NULL) depth_state->Release();
-    if (blend_state != NULL) blend_state->Release();
-    if (raster_state != NULL) raster_state->Release();
-    if (dsv != NULL) dsv->Release();
-    if (depth_texture != NULL) depth_texture->Release();
-    if (constant_buffer != NULL) constant_buffer->Release();
-    if (sampler != NULL) sampler->Release();
-    if (srv != NULL) srv->Release();
-    if (texture != NULL) texture->Release();
+    PCPS4_DEMO_RELEASE_RESOURCES();
+#undef PCPS4_DEMO_RELEASE_RESOURCES
 
     vertex_buffer->Release();
     input_layout->Release();

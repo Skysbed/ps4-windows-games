@@ -30,12 +30,145 @@ extern int32_t sceKernelMunmap(void *addr, size_t len);
 
 typedef int (*pcps4_entry_fn)(void);
 
+#define PCPS4_PAGE_SIZE 0x4000u
+
 /* Round a size up to the 16 KiB PS4 page granule. */
 static size_t pcps4_round_up_page(size_t n)
 {
     const size_t page = 0x4000;
     size_t r = n + (page - 1);
     return r - (r % page);
+}
+
+static int pcps4_apply_image_protections(
+    const pcps4_pe_image *image,
+    uint8_t *mem,
+    size_t map_size)
+{
+    size_t page_count;
+    uint8_t *page_prot;
+    uint16_t i;
+
+    if (image == NULL || mem == NULL || map_size == 0 ||
+        (map_size % PCPS4_PAGE_SIZE) != 0)
+        return -1;
+
+    page_count = map_size / PCPS4_PAGE_SIZE;
+    page_prot = (uint8_t *)calloc(page_count, sizeof(*page_prot));
+    if (page_prot == NULL)
+        return -1;
+
+    /* Headers are readable; section permissions may add execute on the first
+     * page when a PE uses the usual 4 KiB section alignment. */
+    {
+        size_t header_end = pcps4_round_up_page(image->size_of_headers);
+        if (header_end == 0 || header_end > map_size)
+            header_end = PCPS4_PAGE_SIZE;
+        if (header_end > map_size)
+            header_end = map_size;
+        for (size_t p = 0; p < header_end / PCPS4_PAGE_SIZE; ++p)
+            page_prot[p] |= PROT_READ;
+    }
+
+    for (i = 0; i < image->section_count; ++i) {
+        pcps4_pe_section s;
+        size_t section_start;
+        size_t span;
+        size_t section_end;
+        size_t first_page;
+        size_t last_page;
+        int prot = 0;
+
+        if (pcps4_pe_get_section(image, i, &s) != PCPS4_PE_OK) {
+            free(page_prot);
+            return -1;
+        }
+
+        section_start = (size_t)s.virtual_address;
+        span = (size_t)(s.virtual_size > s.raw_size
+                    ? s.virtual_size : s.raw_size);
+        if (span == 0)
+            continue;
+
+        if (section_start >= map_size ||
+            span > map_size - section_start) {
+            free(page_prot);
+            return -1;
+        }
+
+        section_end = section_start + span;
+        if ((s.characteristics & PCPS4_PE_SCN_MEM_READ) != 0)
+            prot |= PROT_READ;
+        if ((s.characteristics & PCPS4_PE_SCN_MEM_WRITE) != 0)
+            prot |= PROT_WRITE;
+        if ((s.characteristics & PCPS4_PE_SCN_MEM_EXECUTE) != 0)
+            prot |= PROT_EXEC;
+
+        first_page = section_start / PCPS4_PAGE_SIZE;
+        last_page = (section_end + PCPS4_PAGE_SIZE - 1) /
+                    PCPS4_PAGE_SIZE;
+
+        if (last_page > page_count) {
+            free(page_prot);
+            return -1;
+        }
+
+        for (size_t p = first_page; p < last_page; ++p)
+            page_prot[p] |= (uint8_t)prot;
+    }
+
+    if (sceKernelMprotect(mem, map_size, PROT_NONE) != 0) {
+        free(page_prot);
+        return -1;
+    }
+
+    size_t run_start = 0;
+    while (run_start < page_count) {
+        uint8_t prot = page_prot[run_start];
+        size_t run_end = run_start + 1;
+
+        while (run_end < page_count &&
+               page_prot[run_end] == prot)
+            ++run_end;
+
+        if (sceKernelMprotect(
+                mem + run_start * PCPS4_PAGE_SIZE,
+                (run_end - run_start) * PCPS4_PAGE_SIZE,
+                prot) != 0) {
+            free(page_prot);
+            return -1;
+        }
+
+        run_start = run_end;
+    }
+
+    free(page_prot);
+    return 0;
+}
+
+static int pcps4_entry_is_executable(
+    const pcps4_pe_image *image)
+{
+    uint16_t i;
+
+    if (image == NULL)
+        return 0;
+
+    for (i = 0; i < image->section_count; ++i) {
+        pcps4_pe_section s;
+        uint32_t span;
+
+        if (pcps4_pe_get_section(image, i, &s) != PCPS4_PE_OK)
+            return 0;
+
+        span = s.virtual_size > s.raw_size ? s.virtual_size : s.raw_size;
+        if (image->entry_point_rva >= s.virtual_address &&
+            image->entry_point_rva - s.virtual_address < span &&
+            (s.characteristics & PCPS4_PE_SCN_MEM_EXECUTE) != 0)
+            return 1;
+    }
+
+    return 0;
 }
 
 pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
@@ -94,11 +227,23 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
         return PCPS4_LOADER_ERR_UNRESOLVED;
     }
 
-    /* Add execute permission. On retail firmware this is refused. */
-    krc = sceKernelMprotect(mem, map_size, PROT_READ | PROT_EXEC);
-    if (krc != 0) {
-        printf("[pcps4] mprotect(EXEC) failed: 0x%x "
-               "(console may not permit executable memory)\n", (unsigned)krc);
+        if (!pcps4_entry_is_executable(&image)) {
+        printf("[pcps4] refusing to run: PE entry point is not in an "
+               "executable section\n");
+        sceKernelMunmap(mem, map_size);
+        return PCPS4_LOADER_ERR_PROTECT;
+    }
+
+    /*
+     * Final section permissions. Writable .data/.bss must remain writable
+     * after relocation while .text becomes executable. PE section alignment
+     * is often smaller than the PS4 page size, so permissions are calculated
+     * per PS4 page and unioned when sections share a page.
+     */
+    if (pcps4_apply_image_protections(
+            &image, (uint8_t *)mem, map_size) != 0) {
+        printf("[pcps4] mprotect(section permissions) failed "
+               "(console may not permit executable memory)\n");
         sceKernelMunmap(mem, map_size);
         return PCPS4_LOADER_ERR_PROTECT;
     }

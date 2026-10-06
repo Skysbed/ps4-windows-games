@@ -65,17 +65,17 @@ struct PCPS4ComSwapChain {
 static void com_noop(void) {}
 static HRESULT com_nyi(void) { return E_NOTIMPL; }
 
-static ULONG com_device_addref(PCPS4ComDevice *self)
+static UINT com_device_addref(PCPS4ComDevice *self)
 {
     return ++self->refs;
 }
 
-static ULONG com_context_addref(PCPS4ComContext *self)
+static UINT com_context_addref(PCPS4ComContext *self)
 {
     return ++self->refs;
 }
 
-static ULONG com_swap_addref(PCPS4ComSwapChain *self)
+static UINT com_swap_addref(PCPS4ComSwapChain *self)
 {
     return ++self->refs;
 }
@@ -92,7 +92,7 @@ static HRESULT com_resource_query(
     return E_NOTIMPL;
 }
 
-static ULONG com_resource_addref(PCPS4ComResource *self)
+static UINT com_resource_addref(PCPS4ComResource *self)
 {
     return ++self->refs;
 }
@@ -144,7 +144,7 @@ static void com_release_internal_resource(PCPS4ComResource *self)
     }
 }
 
-static ULONG com_resource_release(PCPS4ComResource *self)
+static UINT com_resource_release(PCPS4ComResource *self)
 {
     if (self == NULL || self->refs == 0)
         return 0;
@@ -163,18 +163,7 @@ static ULONG com_resource_release(PCPS4ComResource *self)
         PCPS4ComDevice *device = self->device;
         self->device = NULL;
         /* Device proxy release is defined below. */
-        if (device->refs > 0 && --device->refs == 0) {
-            if (device->context != NULL) {
-                PCPS4ComContext *ctx = device->context;
-                device->context = NULL;
-                if (ctx->device == device && ctx->refs > 0)
-                    ctx->device = NULL;
-                /* Context is kept alive by its own raw references. */
-            }
-            if (device->impl != NULL)
-                device->impl->Release();
-            free(device);
-        }
+        com_device_release(device);
     }
 
     free(self);
@@ -267,7 +256,7 @@ static HRESULT com_view_get_resource(
     return S_OK;
 }
 
-static ULONG com_texture_release(PCPS4ComResource *self)
+static UINT com_texture_release(PCPS4ComResource *self)
 {
     return com_resource_release(self);
 }
@@ -321,7 +310,7 @@ static HRESULT com_device_query(
     return E_NOTIMPL;
 }
 
-static ULONG com_device_release(PCPS4ComDevice *self)
+static UINT com_device_release(PCPS4ComDevice *self)
 {
     if (self == NULL || self->refs == 0)
         return 0;
@@ -339,6 +328,19 @@ static ULONG com_device_release(PCPS4ComDevice *self)
     return 0;
 }
 
+static void com_context_get_device(
+    PCPS4ComContext *self,
+    void **out)
+{
+    if (out == NULL)
+        return;
+    *out = NULL;
+    if (self != NULL && self->device != NULL) {
+        ++self->device->refs;
+        *out = self->device;
+    }
+}
+
 static HRESULT com_context_query(
     PCPS4ComContext *self,
     void *riid,
@@ -351,7 +353,7 @@ static HRESULT com_context_query(
     return E_NOTIMPL;
 }
 
-static ULONG com_context_release(PCPS4ComContext *self)
+static UINT com_context_release(PCPS4ComContext *self)
 {
     if (self == NULL || self->refs == 0)
         return 0;
@@ -384,7 +386,7 @@ static HRESULT com_swap_query(
     return E_NOTIMPL;
 }
 
-static ULONG com_swap_release(PCPS4ComSwapChain *self)
+static UINT com_swap_release(PCPS4ComSwapChain *self)
 {
     if (self == NULL || self->refs == 0)
         return 0;
@@ -911,23 +913,55 @@ static void ctx_Unmap(PCPS4ComContext *self, void *resource, UINT sub)
 }
 static void ctx_PSSetConstantBuffers(
     PCPS4ComContext *self, UINT start, UINT count, void *const *buffers)
-{ ctx_VSSetConstantBuffers(self,start,count,buffers); self->impl->PSSetConstantBuffers(start,count,(ID3D11Buffer *const *)buffers); }
+{
+    ID3D11Buffer *tmp[16];
+    UINT n = count > 16 ? 16 : count;
+    for (UINT i=0; i<n; ++i)
+        tmp[i] = buffers && buffers[i]
+            ? (ID3D11Buffer *)((PCPS4ComResource *)buffers[i])->impl
+            : NULL;
+    self->impl->PSSetConstantBuffers(start, n, tmp);
+}
 static void ctx_IASetInputLayout(PCPS4ComContext *self, void *layout)
 { self->impl->IASetInputLayout(layout ? (ID3D11InputLayout *)((PCPS4ComResource *)layout)->impl : NULL); }
 static void ctx_IASetVertexBuffers(
     PCPS4ComContext *self, UINT start, UINT count, void *const *buffers,
     const UINT *strides, const UINT *offsets)
-{ self->impl->IASetVertexBuffers(start,count,(ID3D11Buffer *const *)buffers,strides,offsets); }
+{
+    ID3D11Buffer *tmp[16];
+    UINT n = count > 16 ? 16 : count;
+    for (UINT i=0; i<n; ++i)
+        tmp[i] = buffers && buffers[i]
+            ? (ID3D11Buffer *)((PCPS4ComResource *)buffers[i])->impl
+            : NULL;
+    self->impl->IASetVertexBuffers(start, n, tmp, strides, offsets);
+}
 static void ctx_IASetIndexBuffer(PCPS4ComContext *self, void *buffer, DXGI_FORMAT fmt, UINT offset)
 { self->impl->IASetIndexBuffer(buffer ? (ID3D11Buffer *)((PCPS4ComResource *)buffer)->impl : NULL,fmt,offset); }
 static void ctx_IASetPrimitiveTopology(PCPS4ComContext *self, D3D11_PRIMITIVE_TOPOLOGY topology)
 { self->impl->IASetPrimitiveTopology(topology); }
 static void ctx_VSSetShaderResources(
     PCPS4ComContext *self, UINT start, UINT count, void *const *views)
-{ ctx_PSSetShaderResources(self,start,count,views); self->impl->VSSetShaderResources(start,count,(ID3D11ShaderResourceView *const *)views); }
+{
+    ID3D11ShaderResourceView *tmp[16];
+    UINT n = count > 16 ? 16 : count;
+    for (UINT i=0; i<n; ++i)
+        tmp[i] = views && views[i]
+            ? (ID3D11ShaderResourceView *)((PCPS4ComResource *)views[i])->impl
+            : NULL;
+    self->impl->VSSetShaderResources(start, n, tmp);
+}
 static void ctx_VSSetSamplers(
     PCPS4ComContext *self, UINT start, UINT count, void *const *samplers)
-{ ctx_PSSetSamplers(self,start,count,samplers); self->impl->VSSetSamplers(start,count,(ID3D11SamplerState *const *)samplers); }
+{
+    ID3D11SamplerState *tmp[16];
+    UINT n = count > 16 ? 16 : count;
+    for (UINT i=0; i<n; ++i)
+        tmp[i] = samplers && samplers[i]
+            ? (ID3D11SamplerState *)((PCPS4ComResource *)samplers[i])->impl
+            : NULL;
+    self->impl->VSSetSamplers(start, n, tmp);
+}
 static void ctx_OMSetRenderTargets(
     PCPS4ComContext *self, UINT count, void *const *rtvs, void *dsv)
 {
@@ -960,6 +994,70 @@ static void ctx_ClearDepthStencilView(PCPS4ComContext *self, void *dsv, UINT fla
 { if(dsv) self->impl->ClearDepthStencilView((ID3D11DepthStencilView *)((PCPS4ComResource *)dsv)->impl,flags,depth,stencil); }
 static void ctx_Flush(PCPS4ComContext *self)
 { self->impl->Flush(); }
+
+static D3D_FEATURE_LEVEL device_get_feature_level(PCPS4ComDevice *self)
+{
+    (void)self;
+    return D3D_FEATURE_LEVEL_11_0;
+}
+
+static UINT device_get_creation_flags(PCPS4ComDevice *self)
+{
+    (void)self;
+    return 0;
+}
+
+static HRESULT device_get_removed_reason(PCPS4ComDevice *self)
+{
+    (void)self;
+    return S_OK;
+}
+
+static void device_get_immediate_context(
+    PCPS4ComDevice *self,
+    void **out)
+{
+    if (out == NULL)
+        return;
+    *out = NULL;
+
+    if (self != NULL && self->context != NULL) {
+        ++self->context->refs;
+        *out = self->context;
+    }
+}
+
+static HRESULT device_set_exception_mode(
+    PCPS4ComDevice *self, UINT flags)
+{
+    (void)self;
+    (void)flags;
+    return S_OK;
+}
+
+static UINT device_get_exception_mode(PCPS4ComDevice *self)
+{
+    (void)self;
+    return 0;
+}
+
+static void ctx_clear_state(PCPS4ComContext *self)
+{
+    if (self != NULL && self->impl != NULL)
+        self->impl->Flush();
+}
+
+static UINT ctx_get_type(PCPS4ComContext *self)
+{
+    (void)self;
+    return 0;
+}
+
+static UINT ctx_get_flags(PCPS4ComContext *self)
+{
+    (void)self;
+    return 0;
+}
 
 /* vtable population helpers. */
 static void vtbl_clear(const void **v, size_t n)
@@ -1001,15 +1099,18 @@ static void init_vtables(void)
     g_device_vtbl[21]=(const void *)device_create_depth_state;
     g_device_vtbl[22]=(const void *)device_create_rasterizer;
     g_device_vtbl[23]=(const void *)device_create_sampler;
-    g_device_vtbl[37]=(const void *[]) { 0 };
-    g_device_vtbl[38]=(const void *)com_nyi;
-    g_device_vtbl[39]=(const void *)com_nyi;
-    g_device_vtbl[40]=(const void *)com_nyi;
+    g_device_vtbl[37]=(const void *)device_get_feature_level;
+    g_device_vtbl[38]=(const void *)device_get_creation_flags;
+    g_device_vtbl[39]=(const void *)device_get_removed_reason;
+    g_device_vtbl[40]=(const void *)device_get_immediate_context;
+    g_device_vtbl[41]=(const void *)device_set_exception_mode;
+    g_device_vtbl[42]=(const void *)device_get_exception_mode;
 
     /* Context methods: indices match the public D3D11 base vtable. */
     g_context_vtbl[0]=(const void *)com_context_query;
     g_context_vtbl[1]=(const void *)com_context_addref;
     g_context_vtbl[2]=(const void *)com_context_release;
+    g_context_vtbl[3]=(const void *)com_context_get_device;
     g_context_vtbl[7]=(const void *)ctx_VSSetConstantBuffers;
     g_context_vtbl[8]=(const void *)ctx_PSSetShaderResources;
     g_context_vtbl[9]=(const void *)ctx_PSSetShader;

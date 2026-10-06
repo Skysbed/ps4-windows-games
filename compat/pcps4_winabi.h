@@ -93,6 +93,7 @@ typedef struct pcps4_winabi_exports {
     const void *abort_fn;
     const void *exit_fn;
     const void *fopen_fn;
+    const void *wfopen_fn;
     const void *fclose_fn;
     const void *fread_fn;
     const void *fwrite_fn;

@@ -378,15 +378,21 @@ void ID3D11DeviceContext::OMSetRenderTargets(
     if (NumViews == 0 ||
         ppRenderTargetViews == NULL ||
         ppRenderTargetViews[0] == NULL) {
+        (void)pcps4_gpu_context_set_render_target(native, NULL);
+    } else {
         (void)pcps4_gpu_context_set_render_target(
             native,
-            NULL);
-        return;
+            ppRenderTargetViews[0]->native);
     }
 
-    (void)pcps4_gpu_context_set_render_target(
-        native,
-        ppRenderTargetViews[0]->native);
+    if (pDepthStencilView != NULL) {
+        ID3D11DepthStencilView *depth_view =
+            (ID3D11DepthStencilView *)pDepthStencilView;
+        (void)pcps4_gpu_context_set_depth_target(
+            native, depth_view->native);
+    } else {
+        (void)pcps4_gpu_context_set_depth_target(native, NULL);
+    }
 }
 
 void ID3D11DeviceContext::ClearRenderTargetView(

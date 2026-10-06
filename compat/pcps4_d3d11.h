@@ -16,6 +16,13 @@ typedef uint32_t D3D11_CPU_ACCESS_FLAG;
 typedef uint32_t D3D11_CREATE_DEVICE_FLAG;
 typedef uint32_t DXGI_FORMAT;
 typedef uint32_t DXGI_SWAP_EFFECT;
+typedef uint32_t D3D11_FILTER;
+typedef uint32_t D3D11_TEXTURE_ADDRESS_MODE;
+typedef uint32_t D3D11_FILL_MODE;
+typedef uint32_t D3D11_CULL_MODE;
+typedef uint32_t D3D11_BLEND;
+typedef uint32_t D3D11_BLEND_OP;
+typedef uint32_t D3D11_COMPARISON_FUNC;
 typedef void *HWND;
 
 #ifndef S_OK
@@ -42,7 +49,8 @@ enum {
     D3D11_BIND_INDEX_BUFFER    = PCPS4_GPU_BIND_INDEX_BUFFER,
     D3D11_BIND_CONSTANT_BUFFER = PCPS4_GPU_BIND_CONSTANT_BUFFER,
     D3D11_BIND_SHADER_RESOURCE = PCPS4_GPU_BIND_SHADER_RESOURCE,
-    D3D11_BIND_RENDER_TARGET   = PCPS4_GPU_BIND_RENDER_TARGET
+    D3D11_BIND_RENDER_TARGET   = PCPS4_GPU_BIND_RENDER_TARGET,
+    D3D11_BIND_DEPTH_STENCIL   = PCPS4_GPU_BIND_DEPTH_STENCIL
 };
 
 enum {
@@ -52,6 +60,29 @@ enum {
 
 enum {
     D3D11_CPU_ACCESS_WRITE = 1u
+};
+
+enum {
+    D3D11_FILTER_MIN_MAG_MIP_POINT = 0,
+    D3D11_FILTER_MIN_MAG_MIP_LINEAR = 0x15,
+    D3D11_TEXTURE_ADDRESS_WRAP = 1,
+    D3D11_TEXTURE_ADDRESS_MIRROR = 2,
+    D3D11_TEXTURE_ADDRESS_CLAMP = 3,
+    D3D11_TEXTURE_ADDRESS_BORDER = 4,
+    D3D11_FILL_WIREFRAME = 2,
+    D3D11_FILL_SOLID = 3,
+    D3D11_CULL_NONE = 1,
+    D3D11_CULL_FRONT = 2,
+    D3D11_CULL_BACK = 3,
+    D3D11_BLEND_ZERO = 1,
+    D3D11_BLEND_ONE = 2,
+    D3D11_BLEND_SRC_ALPHA = 5,
+    D3D11_BLEND_INV_SRC_ALPHA = 6,
+    D3D11_BLEND_OP_ADD = 1,
+    D3D11_COMPARISON_NEVER = 1,
+    D3D11_COMPARISON_LESS = 2,
+    D3D11_COMPARISON_LESS_EQUAL = 4,
+    D3D11_COMPARISON_ALWAYS = 8
 };
 
 enum {
@@ -192,6 +223,81 @@ typedef struct D3D11_RENDER_TARGET_VIEW_DESC {
     UINT MipSlice;
 } D3D11_RENDER_TARGET_VIEW_DESC;
 
+typedef struct D3D11_SAMPLER_DESC {
+    D3D11_FILTER Filter;
+    D3D11_TEXTURE_ADDRESS_MODE AddressU;
+    D3D11_TEXTURE_ADDRESS_MODE AddressV;
+    D3D11_TEXTURE_ADDRESS_MODE AddressW;
+    float MipLODBias;
+    UINT MaxAnisotropy;
+    D3D11_COMPARISON_FUNC ComparisonFunc;
+    float BorderColor[4];
+    float MinLOD;
+    float MaxLOD;
+} D3D11_SAMPLER_DESC;
+
+typedef struct D3D11_RASTERIZER_DESC {
+    D3D11_FILL_MODE FillMode;
+    D3D11_CULL_MODE CullMode;
+    UINT FrontCounterClockwise;
+    int32_t DepthBias;
+    float DepthBiasClamp;
+    float SlopeScaledDepthBias;
+    UINT DepthClipEnable;
+    UINT ScissorEnable;
+    UINT MultisampleEnable;
+    UINT AntialiasedLineEnable;
+} D3D11_RASTERIZER_DESC;
+
+typedef struct D3D11_RENDER_TARGET_BLEND_DESC {
+    UINT BlendEnable;
+    D3D11_BLEND SrcBlend;
+    D3D11_BLEND DestBlend;
+    D3D11_BLEND_OP BlendOp;
+    D3D11_BLEND SrcBlendAlpha;
+    D3D11_BLEND DestBlendAlpha;
+    D3D11_BLEND_OP BlendOpAlpha;
+    uint8_t RenderTargetWriteMask;
+} D3D11_RENDER_TARGET_BLEND_DESC;
+
+typedef struct D3D11_BLEND_DESC {
+    UINT AlphaToCoverageEnable;
+    UINT IndependentBlendEnable;
+    D3D11_RENDER_TARGET_BLEND_DESC RenderTarget[8];
+} D3D11_BLEND_DESC;
+
+typedef struct D3D11_DEPTH_STENCILOP_DESC {
+    UINT StencilFailOp;
+    UINT StencilDepthFailOp;
+    UINT StencilPassOp;
+    D3D11_COMPARISON_FUNC StencilFunc;
+} D3D11_DEPTH_STENCILOP_DESC;
+
+typedef struct D3D11_DEPTH_STENCIL_DESC {
+    UINT DepthEnable;
+    UINT DepthWriteMask;
+    D3D11_COMPARISON_FUNC DepthFunc;
+    UINT StencilEnable;
+    uint8_t StencilReadMask;
+    uint8_t StencilWriteMask;
+    D3D11_DEPTH_STENCILOP_DESC FrontFace;
+    D3D11_DEPTH_STENCILOP_DESC BackFace;
+} D3D11_DEPTH_STENCIL_DESC;
+
+typedef struct D3D11_SHADER_RESOURCE_VIEW_DESC {
+    DXGI_FORMAT Format;
+    UINT ViewDimension;
+    UINT MostDetailedMip;
+    UINT MipLevels;
+} D3D11_SHADER_RESOURCE_VIEW_DESC;
+
+typedef struct D3D11_DEPTH_STENCIL_VIEW_DESC {
+    DXGI_FORMAT Format;
+    UINT ViewDimension;
+    UINT MipSlice;
+} D3D11_DEPTH_STENCIL_VIEW_DESC;
+
+
 class ID3D11Buffer {
 public:
     pcps4_gpu_buffer_t *native;
@@ -257,15 +363,85 @@ public:
     UINT Release() { if (refs > 1) return --refs; delete this; return 0; }
 };
 
+
+class ID3D11ShaderResourceView {
+public:
+    ID3D11Texture2D *texture;
+    DXGI_FORMAT format;
+    uint32_t refs;
+    explicit ID3D11ShaderResourceView(ID3D11Texture2D *value)
+        : texture(value), format(DXGI_FORMAT_UNKNOWN), refs(1) {
+        if (texture != NULL) texture->AddRef();
+    }
+    UINT AddRef() { return ++refs; }
+    UINT Release() { if (refs > 1) return --refs; delete this; return 0; }
+private:
+    ~ID3D11ShaderResourceView();
+};
+
+class ID3D11SamplerState {
+public:
+    D3D11_SAMPLER_DESC desc;
+    uint32_t refs;
+    explicit ID3D11SamplerState(const D3D11_SAMPLER_DESC *value) : desc(*value), refs(1) {}
+    UINT AddRef() { return ++refs; }
+    UINT Release() { if (refs > 1) return --refs; delete this; return 0; }
+};
+
+class ID3D11RasterizerState {
+public:
+    D3D11_RASTERIZER_DESC desc;
+    uint32_t refs;
+    explicit ID3D11RasterizerState(const D3D11_RASTERIZER_DESC *value) : desc(*value), refs(1) {}
+    UINT AddRef() { return ++refs; }
+    UINT Release() { if (refs > 1) return --refs; delete this; return 0; }
+};
+
+class ID3D11BlendState {
+public:
+    D3D11_BLEND_DESC desc;
+    uint32_t refs;
+    explicit ID3D11BlendState(const D3D11_BLEND_DESC *value) : desc(*value), refs(1) {}
+    UINT AddRef() { return ++refs; }
+    UINT Release() { if (refs > 1) return --refs; delete this; return 0; }
+};
+
+class ID3D11DepthStencilState {
+public:
+    D3D11_DEPTH_STENCIL_DESC desc;
+    uint32_t refs;
+    explicit ID3D11DepthStencilState(const D3D11_DEPTH_STENCIL_DESC *value) : desc(*value), refs(1) {}
+    UINT AddRef() { return ++refs; }
+    UINT Release() { if (refs > 1) return --refs; delete this; return 0; }
+};
+
 class ID3D11RenderTargetView {
 public:
     pcps4_gpu_render_target_t *native;
+    ID3D11Texture2D *texture;
     uint32_t refs;
-    explicit ID3D11RenderTargetView(pcps4_gpu_render_target_t *value) : native(value), refs(1) {}
+    explicit ID3D11RenderTargetView(pcps4_gpu_render_target_t *value, ID3D11Texture2D *resource) : native(value), texture(resource), refs(1) {
+        if (texture != NULL) texture->AddRef();
+    }
     UINT AddRef() { return ++refs; }
     UINT Release() { if (refs > 1) return --refs; delete this; return 0; }
 private:
     ~ID3D11RenderTargetView();
+};
+
+class ID3D11DepthStencilView {
+public:
+    pcps4_gpu_texture_t *native;
+    ID3D11Texture2D *texture;
+    uint32_t refs;
+    explicit ID3D11DepthStencilView(pcps4_gpu_texture_t *value, ID3D11Texture2D *resource)
+        : native(value), texture(resource), refs(1) {
+        if (texture != NULL) texture->AddRef();
+    }
+    UINT AddRef() { return ++refs; }
+    UINT Release() { if (refs > 1) return --refs; delete this; return 0; }
+private:
+    ~ID3D11DepthStencilView();
 };
 
 class IDXGISwapChain {
@@ -315,6 +491,16 @@ public:
                             void *pDepthStencilView);
     void ClearRenderTargetView(ID3D11RenderTargetView *pRenderTargetView,
                                const float ColorRGBA[4]);
+    void ClearDepthStencilView(ID3D11DepthStencilView *pDepthStencilView,
+                               UINT ClearFlags, float Depth, uint8_t Stencil);
+    void VSSetConstantBuffers(UINT StartSlot, UINT NumBuffers, ID3D11Buffer *const *ppConstantBuffers);
+    void PSSetConstantBuffers(UINT StartSlot, UINT NumBuffers, ID3D11Buffer *const *ppConstantBuffers);
+    void VSSetShaderResources(UINT StartSlot, UINT NumViews, ID3D11ShaderResourceView *const *ppViews);
+    void PSSetShaderResources(UINT StartSlot, UINT NumViews, ID3D11ShaderResourceView *const *ppViews);
+    void VSSetSamplers(UINT StartSlot, UINT NumSamplers, ID3D11SamplerState *const *ppSamplers);
+    void PSSetSamplers(UINT StartSlot, UINT NumSamplers, ID3D11SamplerState *const *ppSamplers);
+    void RSSetState(ID3D11RasterizerState *pRasterizerState);
+    void OMSetBlendState(ID3D11BlendState *pBlendState, const float BlendFactor[4], UINT SampleMask);
     void IASetVertexBuffers(UINT StartSlot, UINT NumBuffers,
                             ID3D11Buffer *const *ppVertexBuffers,
                             const UINT *pStrides, const UINT *pOffsets);
@@ -339,6 +525,9 @@ public:
     void DrawIndexed(UINT IndexCount, UINT StartIndexLocation,
                      int BaseVertexLocation);
     void UpdateSubresource(ID3D11Texture2D *pDstResource, UINT DstSubresource,
+                           const void *pDstBox, const void *pSrcData,
+                           UINT SrcRowPitch, UINT SrcDepthPitch);
+    void UpdateSubresource(ID3D11Buffer *pDstResource, UINT DstSubresource,
                            const void *pDstBox, const void *pSrcData,
                            UINT SrcRowPitch, UINT SrcDepthPitch);
     void Flush();
@@ -375,6 +564,20 @@ public:
     HRESULT CreateRenderTargetView(ID3D11Texture2D *pResource,
                                    const D3D11_RENDER_TARGET_VIEW_DESC *pDesc,
                                    ID3D11RenderTargetView **ppRTView);
+    HRESULT CreateShaderResourceView(ID3D11Texture2D *pResource,
+                                     const D3D11_SHADER_RESOURCE_VIEW_DESC *pDesc,
+                                     ID3D11ShaderResourceView **ppSRView);
+    HRESULT CreateSamplerState(const D3D11_SAMPLER_DESC *pDesc,
+                               ID3D11SamplerState **ppSamplerState);
+    HRESULT CreateRasterizerState(const D3D11_RASTERIZER_DESC *pDesc,
+                                  ID3D11RasterizerState **ppRasterizerState);
+    HRESULT CreateBlendState(const D3D11_BLEND_DESC *pDesc,
+                             ID3D11BlendState **ppBlendState);
+    HRESULT CreateDepthStencilState(const D3D11_DEPTH_STENCIL_DESC *pDesc,
+                                    ID3D11DepthStencilState **ppDepthStencilState);
+    HRESULT CreateDepthStencilView(ID3D11Texture2D *pResource,
+                                   const D3D11_DEPTH_STENCIL_VIEW_DESC *pDesc,
+                                   ID3D11DepthStencilView **ppDepthStencilView);
     HRESULT CreateVertexShader(const void *pShaderBytecode,
                                size_t BytecodeLength, void *pClassLinkage,
                                ID3D11VertexShader **ppVertexShader);

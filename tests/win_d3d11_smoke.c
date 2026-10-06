@@ -339,6 +339,7 @@ static int check_timing_environment(void)
     LARGE_INTEGER counter_a;
     LARGE_INTEGER counter_b;
     LARGE_INTEGER frequency;
+    SYSTEM_INFO system_info;
     char env_a[128];
     WCHAR env_w[128];
     char module_name[256];
@@ -364,11 +365,19 @@ static int check_timing_environment(void)
     env_result_w = GetEnvironmentVariableW(
         L"PATH", env_w, sizeof(env_w) / sizeof(env_w[0]));
 
-    if (GetModuleFileNameA(NULL, module_name, sizeof(module_name)) == 0)
+    ZeroMemory(&system_info, sizeof(system_info));
+    GetSystemInfo(&system_info);
+    if (system_info.wProcessorArchitecture != PROCESSOR_ARCHITECTURE_AMD64 ||
+        system_info.dwPageSize != 4096u ||
+        system_info.dwAllocationGranularity != 0x10000u ||
+        system_info.dwNumberOfProcessors == 0)
         return 4;
 
-    if (GetCommandLineA() == NULL)
+    if (GetModuleFileNameA(NULL, module_name, sizeof(module_name)) == 0)
         return 5;
+
+    if (GetCommandLineA() == NULL)
+        return 6;
 
     (void)env_result_a;
     (void)env_result_w;

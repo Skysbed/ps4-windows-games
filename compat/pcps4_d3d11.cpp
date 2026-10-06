@@ -1068,11 +1068,12 @@ void ID3D11Device::GetImmediateContext(
         context == NULL)
         return;
 
+    pcps4_gpu_context_add_ref(context);
     *ppImmediateContext =
         new (std::nothrow) ID3D11DeviceContext(context);
 
-    if (*ppImmediateContext != NULL)
-        context = NULL;
+    if (*ppImmediateContext == NULL)
+        pcps4_gpu_context_destroy(context);
 }
 
 HRESULT pcps4_d3d11_create_device_and_swap_chain(

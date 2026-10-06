@@ -501,6 +501,7 @@ public:
     void PSSetSamplers(UINT StartSlot, UINT NumSamplers, ID3D11SamplerState *const *ppSamplers);
     void RSSetState(ID3D11RasterizerState *pRasterizerState);
     void OMSetBlendState(ID3D11BlendState *pBlendState, const float BlendFactor[4], UINT SampleMask);
+    void OMSetDepthStencilState(ID3D11DepthStencilState *pDepthStencilState, uint8_t StencilRef);
     void IASetVertexBuffers(UINT StartSlot, UINT NumBuffers,
                             ID3D11Buffer *const *ppVertexBuffers,
                             const UINT *pStrides, const UINT *pOffsets);

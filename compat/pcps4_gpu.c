@@ -15,6 +15,7 @@ struct pcps4_gpu_context {
     uint32_t magic;
     pcps4_gpu_device_t *device;
     pcps4_gpu_render_target_t *render_target;
+    uint32_t primitive_topology;
     pcps4_gpu_buffer_t *vertex_buffer;
     uint32_t vertex_stride;
     uint32_t vertex_offset;
@@ -145,6 +146,7 @@ pcps4_gpu_context_t *pcps4_gpu_context_create(pcps4_gpu_device_t *device)
 
     context->magic = CTX_MAGIC;
     context->device = device;
+    context->primitive_topology = PCPS4_GPU_TOPOLOGY_TRIANGLELIST;
     return context;
 }
 
@@ -606,6 +608,19 @@ int pcps4_gpu_context_set_render_target(
     return PCPS4_GPU_OK;
 }
 
+int pcps4_gpu_context_set_primitive_topology(
+    pcps4_gpu_context_t *context,
+    uint32_t topology)
+{
+    if (!valid_context(context) ||
+        topology < PCPS4_GPU_TOPOLOGY_POINTLIST ||
+        topology > PCPS4_GPU_TOPOLOGY_TRIANGLESTRIP)
+        return PCPS4_GPU_ERR_ARGUMENT;
+
+    context->primitive_topology = topology;
+    return PCPS4_GPU_OK;
+}
+
 int pcps4_gpu_context_clear(
     pcps4_gpu_context_t *context,
     pcps4_gfx_color_t color)
@@ -694,6 +709,250 @@ int pcps4_gpu_context_present(
         : PCPS4_GPU_ERR_BACKEND;
 }
 
+static float pcps4_edge(
+    float ax,
+    float ay,
+    float bx,
+    float by,
+    float px,
+    float py)
+{
+    return (px - ax) * (by - ay) -
+           (py - ay) * (bx - ax);
+}
+
+static void pcps4_write_pixel(
+    pcps4_gpu_texture_t *texture,
+    int32_t x,
+    int32_t y,
+    float r,
+    float g,
+    float b,
+    float a)
+{
+    uint8_t *row;
+
+    if (texture == NULL ||
+        texture->data == NULL ||
+        x < 0 || y < 0 ||
+        x >= (int32_t)texture->desc.width ||
+        y >= (int32_t)texture->desc.height)
+        return;
+
+    if (r < 0.0f) r = 0.0f;
+    if (r > 1.0f) r = 1.0f;
+    if (g < 0.0f) g = 0.0f;
+    if (g > 1.0f) g = 1.0f;
+    if (b < 0.0f) b = 0.0f;
+    if (b > 1.0f) b = 1.0f;
+    if (a < 0.0f) a = 0.0f;
+    if (a > 1.0f) a = 1.0f;
+
+    row = texture->data + (size_t)y * texture->row_pitch;
+    row[(size_t)x * 4u + 0] = (uint8_t)(r * 255.0f + 0.5f);
+    row[(size_t)x * 4u + 1] = (uint8_t)(g * 255.0f + 0.5f);
+    row[(size_t)x * 4u + 2] = (uint8_t)(b * 255.0f + 0.5f);
+    row[(size_t)x * 4u + 3] = (uint8_t)(a * 255.0f + 0.5f);
+}
+
+static int pcps4_decode_float3(
+    const uint8_t *vertex,
+    uint32_t format,
+    float out[3])
+{
+    if (vertex == NULL || out == NULL)
+        return 0;
+
+    if (format != 6u)
+        return 0;
+
+    memcpy(out, vertex, sizeof(float) * 3u);
+    return 1;
+}
+
+static int pcps4_decode_float4(
+    const uint8_t *vertex,
+    uint32_t format,
+    float out[4])
+{
+    if (vertex == NULL || out == NULL)
+        return 0;
+
+    if (format != 2u)
+        return 0;
+
+    memcpy(out, vertex, sizeof(float) * 4u);
+    return 1;
+}
+
+static int pcps4_raster_triangle(
+    pcps4_gpu_texture_t *texture,
+    const float p0[3],
+    const float c0[4],
+    const float p1[3],
+    const float c1[4],
+    const float p2[3],
+    const float c2[4])
+{
+    float area;
+    float min_x;
+    float max_x;
+    float min_y;
+    float max_y;
+
+    if (texture == NULL ||
+        p0 == NULL || p1 == NULL || p2 == NULL ||
+        c0 == NULL || c1 == NULL || c2 == NULL)
+        return PCPS4_GPU_ERR_ARGUMENT;
+
+    if (p0[2] < -1.0f || p0[2] > 1.0f ||
+        p1[2] < -1.0f || p1[2] > 1.0f ||
+        p2[2] < -1.0f || p2[2] > 1.0f)
+        return PCPS4_GPU_ERR_UNSUPPORTED;
+
+    area = pcps4_edge(
+        p0[0], p0[1], p1[0], p1[1], p2[0], p2[1]);
+
+    if (area == 0.0f)
+        return PCPS4_GPU_OK;
+
+    min_x = p0[0];
+    if (p1[0] < min_x) min_x = p1[0];
+    if (p2[0] < min_x) min_x = p2[0];
+
+    max_x = p0[0];
+    if (p1[0] > max_x) max_x = p1[0];
+    if (p2[0] > max_x) max_x = p2[0];
+
+    min_y = p0[1];
+    if (p1[1] < min_y) min_y = p1[1];
+    if (p2[1] < min_y) min_y = p2[1];
+
+    max_y = p0[1];
+    if (p1[1] > max_y) max_y = p1[1];
+    if (p2[1] > max_y) max_y = p2[1];
+
+    int32_t x0 = (int32_t)((min_x * 0.5f + 0.5f) *
+                           (float)texture->desc.width);
+    int32_t x1 = (int32_t)((max_x * 0.5f + 0.5f) *
+                           (float)texture->desc.width);
+    int32_t y0 = (int32_t)((-max_y * 0.5f + 0.5f) *
+                           (float)texture->desc.height);
+    int32_t y1 = (int32_t)((-min_y * 0.5f + 0.5f) *
+                           (float)texture->desc.height);
+
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 >= (int32_t)texture->desc.width) x1 = (int32_t)texture->desc.width - 1;
+    if (y1 >= (int32_t)texture->desc.height) y1 = (int32_t)texture->desc.height - 1;
+
+    for (int32_t y = y0; y <= y1; ++y) {
+        for (int32_t x = x0; x <= x1; ++x) {
+            float px = ((float)x + 0.5f) / (float)texture->desc.width * 2.0f - 1.0f;
+            float py = 1.0f - ((float)y + 0.5f) / (float)texture->desc.height * 2.0f;
+
+            float w0 = pcps4_edge(p1[0], p1[1], p2[0], p2[1], px, py);
+            float w1 = pcps4_edge(p2[0], p2[1], p0[0], p0[1], px, py);
+            float w2 = pcps4_edge(p0[0], p0[1], p1[0], p1[1], px, py);
+
+            if ((area > 0.0f && w0 >= 0.0f && w1 >= 0.0f && w2 >= 0.0f) ||
+                (area < 0.0f && w0 <= 0.0f && w1 <= 0.0f && w2 <= 0.0f)) {
+                float inv_area = 1.0f / area;
+                float a0 = w0 * inv_area;
+                float a1 = w1 * inv_area;
+                float a2 = w2 * inv_area;
+
+                pcps4_write_pixel(
+                    texture, x, y,
+                    c0[0] * a0 + c1[0] * a1 + c2[0] * a2,
+                    c0[1] * a0 + c1[1] * a1 + c2[1] * a2,
+                    c0[2] * a0 + c1[2] * a1 + c2[2] * a2,
+                    c0[3] * a0 + c1[3] * a1 + c2[3] * a2);
+            }
+        }
+    }
+
+    return PCPS4_GPU_OK;
+}
+
+static int pcps4_cpu_draw_trianglelist(
+    pcps4_gpu_context_t *context,
+    uint32_t vertex_count,
+    uint32_t start_vertex)
+{
+    const pcps4_gpu_vertex_element_t *layout;
+    uint32_t layout_count;
+    pcps4_gpu_texture_t *texture;
+    pcps4_gpu_buffer_t *buffer;
+    const uint32_t vertex_stride = context->vertex_stride;
+    const uint32_t vertex_offset = context->vertex_offset;
+    int position_index = -1;
+    int color_index = -1;
+
+    if (context == NULL ||
+        vertex_count < 3 ||
+        context->render_target == NULL ||
+        !valid_rtv(context->render_target) ||
+        context->vertex_buffer == NULL ||
+        !valid_buffer(context->vertex_buffer) ||
+        vertex_stride < 12)
+        return PCPS4_GPU_ERR_STATE;
+
+    texture = context->render_target->texture;
+    if (!valid_texture(texture) ||
+        texture->data == NULL)
+        return PCPS4_GPU_ERR_UNSUPPORTED;
+
+    if (pcps4_gpu_context_get_input_layout(
+            context, &layout, &layout_count) != PCPS4_GPU_OK)
+        return PCPS4_GPU_ERR_STATE;
+
+    for (uint32_t i = 0; i < layout_count; ++i) {
+        if (layout[i].input_slot != 0)
+            continue;
+        if (layout[i].semantic_kind == 1u && position_index < 0)
+            position_index = (int)i;
+        if (layout[i].semantic_kind == 2u && color_index < 0)
+            color_index = (int)i;
+    }
+
+    if (position_index < 0 || color_index < 0)
+        return PCPS4_GPU_ERR_UNSUPPORTED;
+
+    for (uint32_t base = 0; base + 2 < vertex_count; base += 3) {
+        const uint8_t *v[3];
+        float p[3][3];
+        float c[3][4];
+
+        for (uint32_t i = 0; i < 3; ++i) {
+            size_t index = (size_t)start_vertex + base + i;
+            size_t byte_offset = index * vertex_stride +
+                                 (size_t)vertex_offset;
+            if (byte_offset > context->vertex_buffer->desc.size ||
+                vertex_stride > context->vertex_buffer->desc.size - byte_offset)
+                return PCPS4_GPU_ERR_ARGUMENT;
+            v[i] = context->vertex_buffer->data + byte_offset;
+
+            if (!pcps4_decode_float3(
+                    v[i] + layout[position_index].aligned_byte_offset,
+                    layout[position_index].format,
+                    p[i]) ||
+                !pcps4_decode_float4(
+                    v[i] + layout[color_index].aligned_byte_offset,
+                    layout[color_index].format,
+                    c[i]))
+                return PCPS4_GPU_ERR_UNSUPPORTED;
+        }
+
+        int rc = pcps4_raster_triangle(
+            texture, p[0], c[0], p[1], c[1], p[2], c[2]);
+        if (rc != PCPS4_GPU_OK)
+            return rc;
+    }
+
+    return PCPS4_GPU_OK;
+}
+
 int pcps4_gpu_context_draw(
     pcps4_gpu_context_t *context,
     uint32_t vertex_count,
@@ -706,8 +965,6 @@ int pcps4_gpu_context_draw(
     uint32_t vs_type = 0;
     uint32_t ps_type = 0;
     int rc;
-
-    (void)start_vertex;
 
     if (!valid_context(context) || vertex_count == 0)
         return PCPS4_GPU_ERR_ARGUMENT;
@@ -730,11 +987,6 @@ int pcps4_gpu_context_draw(
         ps_size < 16)
         return PCPS4_GPU_ERR_UNSUPPORTED;
 
-    /*
-     * The real execution path currently accepts converted PS4 .sb shader
-     * binaries. A DXBC blob must first pass through the offline
-     * DXBC -> SPIR-V -> PS4 shader pipeline.
-     */
     if (((const uint8_t *)vs_data)[0] != 'S' ||
         ((const uint8_t *)vs_data)[1] != 'h' ||
         ((const uint8_t *)vs_data)[2] != 'd' ||
@@ -762,9 +1014,15 @@ int pcps4_gpu_context_draw(
         ? PCPS4_GPU_OK
         : PCPS4_GPU_ERR_BACKEND;
 #else
-    return PCPS4_GPU_ERR_UNSUPPORTED;
+    if (context->primitive_topology != PCPS4_GPU_TOPOLOGY_TRIANGLELIST)
+        return PCPS4_GPU_ERR_UNSUPPORTED;
+
+    return pcps4_cpu_draw_trianglelist(
+        context, vertex_count, start_vertex);
 #endif
 }
+
+int pcps4_gpu_context_draw_indexed(
 
 int pcps4_gpu_context_draw_indexed(
     pcps4_gpu_context_t *context,

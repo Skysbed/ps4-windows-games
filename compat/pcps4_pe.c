@@ -698,6 +698,100 @@ pcps4_pe_status pcps4_pe_bind_imports(const pcps4_pe_image *image,
     return PCPS4_PE_OK;
 }
 
+
+pcps4_pe_status pcps4_pe_report_unresolved_imports(
+    const pcps4_pe_image *image,
+    const pcps4_pe_resolver *resolver,
+    pcps4_pe_unresolved_fn cb,
+    void *user)
+{
+    uint32_t import_rva, import_off, desc;
+
+    if (image == NULL || resolver == NULL || cb == NULL)
+        return PCPS4_PE_ERR_NULL;
+
+    import_rva = image->directory_rva[PCPS4_PE_DIRECTORY_IMPORT];
+    if (import_rva == 0 ||
+        image->directory_size[PCPS4_PE_DIRECTORY_IMPORT] == 0)
+        return PCPS4_PE_OK;
+
+    if (pcps4_pe_rva_to_offset(image, import_rva, &import_off) != PCPS4_PE_OK)
+        return PCPS4_PE_ERR_BAD_OFFSET;
+
+    for (desc = 0; desc < PCPS4_PE_MAX_IMPORT_DLLS; ++desc) {
+        size_t d = (size_t)import_off + (size_t)desc * 20u;
+        uint32_t orig_first_thunk = 0;
+        uint32_t name_rva = 0;
+        uint32_t first_thunk = 0;
+        uint32_t ilt_rva;
+        uint32_t ilt_off;
+        uint32_t name_off;
+        const char *dll;
+
+        if (!pe_read_u32(image->data, image->size, d + 0, &orig_first_thunk) ||
+            !pe_read_u32(image->data, image->size, d + 12, &name_rva) ||
+            !pe_read_u32(image->data, image->size, d + 16, &first_thunk))
+            return PCPS4_PE_ERR_TRUNCATED;
+
+        if (orig_first_thunk == 0 && name_rva == 0 && first_thunk == 0)
+            break;
+
+        if (first_thunk == 0)
+            continue;
+
+        if (pcps4_pe_rva_to_offset(image, name_rva, &name_off) != PCPS4_PE_OK)
+            return PCPS4_PE_ERR_BAD_OFFSET;
+
+        dll = pe_read_cstr(image, name_off, 256);
+        if (dll == NULL)
+            return PCPS4_PE_ERR_TRUNCATED;
+
+        ilt_rva = orig_first_thunk ? orig_first_thunk : first_thunk;
+        if (pcps4_pe_rva_to_offset(image, ilt_rva, &ilt_off) != PCPS4_PE_OK)
+            return PCPS4_PE_ERR_BAD_OFFSET;
+
+        for (uint32_t t = 0; t < PCPS4_PE_MAX_IMPORTS_PER_DLL; ++t) {
+            uint64_t entry = 0;
+            void *fn = NULL;
+
+            if (!pe_read_u64(
+                    image->data, image->size,
+                    (size_t)ilt_off + (size_t)t * 8u, &entry))
+                return PCPS4_PE_ERR_TRUNCATED;
+
+            if (entry == 0)
+                break;
+
+            if (entry & 0x8000000000000000ull) {
+                uint16_t ordinal = (uint16_t)(entry & 0xFFFFu);
+                fn = pcps4_pe_resolver_lookup_ordinal(
+                    resolver, dll, ordinal);
+                if (fn == NULL &&
+                    cb(user, dll, 0, NULL, ordinal) != 0)
+                    return PCPS4_PE_OK;
+            } else {
+                uint32_t hint_name_off;
+                const char *name;
+
+                if (pcps4_pe_rva_to_offset(
+                        image, (uint32_t)entry, &hint_name_off) != PCPS4_PE_OK)
+                    return PCPS4_PE_ERR_BAD_OFFSET;
+
+                name = pe_read_cstr(image, hint_name_off + 2, 1024);
+                if (name == NULL)
+                    return PCPS4_PE_ERR_TRUNCATED;
+
+                fn = pcps4_pe_resolver_lookup(resolver, dll, name);
+                if (fn == NULL &&
+                    cb(user, dll, 1, name, 0) != 0)
+                    return PCPS4_PE_OK;
+            }
+        }
+    }
+
+    return PCPS4_PE_OK;
+}
+
 pcps4_pe_status pcps4_pe_load(const uint8_t *exe, size_t exe_size,
                               uint8_t *dest, size_t dest_size,
                               uint64_t load_base,

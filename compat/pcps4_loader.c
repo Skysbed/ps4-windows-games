@@ -46,11 +46,13 @@ typedef int (PCPS4_MS_ABI *pcps4_entry_fn)(void);
 static jmp_buf pcps4_pe_exit_jmp;
 static volatile int pcps4_pe_exit_armed;
 static volatile int pcps4_pe_exit_code;
+static volatile int pcps4_pe_exit_requested;
 
 void pcps4_pe_exit_process(uint32_t code)
 {
     if (pcps4_pe_exit_armed) {
         pcps4_pe_exit_code = (int)code;
+        pcps4_pe_exit_requested = 1;
         longjmp(pcps4_pe_exit_jmp, 1);
     }
 }
@@ -394,6 +396,7 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
     pcps4_fault_stage("loader: PE entry (before WinMainCRTStartup)");
     pcps4_pe_exit_armed = 1;
     pcps4_pe_exit_code = 0;
+    pcps4_pe_exit_requested = 0;
     {
         int ret;
 
@@ -406,7 +409,18 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
         pcps4_fault_stage("loader: PE returned");
         if (out_entry_ret)
             *out_entry_ret = (int32_t)ret;
-        pcps4_status_log("[pcps4] binary returned %d (0x%x)", ret, (unsigned)ret);
+
+        if (pcps4_pe_exit_requested) {
+            pcps4_status_log(
+                "[pcps4] binary called ExitProcess(%d / 0x%x)",
+                ret, (unsigned)ret);
+            if (ret != 0)
+                return PCPS4_LOADER_ERR_PROCESS_EXIT;
+        } else {
+            pcps4_status_log(
+                "[pcps4] binary returned %d (0x%x)",
+                ret, (unsigned)ret);
+        }
     }
 
     return PCPS4_LOADER_OK;
@@ -507,6 +521,7 @@ const char *pcps4_loader_status_str(pcps4_loader_status status)
         case PCPS4_LOADER_ERR_LOAD:      return "image load failed";
         case PCPS4_LOADER_ERR_PROTECT:   return "could not make memory executable";
         case PCPS4_LOADER_ERR_UNRESOLVED:return "unresolved imports";
+        case PCPS4_LOADER_ERR_PROCESS_EXIT: return "Windows process exited with a non-zero code";
         case PCPS4_LOADER_ERR_NULL:      return "null argument";
         default:                         return "unknown error";
     }

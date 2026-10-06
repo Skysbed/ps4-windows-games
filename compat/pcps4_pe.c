@@ -516,6 +516,42 @@ pcps4_pe_status pcps4_pe_resolver_register(pcps4_pe_resolver *resolver,
                     sizeof(resolver->symbols[0].dll), dll);
     pe_copy_bounded(resolver->symbols[resolver->count].name,
                     sizeof(resolver->symbols[0].name), name);
+    resolver->symbols[resolver->count].ordinal = 0;
+    resolver->symbols[resolver->count].by_ordinal = 0;
+    resolver->symbols[resolver->count].fn = fn;
+    ++resolver->count;
+    return PCPS4_PE_OK;
+}
+
+pcps4_pe_status pcps4_pe_resolver_register_ordinal(
+    pcps4_pe_resolver *resolver,
+    const char *dll,
+    uint16_t ordinal,
+    void *fn)
+{
+    uint32_t i;
+
+    if (resolver == NULL || dll == NULL || ordinal == 0)
+        return PCPS4_PE_ERR_NULL;
+
+    for (i = 0; i < resolver->count; ++i) {
+        if (resolver->symbols[i].by_ordinal != 0 &&
+            resolver->symbols[i].ordinal == ordinal &&
+            pe_streq_ci(resolver->symbols[i].dll, dll)) {
+            resolver->symbols[i].fn = fn;
+            return PCPS4_PE_OK;
+        }
+    }
+
+    if (resolver->count >= PCPS4_PE_MAX_RESOLVER_SYMBOLS)
+        return PCPS4_PE_ERR_NO_SPACE;
+
+    pe_copy_bounded(resolver->symbols[resolver->count].dll,
+                    sizeof(resolver->symbols[0].dll), dll);
+    resolver->symbols[resolver->count].name[0] = '\0';
+    resolver->symbols[resolver->count].ordinal = ordinal;
+    resolver->symbols[resolver->count].by_ordinal = 1;
+    resolver->symbols[resolver->count].reserved = 0;
     resolver->symbols[resolver->count].fn = fn;
     ++resolver->count;
     return PCPS4_PE_OK;
@@ -528,10 +564,31 @@ void *pcps4_pe_resolver_lookup(const pcps4_pe_resolver *resolver,
     if (resolver == NULL || dll == NULL || name == NULL)
         return NULL;
     for (i = 0; i < resolver->count; ++i) {
-        if (pe_streq_ci(resolver->symbols[i].dll, dll) &&
+        if (resolver->symbols[i].by_ordinal == 0 &&
+            pe_streq_ci(resolver->symbols[i].dll, dll) &&
             strcmp(resolver->symbols[i].name, name) == 0)
             return resolver->symbols[i].fn;
     }
+    return NULL;
+}
+
+void *pcps4_pe_resolver_lookup_ordinal(
+    const pcps4_pe_resolver *resolver,
+    const char *dll,
+    uint16_t ordinal)
+{
+    uint32_t i;
+
+    if (resolver == NULL || dll == NULL || ordinal == 0)
+        return NULL;
+
+    for (i = 0; i < resolver->count; ++i) {
+        if (resolver->symbols[i].by_ordinal != 0 &&
+            resolver->symbols[i].ordinal == ordinal &&
+            pe_streq_ci(resolver->symbols[i].dll, dll))
+            return resolver->symbols[i].fn;
+    }
+
     return NULL;
 }
 
@@ -613,8 +670,9 @@ pcps4_pe_status pcps4_pe_bind_imports(const pcps4_pe_image *image,
                 return PCPS4_PE_ERR_NO_SPACE;
 
             if (entry & 0x8000000000000000ull) {
-                /* Import by ordinal: not resolvable by name. */
-                fn = NULL;
+                uint16_t ordinal = (uint16_t)(entry & 0xFFFFu);
+                fn = pcps4_pe_resolver_lookup_ordinal(
+                    resolver, dll, ordinal);
             } else {
                 uint32_t hn_off;
                 const char *name;

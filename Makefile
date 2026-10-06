@@ -300,7 +300,7 @@ info:
 	@echo "OpenGNM enabled: $(PCPS4_ENABLE_OPENGNM)"
 	@echo "Interactive game demo: $(PCPS4_RUN_GAME)"
 	@echo "Bundled Windows game: $(PCPS4_BUNDLED_GAME)"
-	@echo "Bundled game directory: $(PCPS4_GAME_DIR)
+	@echo "Bundled game directory: $(PCPS4_GAME_DIR)"
 	@echo "Fault boundary: compat/pcps4_fault.[ch]"
 	@echo "Content ID: $(CONTENT_ID)"
 	@echo "Title ID: $(TITLE_ID)"

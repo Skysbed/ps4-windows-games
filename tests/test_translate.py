@@ -69,6 +69,34 @@ VirtualFree(p, 4096, MEM_RELEASE);
         self.assertIn('pcps4_VirtualFree', translated)
         self.assertEqual(report["blockers"], [])
 
+    def test_extended_event_and_socket_surface(self):
+        source = """
+#include <windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+HANDLE event = CreateEventA(NULL, TRUE, FALSE, "evt");
+SetEvent(event);
+ResetEvent(event);
+WaitForSingleObject(event, 10);
+SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+connect(s, NULL, 0);
+send(s, "x", 1, 0);
+recv(s, buffer, 1, 0);
+shutdown(s, 2);
+closesocket(s);
+"""
+        translated, report, status = translate(source, strict=True)
+        self.assertEqual(status, 0)
+        self.assertIn('pcps4_CreateEventA', translated)
+        self.assertIn('pcps4_SetEvent', translated)
+        self.assertIn('pcps4_ResetEvent', translated)
+        self.assertIn('pcps4_socket', translated)
+        self.assertIn('pcps4_connect', translated)
+        self.assertIn('pcps4_send', translated)
+        self.assertIn('pcps4_recv', translated)
+        self.assertIn('pcps4_shutdown', translated)
+        self.assertEqual(report["blockers"], [])
+
     def test_d3d11_header_is_translated(self):
         source = """
 #include <d3d11.h>

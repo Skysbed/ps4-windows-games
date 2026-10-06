@@ -29,13 +29,16 @@ COMMONFLAGS   := --target=x86_64-pc-freebsd12-elf -fPIC -funwind-tables \
                  -isysroot $(TOOLCHAIN) \
                  -isystem $(TOOLCHAIN)/include \
                  -Icompat
-CFLAGS        := $(COMMONFLAGS) -std=c11 -c
+CFLAGS        := $(COMMONFLAGS) -std=c11 $(if $(PCPS4_ENABLE_GNM),-DPCPS4_ENABLE_GNM=1,) -c
 CXXFLAGS      := $(COMMONFLAGS) -isystem $(TOOLCHAIN)/include/c++/v1 -c
 
 OBJS_C        := $(patsubst $(GENERATED)/%.c,$(INTDIR)/%.o,$(TRANSLATED_C))
 OBJS_CPP      := $(patsubst $(GENERATED)/%.cpp,$(INTDIR)/%.cpp.o,$(TRANSLATED_CPP))
 OBJS          := $(OBJS_C) $(OBJS_CPP)
 SYS_OBJ       := $(INTDIR)/pcps4_sys.o
+FAULT_OBJ     := $(INTDIR)/pcps4_fault.o
+GFX_OBJ       := $(INTDIR)/pcps4_gfx.o
+GNM_OBJ       := $(INTDIR)/pcps4_gnm.o
 
 ELF           := $(INTDIR)/$(PROJECT).elf
 OELF          := $(INTDIR)/$(PROJECT).oelf
@@ -53,7 +56,7 @@ LDFLAGS       := -m elf_x86_64 -pie \
                  --script $(TOOLCHAIN)/link.x \
                  --eh-frame-hdr \
                  -L$(TOOLCHAIN)/lib \
-                 -lc -lkernel -lc++ $(TOOLCHAIN)/lib/crt1.o
+                 -lc -lkernel -lc++ -lSceVideoOut $(if $(PCPS4_ENABLE_GNM),-lSceGnmDriver,) $(TOOLCHAIN)/lib/crt1.o
 
 .PHONY: all pkg eboot translate test clean info
 
@@ -81,10 +84,25 @@ $(SYS_OBJ): compat/pcps4_sys.c compat/pcps4_sys.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
 
+$(FAULT_OBJ): compat/pcps4_fault.c compat/pcps4_fault.h
+	@mkdir -p "$(dir $@)"
+	$(CC) $(CFLAGS) -o "$@" "$<"
+
+$(GFX_OBJ): compat/pcps4_gfx.c compat/pcps4_gfx.h
+	@mkdir -p "$(dir $@)"
+	$(CC) $(CFLAGS) -o "$@" "$<"
+
+$(GNM_OBJ): compat/pcps4_gnm.c compat/pcps4_gnm.h
+	@mkdir -p "$(dir $@)"
+	$(CC) $(CFLAGS) -o "$@" "$<"
+
+	@mkdir -p "$(dir $@)"
+	$(CC) $(CFLAGS) -o "$@" "$<"
+
 $(INTDIR):
 	@mkdir -p "$(INTDIR)"
 
-$(ELF): $(OBJS) $(SYS_OBJ)
+$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ)
 	@test -n "$(OBJS)" || (echo "ERROR: no PC source files found in pc_source/."; exit 1)
 	$(LD) $(OBJS) $(SYS_OBJ) -o "$@" $(LDFLAGS)
 
@@ -135,6 +153,9 @@ info:
 	@echo "Target: x86_64-pc-freebsd12-elf"
 	@echo "Translator: $(TRANSLATOR)"
 	@echo "OS adapter: compat/pcps4_sys.[ch]"
+	@echo "Graphics backend: compat/pcps4_gfx.[ch] (VideoOut framebuffer)"
+	@echo "GNM submit bridge: compat/pcps4_gnm.[ch] (PCPS4_ENABLE_GNM=$(PCPS4_ENABLE_GNM))"
+	@echo "Fault boundary: compat/pcps4_fault.[ch]"
 	@echo "create-fself: $(CREATE_FSELF)"
 	@echo "create-gp4: $(CREATE_GP4)"
 	@echo "PkgTool.Core: $(PKGTOOL)"

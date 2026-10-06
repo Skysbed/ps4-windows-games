@@ -98,7 +98,7 @@ LDFLAGS := -m elf_x86_64 -pie \
            -L$(TOOLCHAIN)/lib \
            -lc -lkernel -lc++ -lSceVideoOut \
            $(if $(PCPS4_ENABLE_GNM),-lSceGnmDriver,) \
-           -lScePad -lSceUserService \
+           -lScePad -lSceUserService -lSceNet \
            $(if $(filter 1,$(PCPS4_ENABLE_OPENGNM)),-L$(PCPS4_OPENGNM_DIR) -lopengnm,) \
            $(TOOLCHAIN)/lib/crt1.o
 

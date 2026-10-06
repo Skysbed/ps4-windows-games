@@ -9,6 +9,8 @@ CONTENT_ID    := IV0000-PCPS00001_00-PCPS4TRANSLATE01
 TOOLCHAIN     := $(OO_PS4_TOOLCHAIN)
 PCPS4_ENABLE_OPENGNM ?= 0
 PCPS4_RUN_GAME ?= 1
+PCPS4_BUNDLED_GAME ?= 0
+PCPS4_GAME_DIR ?=
 PCPS4_GRAPHICS_ROOT ?= external/ps4-graphics
 PCPS4_OPENGNM_DIR := $(PCPS4_GRAPHICS_ROOT)/opengnm
 INTDIR        := build
@@ -37,6 +39,7 @@ COMMONFLAGS := --target=x86_64-pc-freebsd12-elf -fPIC -funwind-tables \
 CFLAGS   := $(COMMONFLAGS) -std=c11 \
             -DPCPS4_ENABLE_OPENGNM=$(PCPS4_ENABLE_OPENGNM) \
             -DPCPS4_RUN_GAME=$(PCPS4_RUN_GAME) \
+            -DPCPS4_BUNDLED_GAME=$(PCPS4_BUNDLED_GAME) \
             $(if $(PCPS4_ENABLE_GNM),-DPCPS4_ENABLE_GNM=1,) -c
 CXXFLAGS := $(COMMONFLAGS) \
             -isystem $(TOOLCHAIN)/include/c++/v1 -c
@@ -56,6 +59,8 @@ PE_OBJ    := $(INTDIR)/pcps4_pe.o
 LOADER_OBJ := $(INTDIR)/pcps4_loader.o
 STATUS_OBJ := $(INTDIR)/pcps4_status.o
 XINPUT_OBJ := $(INTDIR)/pcps4_xinput.o
+WINAPI_OBJ := $(INTDIR)/pcps4_winapi.o
+GAME_OBJ  := $(INTDIR)/pcps4_game.o
 
 ELF := $(INTDIR)/$(PROJECT).elf
 OELF := $(INTDIR)/$(PROJECT).oelf
@@ -108,6 +113,18 @@ DXBC_HOST_TEST := $(INTDIR)/dxbc_host_test
 
 all: pkg
 
+.PHONY: package-game
+
+package-game:
+	@rm -rf "$(PACKAGE_ROOT)/game"
+	@if [ "$(PCPS4_BUNDLED_GAME)" = "1" ]; then \
+		test -n "$(PCPS4_GAME_DIR)" || (echo "ERROR: PCPS4_GAME_DIR must be set when PCPS4_BUNDLED_GAME=1"; exit 1); \
+		test -f "$(PCPS4_GAME_DIR)/game.exe" || (echo "ERROR: $(PCPS4_GAME_DIR)/game.exe not found"; exit 1); \
+		mkdir -p "$(PACKAGE_ROOT)/game"; \
+		cp -R "$(PCPS4_GAME_DIR)/." "$(PACKAGE_ROOT)/game/"; \
+		echo "Bundled Windows game staged from $(PCPS4_GAME_DIR)"; \
+	fi
+
 translate: $(TRANSLATED)
 
 $(GENERATED)/%.c: pc_source/%.c $(TRANSLATOR) compat/pcps4_compat.h compat/pcps4_xinput.h compat/pcps4_sys.h
@@ -159,6 +176,14 @@ $(INTDIR)/pcps4_xinput.o: compat/pcps4_xinput.c compat/pcps4_xinput.h compat/pcp
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
 
+$(WINAPI_OBJ): compat/pcps4_winapi.c compat/pcps4_winapi.h compat/pcps4_compat.h compat/pcps4_xinput.h compat/pcps4_pe.h
+	@mkdir -p "$(dir $@)"
+	$(CC) $(CFLAGS) -o "$@" "$<"
+
+$(GAME_OBJ): compat/pcps4_game.c compat/pcps4_game.h compat/pcps4_loader.h compat/pcps4_winapi.h
+	@mkdir -p "$(dir $@)"
+	$(CC) $(CFLAGS) -o "$@" "$<"
+
 $(SHADER_OBJ): compat/pcps4_shader.c compat/pcps4_shader.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
@@ -178,10 +203,10 @@ $(STATUS_OBJ): compat/pcps4_status.c compat/pcps4_status.h compat/pcps4_gfx.h
 $(INTDIR):
 	@mkdir -p "$(INTDIR)"
 
-$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ)
+$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ)
 	@test -n "$(OBJS)" || (echo "ERROR: no PC source files found in pc_source/."; exit 1)
 	$(LD) $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) \
-	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(GNM_RENDERER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) -o "$@" $(LDFLAGS)
+	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(GNM_RENDERER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) -o "$@" $(LDFLAGS)
 
 eboot.bin: $(ELF)
 	@test -n "$(OO_PS4_TOOLCHAIN)" || (echo "ERROR: OO_PS4_TOOLCHAIN is not set."; exit 1)
@@ -220,12 +245,14 @@ $(PACKAGE_ROOT)/sce_sys/icon0.png: $(OO_ICON)
 	@mkdir -p "$(dir $@)"
 	cp "$<" "$@"
 
-$(GP4): $(SFO) $(PACKAGE_EBOOT) $(PACKAGE_SUPPORT)
+$(GP4): $(SFO) $(PACKAGE_EBOOT) $(PACKAGE_SUPPORT) package-game
 	@test -x "$(CREATE_GP4)" || (echo "ERROR: $(CREATE_GP4) not found."; exit 1)
-	cd "$(PACKAGE_ROOT)" && "$(CREATE_GP4)" \
+	cd "$(PACKAGE_ROOT)" && \
+	  GAME_FILES="$(if [ -d game ]; then find game -type f -print | tr '\\n' ' '; fi)" && \
+	  "$(CREATE_GP4)" \
 	    -out "$(notdir $@)" \
 	    --content-id="$(CONTENT_ID)" \
-	    --files "$(PACKAGE_FILES)"
+	    --files "$(PACKAGE_FILES)" $GAME_FILES
 
 $(PKG): $(GP4)
 	@test -x "$(PKGTOOL)" || (echo "ERROR: $(PKGTOOL) not found."; exit 1)
@@ -272,6 +299,8 @@ info:
 	@echo "Real GNM renderer: compat/pcps4_gnm_renderer.[ch]"
 	@echo "OpenGNM enabled: $(PCPS4_ENABLE_OPENGNM)"
 	@echo "Interactive game demo: $(PCPS4_RUN_GAME)"
+	@echo "Bundled Windows game: $(PCPS4_BUNDLED_GAME)"
+	@echo "Bundled game directory: $(PCPS4_GAME_DIR)
 	@echo "Fault boundary: compat/pcps4_fault.[ch]"
 	@echo "Content ID: $(CONTENT_ID)"
 	@echo "Title ID: $(TITLE_ID)"

@@ -82,6 +82,26 @@ jobs:
           path: eboot.bin
           if-no-files-found: error
 
+      - name: Package native Windows D3D11 smoke binary for PS4
+        run: |
+          mkdir -p build/win-game
+          cp build/win_d3d11_smoke.exe build/win-game/game.exe
+          PCPS4_BUNDLED_GAME=1 \
+          PCPS4_GAME_DIR="$GITHUB_WORKSPACE/build/win-game" \
+          INTDIR=build/win-smoke \
+          PACKAGE_ROOT=build/win-smoke/package \
+          TITLE="PcPs4 Windows D3D11 Smoke" \
+          TITLE_ID=PCPS00002 \
+          CONTENT_ID=IV0000-PCPS00002_00-WIND3D11SMOKE01 \
+          make pkg
+
+      - name: Upload PS4 package containing native Windows D3D11 smoke binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: PcPs4-PKG-Windows-D3D11-Smoke
+          path: build/win-smoke/package/*.pkg
+          if-no-files-found: error
+
       - name: Upload translated source and report
         uses: actions/upload-artifact@v4
         with:

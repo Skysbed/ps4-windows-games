@@ -23,6 +23,8 @@ void pcps4_status_begin(void);
 void pcps4_status_log(const char *fmt, ...);
 void pcps4_status_step(const char *name);          /* "about to run X" */
 void pcps4_status_report(const char *name, int ok); /* record a result */
+void pcps4_status_suspend_display(void);       /* release VideoOut for another renderer */
+void pcps4_status_resume_display(void);        /* reacquire VideoOut after the renderer exits */
 void pcps4_status_finish_forever(void);            /* never returns */
 
 #ifdef __cplusplus

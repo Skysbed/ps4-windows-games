@@ -140,6 +140,15 @@ typedef struct D3D11_INPUT_ELEMENT_DESC {
     UINT InstanceDataStepRate;
 } D3D11_INPUT_ELEMENT_DESC;
 
+typedef struct D3D11_VIEWPORT {
+    float TopLeftX;
+    float TopLeftY;
+    float Width;
+    float Height;
+    float MinDepth;
+    float MaxDepth;
+} D3D11_VIEWPORT;
+
 typedef struct D3D11_MAPPED_SUBRESOURCE {
     void *pData;
     UINT RowPitch;
@@ -500,6 +509,8 @@ public:
     void VSSetSamplers(UINT StartSlot, UINT NumSamplers, ID3D11SamplerState *const *ppSamplers);
     void PSSetSamplers(UINT StartSlot, UINT NumSamplers, ID3D11SamplerState *const *ppSamplers);
     void RSSetState(ID3D11RasterizerState *pRasterizerState);
+    void RSSetViewports(UINT NumViewports,
+                        const D3D11_VIEWPORT *pViewports);
     void OMSetBlendState(ID3D11BlendState *pBlendState, const float BlendFactor[4], UINT SampleMask);
     void OMSetDepthStencilState(ID3D11DepthStencilState *pDepthStencilState, uint8_t StencilRef);
     void IASetVertexBuffers(UINT StartSlot, UINT NumBuffers,

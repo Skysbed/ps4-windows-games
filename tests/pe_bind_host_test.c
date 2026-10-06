@@ -178,10 +178,41 @@ static void test_bind(void)
     CHECK(get64(dest, IAT_RVA + 8) == 0);
 }
 
+static void test_load_unified(void)
+{
+    uint8_t buf[IMG_SIZE];
+    uint8_t dest[SIZE_OF_IMAGE];
+    pcps4_pe_image img;
+    pcps4_pe_resolver r;
+    uint32_t resolved = 0, unresolved = 0;
+    void *p = (void *)fake_getprocaddress;
+
+    build_pe(buf);
+    pcps4_pe_resolver_init(&r);
+    CHECK(pcps4_pe_resolver_register(&r, "KERNEL32.dll", "GetProcAddress", p)
+          == PCPS4_PE_OK);
+
+    /* One call does parse + map + bind. */
+    CHECK(pcps4_pe_load(buf, sizeof(buf), dest, sizeof(dest),
+                        0x140000000ull, &r, &img,
+                        &resolved, &unresolved) == PCPS4_PE_OK);
+    CHECK(resolved == 1);
+    CHECK(unresolved == 1);
+    CHECK(get64(dest, IAT_RVA + 0) == (uint64_t)(uintptr_t)p);
+
+    /* Resolver NULL skips binding but still maps. */
+    memset(dest, 0, sizeof(dest));
+    CHECK(pcps4_pe_load(buf, sizeof(buf), dest, sizeof(dest),
+                        0x140000000ull, NULL, &img, NULL, NULL)
+          == PCPS4_PE_OK);
+    CHECK(dest[0] == 'M' && dest[1] == 'Z');
+}
+
 int main(void)
 {
     test_resolver_api();
     test_bind();
+    test_load_unified();
 
     if (g_failures == 0) {
         printf("pe_bind_host_test: all checks passed\n");

@@ -10,6 +10,7 @@
 void pcps4_runtime_demo(char *buffer, size_t buffer_size);
 int pcps4_gnm_smoke_run(void);
 int pcps4_d3d11_smoke_test(void);
+int pcps4_pe_exec_smoke(void);
 
 static volatile LONG demo_value = 0;
 
@@ -27,6 +28,11 @@ int main(void)
     printf("PID: %u\n", GetCurrentProcessId());
     printf("Value: %d\n", (int)demo_value);
     printf("Buffer: %s\n", buffer);
+
+    /* Stage 4 proof: load and execute a real (tiny) PE binary in fresh
+     * executable memory on this console. Prints PASS/FAIL. */
+    printf("Starting PE load+execute smoke...\n");
+    (void)pcps4_pe_exec_smoke();
 
 #if PCPS4_ENABLE_OPENGNM
     printf("Starting real GNM graphics smoke...\n");

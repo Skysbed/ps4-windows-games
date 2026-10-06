@@ -179,6 +179,21 @@ pcps4_pe_status pcps4_pe_bind_imports(const pcps4_pe_image *image,
                                       uint32_t *out_resolved,
                                       uint32_t *out_unresolved);
 
+/*
+ * Convenience: parse + map + bind in one call. `exe`/`exe_size` is the raw
+ * file; `dest`/`dest_size` is the memory the image is mapped into (at
+ * `load_base`, which should equal the real address of `dest` when the image
+ * will be executed there). `resolver` may be NULL to skip binding. On success
+ * `out_image` describes the image and the counts report binding results.
+ */
+pcps4_pe_status pcps4_pe_load(const uint8_t *exe, size_t exe_size,
+                              uint8_t *dest, size_t dest_size,
+                              uint64_t load_base,
+                              const pcps4_pe_resolver *resolver,
+                              pcps4_pe_image *out_image,
+                              uint32_t *out_resolved,
+                              uint32_t *out_unresolved);
+
 /* Human-readable text for a status code (never NULL). */
 const char *pcps4_pe_status_str(pcps4_pe_status status);
 

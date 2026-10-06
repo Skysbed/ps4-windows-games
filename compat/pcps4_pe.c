@@ -640,6 +640,40 @@ pcps4_pe_status pcps4_pe_bind_imports(const pcps4_pe_image *image,
     return PCPS4_PE_OK;
 }
 
+pcps4_pe_status pcps4_pe_load(const uint8_t *exe, size_t exe_size,
+                              uint8_t *dest, size_t dest_size,
+                              uint64_t load_base,
+                              const pcps4_pe_resolver *resolver,
+                              pcps4_pe_image *out_image,
+                              uint32_t *out_resolved,
+                              uint32_t *out_unresolved)
+{
+    pcps4_pe_status rc;
+
+    if (out_resolved) *out_resolved = 0;
+    if (out_unresolved) *out_unresolved = 0;
+
+    if (out_image == NULL)
+        return PCPS4_PE_ERR_NULL;
+
+    rc = pcps4_pe_parse(exe, exe_size, out_image);
+    if (rc != PCPS4_PE_OK)
+        return rc;
+
+    rc = pcps4_pe_map_image(out_image, dest, dest_size, load_base);
+    if (rc != PCPS4_PE_OK)
+        return rc;
+
+    if (resolver != NULL) {
+        rc = pcps4_pe_bind_imports(out_image, dest, dest_size, resolver,
+                                   out_resolved, out_unresolved);
+        if (rc != PCPS4_PE_OK)
+            return rc;
+    }
+
+    return PCPS4_PE_OK;
+}
+
 const char *pcps4_pe_status_str(pcps4_pe_status status)
 {
     switch (status) {

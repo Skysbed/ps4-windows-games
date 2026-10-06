@@ -73,6 +73,8 @@ HRESULT ID3D11InputLayout::apply(
             native_elements[i].semantic_kind = 1u;
         else if (strcmp(elements[i].SemanticName, "COLOR") == 0)
             native_elements[i].semantic_kind = 2u;
+        else if (strcmp(elements[i].SemanticName, "TEXCOORD") == 0)
+            native_elements[i].semantic_kind = 3u;
     }
 
     return pcps4_gpu_context_set_input_layout(

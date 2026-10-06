@@ -1,0 +1,5 @@
+build/
+x64/
+*.elf
+*.oelf
+*.pkg

@@ -136,9 +136,12 @@ pcps4_pe_status pcps4_pe_map_image(const pcps4_pe_image *image,
 #define PCPS4_PE_MAX_RESOLVER_SYMBOLS 512
 
 typedef struct pcps4_pe_symbol {
-    char   dll[32];   /* importing module, matched case-insensitively */
-    char   name[64];  /* function name, matched case-sensitively */
-    void  *fn;        /* handler to bind into the IAT */
+    char     dll[32];   /* importing module, matched case-insensitively */
+    char     name[64];  /* function name, matched case-sensitively */
+    uint16_t ordinal;   /* non-zero when this entry is ordinal-based */
+    uint8_t  by_ordinal;
+    uint8_t  reserved;
+    void    *fn;        /* handler to bind into the IAT */
 } pcps4_pe_symbol;
 
 /*
@@ -163,11 +166,23 @@ pcps4_pe_status pcps4_pe_resolver_register(pcps4_pe_resolver *resolver,
 void *pcps4_pe_resolver_lookup(const pcps4_pe_resolver *resolver,
                                const char *dll, const char *name);
 
+/* Register/lookup a handler for a DLL ordinal import. */
+pcps4_pe_status pcps4_pe_resolver_register_ordinal(
+    pcps4_pe_resolver *resolver,
+    const char *dll,
+    uint16_t ordinal,
+    void *fn);
+
+void *pcps4_pe_resolver_lookup_ordinal(
+    const pcps4_pe_resolver *resolver,
+    const char *dll,
+    uint16_t ordinal);
+
 /*
  * Bind a mapped image's imports. For each imported-by-name symbol, look it up
  * in `resolver` and write the handler pointer into that image's IAT slot; a
- * symbol with no handler (and every import-by-ordinal) is left NULL and
- * counted as unresolved. `mapped` is the buffer produced by
+ * symbol with no handler is left NULL and counted as unresolved; ordinal
+ * imports are resolved through the ordinal registry when present. `mapped` is the buffer produced by
  * pcps4_pe_map_image. Counts are optional (pass NULL to ignore).
  *
  * An unresolved count > 0 is not an error: it is the precise list of APIs the

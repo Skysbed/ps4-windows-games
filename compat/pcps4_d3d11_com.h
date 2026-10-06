@@ -39,6 +39,11 @@ HRESULT pcps4_d3d11_com_create_device_and_swap_chain(
     D3D_FEATURE_LEVEL *pFeatureLevel,
     void **ppImmediateContext);
 
+HRESULT pcps4_d3d11_com_create_swap_chain(
+    void *device,
+    const void *swap_chain_desc,
+    void **swap_chain);
+
 HRESULT pcps4_d3d11_com_create_device(
     void *pAdapter,
     D3D_DRIVER_TYPE DriverType,

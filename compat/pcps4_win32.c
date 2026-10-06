@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200112L
 #include "pcps4_win32.h"
 
 #include <errno.h>
@@ -8,6 +9,10 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <unistd.h>
+
+#ifndef S_OK
+#define S_OK ((HRESULT)0)
+#endif
 
 #define TLS_KEYS 128
 #define TLS_THREADS 64

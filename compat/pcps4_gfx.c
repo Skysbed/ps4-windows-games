@@ -522,7 +522,17 @@ int pcps4_gfx_blit_rgba8_scaled(pcps4_gfx_context_t *context,
         {
             uint32_t sy = (uint32_t)(((uint64_t)(y - off_y) * src_height) /
                                      fit_h);
-            const uint8_t *src_row = rgba + (size_t)sy * src_stride;
+            /*
+             * Defensive clamp: never index a source row at or past
+             * src_height. Rounding at the bottom edge (or a dimension/pitch
+             * mismatch upstream) would otherwise read into the heap just past
+             * the back buffer, which shows up as a band of garbage (reddish
+             * noise) along the bottom of the frame.
+             */
+            const uint8_t *src_row;
+            if (sy >= src_height)
+                sy = src_height - 1u;
+            src_row = rgba + (size_t)sy * src_stride;
 
             for (x = 0; x < off_x; ++x)
                 row[x] = 0x80000000u;

@@ -2,6 +2,7 @@
 #include "pcps4_d3d11.h"
 #include "pcps4_shader.h"
 #include "pcps4_gnm_renderer.h"
+#include "pcps4_status.h"  /* pcps4_status_log -> /data/pcps4_log.txt */
 
 #include <limits.h>
 #include <new>
@@ -313,9 +314,43 @@ HRESULT IDXGISwapChain::Present(UINT SyncInterval, UINT Flags)
         if (pcps4_gpu_texture_cpu_data(back_texture->native, &pixels,
                                        &pitch, &w, &h) != PCPS4_GPU_OK)
             return E_FAIL;
+
+        /*
+         * Present diagnostics -> /data/pcps4_log.txt (first 2 frames only).
+         * This records the real dimensions, pitch and a few source pixels so
+         * the present/scale path can be diagnosed from the log alone, without
+         * a PC attached to capture klog.
+         */
+        if (current_frame < 2) {
+            size_t last = (size_t)(h ? h - 1 : 0) * pitch;
+            size_t mido = (size_t)(h / 2) * pitch + (size_t)(w / 2) * 4u;
+            pcps4_status_log(
+                "[pcps4] present#%llu swap=%ux%u back=%ux%u pitch=%zu "
+                "display=%ux%u",
+                (unsigned long long)current_frame,
+                (unsigned)width, (unsigned)height,
+                (unsigned)w, (unsigned)h, pitch,
+                (unsigned)graphics->width, (unsigned)graphics->height);
+            pcps4_status_log(
+                "[pcps4]   src px: TL=%02x%02x%02x%02x "
+                "C=%02x%02x%02x%02x BL=%02x%02x%02x%02x",
+                pixels[0], pixels[1], pixels[2], pixels[3],
+                pixels[mido + 0], pixels[mido + 1],
+                pixels[mido + 2], pixels[mido + 3],
+                pixels[last + 0], pixels[last + 1],
+                pixels[last + 2], pixels[last + 3]);
+        }
+
         if (pcps4_gfx_blit_rgba8_scaled(graphics, pixels, w, h,
                                         (uint32_t)pitch) != PCPS4_GFX_OK)
             return E_FAIL;
+    } else if (current_frame < 2) {
+        pcps4_status_log(
+            "[pcps4] present#%llu no CPU back buffer (back_texture=%p "
+            "graphics=%p) swap=%ux%u",
+            (unsigned long long)current_frame,
+            (void *)back_texture, (void *)graphics,
+            (unsigned)width, (unsigned)height);
     }
 
     return pcps4_gpu_context_present(

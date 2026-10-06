@@ -965,6 +965,31 @@ static PCPS4_MS_ABI void ctx_DrawIndexed(PCPS4ComContext *self, UINT a, UINT b, 
 { self->impl->DrawIndexed(a,b,c); }
 static PCPS4_MS_ABI void ctx_Draw(PCPS4ComContext *self, UINT a, UINT b)
 { self->impl->Draw(a,b); }
+static PCPS4_MS_ABI void ctx_DrawIndexedInstanced(
+    PCPS4ComContext *self, UINT index_count_per_instance, UINT instance_count,
+    UINT start_index_location, int base_vertex_location, UINT start_instance_location)
+{
+    (void)start_instance_location;
+    if (self == NULL || self->impl == NULL || instance_count == 0)
+        return;
+    /* Preserve draws for shaders that do not consume per-instance inputs. */
+    for (UINT i = 0; i < instance_count; ++i)
+        self->impl->DrawIndexed(index_count_per_instance,
+                                start_index_location,
+                                base_vertex_location);
+}
+
+static PCPS4_MS_ABI void ctx_DrawInstanced(
+    PCPS4ComContext *self, UINT vertex_count_per_instance, UINT instance_count,
+    UINT start_vertex_location, UINT start_instance_location)
+{
+    (void)start_instance_location;
+    if (self == NULL || self->impl == NULL || instance_count == 0)
+        return;
+    for (UINT i = 0; i < instance_count; ++i)
+        self->impl->Draw(vertex_count_per_instance, start_vertex_location);
+}
+
 static PCPS4_MS_ABI HRESULT ctx_Map(
     PCPS4ComContext *self, void *resource, UINT sub, D3D11_MAP map, UINT flags,
     D3D11_MAPPED_SUBRESOURCE *mapped)
@@ -1074,6 +1099,53 @@ static PCPS4_MS_ABI void ctx_ClearDepthStencilView(PCPS4ComContext *self, void *
 { if(dsv) self->impl->ClearDepthStencilView((ID3D11DepthStencilView *)((PCPS4ComResource *)dsv)->impl,flags,depth,stencil); }
 static PCPS4_MS_ABI void ctx_Flush(PCPS4ComContext *self)
 { self->impl->Flush(); }
+
+static PCPS4_MS_ABI HRESULT device_check_format_support(
+    PCPS4ComDevice *self, DXGI_FORMAT format, UINT *support)
+{
+    (void)self;
+    if (support == NULL)
+        return E_INVALIDARG;
+    *support = 0;
+    switch (format) {
+        case DXGI_FORMAT_R8G8B8A8_UNORM:
+        case DXGI_FORMAT_B8G8R8A8_UNORM:
+            *support = 0x20u | 0x100u | 0x200u | 0x4000u | 0x8000u;
+            return S_OK;
+        case DXGI_FORMAT_R32_FLOAT:
+            *support = 0x20u | 0x100u | 0x200u | 0x4000u;
+            return S_OK;
+        case DXGI_FORMAT_R32_UINT:
+        case DXGI_FORMAT_R16_UINT:
+            *support = 0x4u;
+            return S_OK;
+        default:
+            return E_NOTIMPL;
+    }
+}
+
+static PCPS4_MS_ABI HRESULT device_check_multisample_quality_levels(
+    PCPS4ComDevice *self, DXGI_FORMAT format, UINT sample_count, UINT *quality_levels)
+{
+    (void)self;
+    (void)format;
+    if (quality_levels == NULL || sample_count == 0)
+        return E_INVALIDARG;
+    *quality_levels = sample_count == 1 ? 1u : 0u;
+    return S_OK;
+}
+
+static PCPS4_MS_ABI HRESULT device_check_feature_support(
+    PCPS4ComDevice *self, UINT feature, void *data, UINT data_size)
+{
+    (void)self;
+    if (feature == 0u && data != NULL && data_size == 8u) {
+        /* D3D11_FEATURE_THREADING: conservative capability report. */
+        memset(data, 0, 8);
+        return S_OK;
+    }
+    return E_NOTIMPL;
+}
 
 static PCPS4_MS_ABI D3D_FEATURE_LEVEL device_get_feature_level(PCPS4ComDevice *self)
 {
@@ -1199,6 +1271,9 @@ static PCPS4_MS_ABI void init_vtables(void)
     g_device_vtbl[21]=(const void *)device_create_depth_state;
     g_device_vtbl[22]=(const void *)device_create_rasterizer;
     g_device_vtbl[23]=(const void *)device_create_sampler;
+    g_device_vtbl[29]=(const void *)device_check_format_support;
+    g_device_vtbl[30]=(const void *)device_check_multisample_quality_levels;
+    g_device_vtbl[33]=(const void *)device_check_feature_support;
     g_device_vtbl[37]=(const void *)device_get_feature_level;
     g_device_vtbl[38]=(const void *)device_get_creation_flags;
     g_device_vtbl[39]=(const void *)device_get_removed_reason;
@@ -1224,8 +1299,8 @@ static PCPS4_MS_ABI void init_vtables(void)
     g_context_vtbl[17]=(const void *)ctx_IASetInputLayout;
     g_context_vtbl[18]=(const void *)ctx_IASetVertexBuffers;
     g_context_vtbl[19]=(const void *)ctx_IASetIndexBuffer;
-    g_context_vtbl[20]=(const void *)com_noop;
-    g_context_vtbl[21]=(const void *)com_noop;
+    g_context_vtbl[20]=(const void *)ctx_DrawIndexedInstanced;
+    g_context_vtbl[21]=(const void *)ctx_DrawInstanced;
     g_context_vtbl[24]=(const void *)ctx_IASetPrimitiveTopology;
     g_context_vtbl[25]=(const void *)ctx_VSSetShaderResources;
     g_context_vtbl[26]=(const void *)ctx_VSSetSamplers;

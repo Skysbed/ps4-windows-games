@@ -65,6 +65,7 @@ void pcps4_winabi_fill(pcps4_winabi_exports *exports)
         return;
 
 #define WABI(member, fn) exports->member = PCPS4_MSW(fn)
+#define MS_DIRECT(member, fn) exports->member = (const void *)(fn)
 
     WABI(get_current_process_id, pcps4_get_current_process_id);
     WABI(get_current_thread_id, pcps4_get_current_thread_id);
@@ -140,8 +141,8 @@ void pcps4_winabi_fill(pcps4_winabi_exports *exports)
     WABI(strtoul_fn, strtoul);
     WABI(strtoll_fn, strtoll);
     WABI(strtoull_fn, strtoull);
-    WABI(abort_fn, pcps4_winabi_abort);
-    WABI(exit_fn, pcps4_winabi_exit);
+    MS_DIRECT(abort_fn, pcps4_winabi_abort);
+    MS_DIRECT(exit_fn, pcps4_winabi_exit);
     WABI(fopen_fn, pcps4_winabi_fopen);
     WABI(fclose_fn, fclose);
     WABI(fread_fn, fread);
@@ -149,5 +150,6 @@ void pcps4_winabi_fill(pcps4_winabi_exports *exports)
     WABI(fseek_fn, fseek);
     WABI(ftell_fn, ftell);
 
+#undef MS_DIRECT
 #undef WABI
 }

@@ -33,6 +33,33 @@ static void PCPS4_MS_ABI pcps4_winabi_exit(int code)
     exit(code);
 }
 
+static FILE *pcps4_winabi_wfopen(
+    const wchar_t *path, const wchar_t *mode)
+{
+    char utf8_path[1024];
+    char utf8_mode[64];
+    int writing = 0;
+
+    if (pcps4_wide_to_utf8(
+            path, utf8_path, sizeof(utf8_path)) != 0 ||
+        pcps4_wide_to_utf8(
+            mode, utf8_mode, sizeof(utf8_mode)) != 0)
+        return NULL;
+
+    if (strchr(utf8_mode, 'w') != NULL ||
+        strchr(utf8_mode, 'a') != NULL ||
+        strchr(utf8_mode, '+') != NULL)
+        writing = 1;
+
+    {
+        char translated[1024];
+        if (pcps4_sys_translate_path(
+                utf8_path, writing, translated, sizeof(translated)) != 0)
+            return NULL;
+        return fopen(translated, utf8_mode);
+    }
+}
+
 static FILE *pcps4_winabi_fopen(
     const char *path, const char *mode)
 {
@@ -144,6 +171,7 @@ void pcps4_winabi_fill(pcps4_winabi_exports *exports)
     MS_DIRECT(abort_fn, pcps4_winabi_abort);
     MS_DIRECT(exit_fn, pcps4_winabi_exit);
     WABI(fopen_fn, pcps4_winabi_fopen);
+WABI(wfopen_fn, pcps4_winabi_wfopen);
     WABI(fclose_fn, fclose);
     WABI(fread_fn, fread);
     WABI(fwrite_fn, fwrite);

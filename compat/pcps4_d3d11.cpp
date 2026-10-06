@@ -565,6 +565,25 @@ void ID3D11DeviceContext::RSSetState(
         pRasterizerState != NULL ? pRasterizerState->desc.CullMode : 0u);
 }
 
+void ID3D11DeviceContext::RSSetViewports(
+    UINT NumViewports,
+    const D3D11_VIEWPORT *pViewports)
+{
+    if (native == NULL || pViewports == NULL || NumViewports == 0)
+        return;
+
+    const D3D11_VIEWPORT &vp = pViewports[0];
+
+    (void)pcps4_gpu_context_set_viewport(
+        native,
+        vp.TopLeftX,
+        vp.TopLeftY,
+        vp.Width,
+        vp.Height,
+        vp.MinDepth,
+        vp.MaxDepth);
+}
+
 void ID3D11DeviceContext::OMSetBlendState(
     ID3D11BlendState *pBlendState,
     const float BlendFactor[4],

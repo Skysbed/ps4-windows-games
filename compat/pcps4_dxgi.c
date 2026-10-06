@@ -29,6 +29,10 @@ static const PCPS4Guid IID_IDXGIFactory1 = {
 static const PCPS4Guid IID_IDXGIAdapter = {
     0x2411e7e1u,0x12acu,0x4ccfu,{0xbd,0x14,0x97,0x98,0xe8,0x53,0x4d,0xc0}
 };
+static const PCPS4Guid IID_IDXGIDevice = {
+    0x54ec77fau,0x1377u,0x44e6u,{0x8c,0x32,0x88,0xfd,0x5f,0x44,0xc8,0x4c}
+};
+
 static const PCPS4Guid IID_IDXGIAdapter1 = {
     0x29038f61u,0x3839u,0x4626u,{0x91,0xfd,0x08,0x68,0x79,0x01,0x1a,0x05}
 };
@@ -189,6 +193,119 @@ static PCPS4_MS_ABI HRESULT factory_enum_adapters1(PCPS4DxgiFactory*s,UINT index
     return factory_enum_adapters(s,index,out);
 }
 static PCPS4_MS_ABI BOOL factory_is_current(PCPS4DxgiFactory*s){(void)s;return TRUE;}
+
+
+typedef struct PCPS4DxgiDevice {
+    const void **vtbl;
+    uint32_t refs;
+    PCPS4DxgiFactory *factory;
+} PCPS4DxgiDevice;
+
+#define DEVICE_SLOTS 12
+static const void *g_device_vtbl[DEVICE_SLOTS];
+
+static PCPS4_MS_ABI UINT dxgi_device_addref(PCPS4DxgiDevice *s)
+{
+    return ++s->refs;
+}
+static PCPS4_MS_ABI UINT dxgi_device_release(PCPS4DxgiDevice *s)
+{
+    if (!s || s->refs == 0) return 0;
+    if (--s->refs) return s->refs;
+    if (s->factory) {
+        PCPS4DxgiFactory *f=s->factory;
+        s->factory=NULL;
+        factory_release(f);
+    }
+    free(s);
+    return 0;
+}
+static PCPS4_MS_ABI HRESULT dxgi_device_query(
+    PCPS4DxgiDevice *s,const void *riid,void **out)
+{
+    if(!s||!out)return PCPS4_DXGI_ERROR_INVALID_CALL;
+    *out=NULL;
+    if(guid_eq(riid,&IID_IUnknown)||guid_eq(riid,&IID_IDXGIDevice)){
+        ++s->refs;*out=s;return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+static PCPS4_MS_ABI HRESULT dxgi_device_private(PCPS4DxgiDevice*s,const void*a,UINT b,const void*c)
+{(void)s;(void)a;(void)b;(void)c;return E_NOTIMPL;}
+static PCPS4_MS_ABI HRESULT dxgi_device_private_i(PCPS4DxgiDevice*s,const void*a,const void*b)
+{(void)s;(void)a;(void)b;return E_NOTIMPL;}
+static PCPS4_MS_ABI HRESULT dxgi_device_get_private(PCPS4DxgiDevice*s,const void*a,UINT*b,void*c)
+{(void)s;(void)a;(void)b;(void)c;return E_NOTIMPL;}
+static PCPS4_MS_ABI HRESULT dxgi_device_get_parent(PCPS4DxgiDevice*s,const void*riid,void**out)
+{
+    if(!s||!out)return PCPS4_DXGI_ERROR_INVALID_CALL;
+    *out=NULL;
+    return s->factory ? factory_query(s->factory,riid,out) : E_NOINTERFACE;
+}
+static PCPS4_MS_ABI HRESULT dxgi_device_get_adapter(
+    PCPS4DxgiDevice*s,void**out)
+{
+    if(!s||!out)return PCPS4_DXGI_ERROR_INVALID_CALL;
+    *out=NULL;
+    if(!s->factory||!s->factory->adapter)return E_FAIL;
+    ++s->factory->adapter->refs;
+    *out=s->factory->adapter;
+    return S_OK;
+}
+static PCPS4_MS_ABI HRESULT dxgi_device_create_surface(
+    PCPS4DxgiDevice*s,const void*desc,UINT count,UINT usage,const void*shared,void**surface)
+{
+    (void)s;(void)desc;(void)count;(void)usage;(void)shared;
+    if(surface)*surface=NULL;
+    return PCPS4_DXGI_ERROR_UNSUPPORTED;
+}
+static PCPS4_MS_ABI HRESULT dxgi_device_query_residency(
+    PCPS4DxgiDevice*s,const void*resources,void*residency,UINT count)
+{
+    (void)s;(void)resources;
+    if(!residency)return PCPS4_DXGI_ERROR_INVALID_CALL;
+    memset(residency,1,count*4u);
+    return S_OK;
+}
+static PCPS4_MS_ABI HRESULT dxgi_device_set_priority(PCPS4DxgiDevice*s,int priority)
+{(void)s;(void)priority;return S_OK;}
+static PCPS4_MS_ABI HRESULT dxgi_device_get_priority(PCPS4DxgiDevice*s,int*priority)
+{(void)s;if(!priority)return PCPS4_DXGI_ERROR_INVALID_CALL;*priority=0;return S_OK;}
+
+PCPS4_MS_ABI HRESULT pcps4_dxgi_create_device(const void *riid, void **out)
+{
+    if(!out)return PCPS4_DXGI_ERROR_INVALID_CALL;
+    *out=NULL;
+    if(!guid_eq(riid,&IID_IUnknown)&&!guid_eq(riid,&IID_IDXGIDevice))
+        return E_NOINTERFACE;
+    init_vtbls();
+    for(int i=0;i<DEVICE_SLOTS;++i)g_device_vtbl[i]=(const void*)dxgi_device_get_private;
+    g_device_vtbl[0]=(const void*)dxgi_device_query;
+    g_device_vtbl[1]=(const void*)dxgi_device_addref;
+    g_device_vtbl[2]=(const void*)dxgi_device_release;
+    g_device_vtbl[3]=(const void*)dxgi_device_private;
+    g_device_vtbl[4]=(const void*)dxgi_device_private_i;
+    g_device_vtbl[5]=(const void*)dxgi_device_get_private;
+    g_device_vtbl[6]=(const void*)dxgi_device_get_parent;
+    g_device_vtbl[7]=(const void*)dxgi_device_get_adapter;
+    g_device_vtbl[8]=(const void*)dxgi_device_create_surface;
+    g_device_vtbl[9]=(const void*)dxgi_device_query_residency;
+    g_device_vtbl[10]=(const void*)dxgi_device_set_priority;
+    g_device_vtbl[11]=(const void*)dxgi_device_get_priority;
+
+    /*
+     * A standalone DXGI device gets the same one-adapter factory. This keeps
+     * the object graph coherent for enumeration and adapter queries.
+     */
+    void *factory_ptr=NULL;
+    HRESULT hr=create_factory(&IID_IDXGIFactory1,&factory_ptr);
+    if(hr!=S_OK)return hr;
+    PCPS4DxgiDevice*d=calloc(1,sizeof(*d));
+    if(!d){factory_release((PCPS4DxgiFactory*)factory_ptr);return E_OUTOFMEMORY;}
+    d->vtbl=g_device_vtbl;d->refs=1;d->factory=(PCPS4DxgiFactory*)factory_ptr;
+    *out=d;
+    return S_OK;
+}
 
 static void init_vtbls(void)
 {

@@ -194,8 +194,11 @@ static int check_win32_file_api(void)
         return 5;
     }
 
-    if (!CloseHandle(handle) || !DeleteFileA(path_a))
+    if (GetFileAttributesA(path_a) == INVALID_FILE_ATTRIBUTES)
         return 6;
+
+    if (!CloseHandle(handle) || !DeleteFileA(path_a))
+        return 7;
 
     handle_w = CreateFileW(
         path_w,

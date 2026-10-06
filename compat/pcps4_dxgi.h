@@ -7,6 +7,10 @@
 #define PCPS4_MS_ABI __attribute__((ms_abi))
 #else
 #define PCPS4_MS_ABI
+#ifdef __cplusplus
+}
+#endif
+
 #endif
 
 #ifndef S_OK
@@ -63,6 +67,10 @@ typedef struct PCPS4_DXGI_SWAP_CHAIN_DESC {
 #define PCPS4_DXGI_ERROR_INVALID_CALL ((HRESULT)0x887A0001L)
 #define PCPS4_DXGI_ERROR_NOT_FOUND    ((HRESULT)0x887A0002L)
 #define PCPS4_DXGI_ERROR_UNSUPPORTED  ((HRESULT)0x887A0004L)
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 PCPS4_MS_ABI HRESULT pcps4_dxgi_create_device(
     const void *riid,

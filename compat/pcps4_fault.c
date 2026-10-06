@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "pcps4_fault.h"
+#include "pcps4_version.h"
 
 #include <fcntl.h>
 #include <signal.h>
@@ -9,8 +10,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-#define PCPS4_CRASH_PATH "/data/pcps4_crash.txt"
-#define PCPS4_TRACE_PATH "/data/pcps4_trace.txt"
+
 
 static volatile sig_atomic_t pcps4_fault_seen = 0;
 

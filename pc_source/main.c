@@ -35,15 +35,24 @@ int main(void)
     /* Test 1: translated Win32 runtime calls. */
     pcps4_status_step("Win32 runtime (translated source)");
     start = GetTickCount64();
-    InterlockedIncrement(&demo_value);
+    LONG increment_result = InterlockedIncrement(&demo_value);
     Sleep(10);
     memset(buffer, 0, sizeof(buffer));
     pcps4_runtime_demo(buffer, sizeof(buffer));
-    printf("Elapsed: %u ms, PID: %u, Value: %d, Buffer: %s\n",
-           (unsigned)(GetTickCount64() - start), GetCurrentProcessId(),
-           (int)demo_value, buffer);
-    pcps4_status_report("Win32 runtime (translated source)",
-                        demo_value == 1 && buffer[0] != '\0');
+
+    int runtime_ok =
+        increment_result == 1 &&
+        demo_value == 1 &&
+        strcmp(buffer, "hello from PC source") == 0;
+
+    pcps4_status_log(
+        "[pcps4] Win32 checks: increment=%d value=%d elapsed=%u buffer=\"%s\"",
+        (int)increment_result,
+        (int)demo_value,
+        (unsigned)(GetTickCount64() - start),
+        buffer);
+
+    pcps4_status_report("Win32 runtime (translated source)", runtime_ok);
 
     /* Test 2: load and execute a real (tiny) PE binary in executable memory. */
     pcps4_status_step("PE load + execute");
@@ -55,7 +64,11 @@ int main(void)
     pcps4_status_report("GNM graphics smoke", pcps4_gnm_smoke_run() == 0);
 
     pcps4_status_step("D3D11 -> GNM smoke");
-    pcps4_status_report("D3D11 -> GNM smoke", pcps4_d3d11_smoke_test() == 0);
+    int d3d11_rc = pcps4_d3d11_smoke_test();
+    pcps4_status_log(
+        "[pcps4] D3D11 -> GNM smoke return code=%d",
+        d3d11_rc);
+    pcps4_status_report("D3D11 -> GNM smoke", d3d11_rc == 0);
 #endif
 
 #if PCPS4_RUN_GAME

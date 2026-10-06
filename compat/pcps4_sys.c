@@ -691,6 +691,14 @@ int pcps4_sys_mutex_release(pcps4_os_handle_t *handle)
     return scePthreadMutexUnlock(&handle->value.mutex);
 }
 
+int pcps4_sys_mutex_trylock(pcps4_os_handle_t *handle)
+{
+    if (!valid_handle(handle) || handle->kind != PCPS4_HANDLE_MUTEX)
+        return -1;
+
+    return scePthreadMutexTrylock(&handle->value.mutex);
+}
+
 typedef struct {
     pcps4_sys_thread_fn function;
     void *argument;

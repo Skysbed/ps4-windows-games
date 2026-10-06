@@ -82,6 +82,27 @@ HRESULT hr = D3D11CreateDeviceAndSwapChain(
         self.assertIn('#include "pcps4_d3d11.h"', translated)
         self.assertEqual(report["blockers"], [])
 
+    def test_xinput_surface(self):
+        source = """
+#include <windows.h>
+#include <xinput.h>
+XINPUT_STATE state;
+DWORD rc = XInputGetState(0, &state);
+XInputEnable(TRUE);
+XINPUT_VIBRATION vibration = {0, 0};
+XInputSetState(0, &vibration);
+XINPUT_CAPABILITIES caps;
+XInputGetCapabilities(0, 0, &caps);
+"""
+        translated, report, status = translate(source, strict=True)
+        self.assertEqual(status, 0)
+        self.assertIn('#include "pcps4_xinput.h"', translated)
+        self.assertIn('pcps4_XInputGetState', translated)
+        self.assertIn('pcps4_XInputSetState', translated)
+        self.assertIn('pcps4_XInputGetCapabilities', translated)
+        self.assertIn('pcps4_XInputEnable', translated)
+        self.assertEqual(report["blockers"], [])
+
     def test_unsupported_api_is_reported(self):
         source = """
 #include <d3d12.h>

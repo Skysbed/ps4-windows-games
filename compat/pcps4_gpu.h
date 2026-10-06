@@ -37,6 +37,15 @@ enum {
 };
 
 enum {
+    PCPS4_GPU_TOPOLOGY_UNDEFINED = 0,
+    PCPS4_GPU_TOPOLOGY_POINTLIST = 1,
+    PCPS4_GPU_TOPOLOGY_LINELIST = 2,
+    PCPS4_GPU_TOPOLOGY_LINESTRIP = 3,
+    PCPS4_GPU_TOPOLOGY_TRIANGLELIST = 4,
+    PCPS4_GPU_TOPOLOGY_TRIANGLESTRIP = 5
+};
+
+enum {
     PCPS4_GPU_SHADER_VERTEX = 1,
     PCPS4_GPU_SHADER_PIXEL = 2
 };
@@ -80,6 +89,7 @@ typedef struct {
     uint32_t aligned_byte_offset;
     uint32_t format;
     uint32_t semantic_index;
+    uint32_t semantic_kind; /* 1 = POSITION, 2 = COLOR */
 } pcps4_gpu_vertex_element_t;
 
 pcps4_gpu_device_t *pcps4_gpu_device_create(void);
@@ -101,6 +111,9 @@ int pcps4_gpu_context_get_input_layout(
     const pcps4_gpu_context_t *context,
     const pcps4_gpu_vertex_element_t **elements,
     uint32_t *count);
+int pcps4_gpu_context_set_primitive_topology(
+    pcps4_gpu_context_t *context,
+    uint32_t topology);
 
 pcps4_gpu_buffer_t *pcps4_gpu_buffer_create(
     pcps4_gpu_device_t *device,

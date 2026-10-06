@@ -305,6 +305,11 @@ static int module_name_normalize(
         return -1;
 
     base = strrchr(input, '/');
+    {
+        const char *slash = strrchr(input, 92);
+        if (slash != NULL && (base == NULL || slash > base))
+            base = slash;
+    }
     base = base != NULL ? base + 1 : input;
 
     length = strlen(base);

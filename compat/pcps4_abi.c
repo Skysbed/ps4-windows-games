@@ -77,7 +77,7 @@ WRAP(VirtualFree, BOOL,
      (void *a, SIZE_T s, DWORD t), pcps4_VirtualFree, (a, s, t))
 
 WRAP(WSAStartup, int, (WORD v, WSADATA *d), pcps4_WSAStartup, (v, d))
-WRAP_VOID(WSACleanup, (void), pcps4_WSACleanup, ())
+WRAP(WSACleanup, int, (void), pcps4_WSACleanup, ())
 WRAP(WSAGetLastError, int, (void), pcps4_WSAGetLastError, ())
 WRAP(socket, int, (int a, int b, int c), pcps4_socket, (a, b, c))
 WRAP(connect, int, (int s, const struct sockaddr *a, socklen_t l), pcps4_connect, (s, a, l))

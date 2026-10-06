@@ -49,6 +49,11 @@ static int module_name_normalize(
         return -1;
 
     base = strrchr(input, '/');
+    {
+        const char *backslash = strrchr(input, 92);
+        if (backslash != NULL && (base == NULL || backslash > base))
+            base = backslash;
+    }
     base = base != NULL ? base + 1 : input;
 
     length = strlen(base);

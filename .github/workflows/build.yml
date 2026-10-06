@@ -37,7 +37,7 @@ jobs:
 
           cd "$GITHUB_WORKSPACE/external/ps4-graphics/opengnm"
           cp config.orbis.mak config.mak
-          make -j2
+          make CC=clang AR=llvm-ar -j2
 
           cd "$GITHUB_WORKSPACE/external/ps4-graphics/dxbc-spirv"
           meson setup builddir -Denable_tools=true

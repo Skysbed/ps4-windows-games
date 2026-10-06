@@ -57,6 +57,11 @@ PACKAGE_EBOOT := $(PACKAGE_ROOT)/eboot.bin
 GP4 := $(PACKAGE_ROOT)/$(CONTENT_ID).gp4
 PKG := $(PACKAGE_ROOT)/$(CONTENT_ID).pkg
 
+PACKAGE_FILES := eboot.bin sce_sys/param.sfo
+ifeq ($(PCPS4_ENABLE_OPENGNM),1)
+PACKAGE_FILES += assets/shaders/tri.vert.sb assets/shaders/tri.frag.sb
+endif
+
 CREATE_FSELF := $(TOOLCHAIN)/bin/linux/create-fself
 CREATE_GP4 := $(TOOLCHAIN)/bin/linux/create-gp4
 PKGTOOL := $(TOOLCHAIN)/bin/linux/PkgTool.Core

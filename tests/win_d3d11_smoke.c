@@ -31,6 +31,27 @@ void WINAPI WinMainCRTStartup(void)
     g_swap_desc.Windowed = TRUE;
     g_swap_desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 
+    /*
+     * First exercise the runtime PE-DLL path. This keeps the hardware test
+     * single-install: LoadLibrary/GetProcAddress must map a real adjacent
+     * Windows DLL before D3D11 presentation is attempted.
+     */
+    {
+        HMODULE probe_module = LoadLibraryA("winprobe.dll");
+        int (*probe_fn)(void);
+
+        if (!probe_module)
+            ExitProcess(5);
+
+        probe_fn = (int (*)(void))GetProcAddress(
+            probe_module, "GameProbe");
+
+        if (!probe_fn || probe_fn() != 0xBEEF)
+            ExitProcess(6);
+
+        FreeLibrary(probe_module);
+    }
+
     hr = D3D11CreateDeviceAndSwapChain(
         0,
         D3D_DRIVER_TYPE_HARDWARE,

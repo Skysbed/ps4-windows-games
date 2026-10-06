@@ -21,16 +21,16 @@ typedef struct pcps4_module_handle {
 
 static pcps4_pe_resolver *g_resolver = NULL;
 
-static void win_SetLastError(DWORD value);
-static HMODULE win_LoadLibraryA(LPCSTR name);
-static HMODULE win_LoadLibraryW(LPCWSTR name);
-static HMODULE win_GetModuleHandleA(LPCSTR name);
-static HMODULE win_GetModuleHandleW(LPCWSTR name);
-static DWORD win_GetEnvironmentVariableA(
+static PCPS4_MS_ABI void win_SetLastError(DWORD value);
+static PCPS4_MS_ABI HMODULE win_LoadLibraryA(LPCSTR name);
+static PCPS4_MS_ABI HMODULE win_LoadLibraryW(LPCWSTR name);
+static PCPS4_MS_ABI HMODULE win_GetModuleHandleA(LPCSTR name);
+static PCPS4_MS_ABI HMODULE win_GetModuleHandleW(LPCWSTR name);
+static PCPS4_MS_ABI DWORD win_GetEnvironmentVariableA(
     LPCSTR name,
     LPSTR buffer,
     DWORD size);
-static DWORD win_GetEnvironmentVariableW(
+static PCPS4_MS_ABI DWORD win_GetEnvironmentVariableW(
     LPCWSTR name,
     LPWSTR buffer,
     DWORD size);
@@ -74,7 +74,7 @@ static int module_name_normalize(
     return 0;
 }
 
-static HMODULE win_LoadLibraryW(LPCWSTR name)
+static PCPS4_MS_ABI HMODULE win_LoadLibraryW(LPCWSTR name)
 {
     char utf8[1024];
 
@@ -86,12 +86,12 @@ static HMODULE win_LoadLibraryW(LPCWSTR name)
     return win_LoadLibraryA(utf8);
 }
 
-static HMODULE win_GetModuleHandleW(LPCWSTR name)
+static PCPS4_MS_ABI HMODULE win_GetModuleHandleW(LPCWSTR name)
 {
     return win_LoadLibraryW(name);
 }
 
-static HMODULE win_LoadLibraryA(LPCSTR name)
+static PCPS4_MS_ABI HMODULE win_LoadLibraryA(LPCSTR name)
 {
     pcps4_module_handle *module;
     char normalized[128];
@@ -112,12 +112,12 @@ static HMODULE win_LoadLibraryA(LPCSTR name)
     return (HMODULE)module;
 }
 
-static HMODULE win_GetModuleHandleA(LPCSTR name)
+static PCPS4_MS_ABI HMODULE win_GetModuleHandleA(LPCSTR name)
 {
     return win_LoadLibraryA(name);
 }
 
-static FARPROC win_GetProcAddress(
+static PCPS4_MS_ABI FARPROC win_GetProcAddress(
     HMODULE module,
     LPCSTR name)
 {
@@ -147,7 +147,7 @@ static FARPROC win_GetProcAddress(
     return (FARPROC)fn;
 }
 
-static DWORD win_GetEnvironmentVariableW(
+static PCPS4_MS_ABI DWORD win_GetEnvironmentVariableW(
     LPCWSTR name,
     LPWSTR buffer,
     DWORD size)
@@ -181,7 +181,7 @@ static DWORD win_GetEnvironmentVariableW(
     return result;
 }
 
-static BOOL win_FreeLibrary(HMODULE module)
+static PCPS4_MS_ABI BOOL win_FreeLibrary(HMODULE module)
 {
     pcps4_module_handle *handle = (pcps4_module_handle *)module;
 
@@ -194,32 +194,32 @@ static BOOL win_FreeLibrary(HMODULE module)
 }
 
 
-static DWORD win_GetLastError(void)
+static PCPS4_MS_ABI DWORD win_GetLastError(void)
 {
     return g_last_error;
 }
 
-static void win_SetLastError(DWORD value)
+static PCPS4_MS_ABI void win_SetLastError(DWORD value)
 {
     g_last_error = value;
 }
 
-static HANDLE win_GetCurrentProcess(void)
+static PCPS4_MS_ABI HANDLE win_GetCurrentProcess(void)
 {
     return (HANDLE)(intptr_t)1;
 }
 
-static HANDLE win_GetCurrentThread(void)
+static PCPS4_MS_ABI HANDLE win_GetCurrentThread(void)
 {
     return (HANDLE)(intptr_t)1;
 }
 
-static void win_ExitProcess(UINT code)
+static PCPS4_MS_ABI void win_ExitProcess(UINT code)
 {
     exit((int)code);
 }
 
-static DWORD win_GetEnvironmentVariableA(
+static PCPS4_MS_ABI DWORD win_GetEnvironmentVariableA(
     LPCSTR name,
     LPSTR buffer,
     DWORD size)
@@ -257,13 +257,13 @@ static DWORD win_GetEnvironmentVariableA(
     return (DWORD)length;
 }
 
-static LPSTR win_GetCommandLineA(void)
+static PCPS4_MS_ABI LPSTR win_GetCommandLineA(void)
 {
     static char command_line[] = "game.exe";
     return command_line;
 }
 
-static DWORD win_GetModuleFileNameA(
+static PCPS4_MS_ABI DWORD win_GetModuleFileNameA(
     HANDLE module,
     LPSTR filename,
     DWORD size)
@@ -290,7 +290,7 @@ static DWORD win_GetModuleFileNameA(
     return (DWORD)length;
 }
 
-static BOOL win_QueryPerformanceCounter(int64_t *counter)
+static PCPS4_MS_ABI BOOL win_QueryPerformanceCounter(int64_t *counter)
 {
     struct timespec now;
 
@@ -305,7 +305,7 @@ static BOOL win_QueryPerformanceCounter(int64_t *counter)
     return TRUE;
 }
 
-static BOOL win_QueryPerformanceFrequency(int64_t *frequency)
+static PCPS4_MS_ABI BOOL win_QueryPerformanceFrequency(int64_t *frequency)
 {
     if (frequency == NULL)
         return FALSE;
@@ -314,19 +314,19 @@ static BOOL win_QueryPerformanceFrequency(int64_t *frequency)
     return TRUE;
 }
 
-static HANDLE win_GetProcessHeap(void)
+static PCPS4_MS_ABI HANDLE win_GetProcessHeap(void)
 {
     return (HANDLE)(intptr_t)1;
 }
 
-static LPVOID win_HeapAlloc(HANDLE heap, DWORD flags, SIZE_T size)
+static PCPS4_MS_ABI LPVOID win_HeapAlloc(HANDLE heap, DWORD flags, SIZE_T size)
 {
     (void)heap;
     (void)flags;
     return malloc(size);
 }
 
-static LPVOID win_HeapReAlloc(
+static PCPS4_MS_ABI LPVOID win_HeapReAlloc(
     HANDLE heap,
     DWORD flags,
     LPVOID memory,
@@ -337,7 +337,7 @@ static LPVOID win_HeapReAlloc(
     return realloc(memory, size);
 }
 
-static BOOL win_HeapFree(HANDLE heap, DWORD flags, LPVOID memory)
+static PCPS4_MS_ABI BOOL win_HeapFree(HANDLE heap, DWORD flags, LPVOID memory)
 {
     (void)heap;
     (void)flags;
@@ -345,7 +345,7 @@ static BOOL win_HeapFree(HANDLE heap, DWORD flags, LPVOID memory)
     return TRUE;
 }
 
-static void win_RtlMoveMemory(PVOID dst, const void *src, SIZE_T length)
+static PCPS4_MS_ABI void win_RtlMoveMemory(PVOID dst, const void *src, SIZE_T length)
 {
     memmove(dst, src, length);
 }
@@ -361,7 +361,7 @@ static void register_kernel32(
     KREG("GetCurrentThread", win_GetCurrentThread);
     KREG("GetCurrentProcessId", pcps4_abi_GetCurrentProcessId);
     KREG("GetCurrentThreadId", pcps4_abi_GetCurrentThreadId);
-    KREG("GetTickCount", pcps4_abi_GetTickCount64);
+    KREG("GetTickCount", pcps4_abi_GetTickCount);
     KREG("GetTickCount64", pcps4_abi_GetTickCount64);
     KREG("Sleep", pcps4_abi_Sleep);
     KREG("InterlockedIncrement", pcps4_abi_InterlockedIncrement);

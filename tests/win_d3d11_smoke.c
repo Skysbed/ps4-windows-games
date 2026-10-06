@@ -59,11 +59,15 @@ void WINAPI WinMainCRTStartup(void)
      */
     {
         IDXGIFactory1 *factory = 0;
+        static const GUID pcps4_iid_idxgifactory1 = {
+            0x770aae78, 0xf26f, 0x4dba,
+            {0xa8, 0x29, 0x25, 0x3c, 0x83, 0xd1, 0xb3, 0x87}
+        };
         IDXGIAdapter1 *adapter = 0;
         DXGI_ADAPTER_DESC1 adapter_desc;
 
         hr = CreateDXGIFactory1(
-            &IID_IDXGIFactory1,
+            &pcps4_iid_idxgifactory1,
             (void **)&factory);
         if (FAILED(hr) || !factory)
             ExitProcess(7);

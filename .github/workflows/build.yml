@@ -29,6 +29,9 @@ jobs:
       - name: Test translation layer
         run: make test
 
+      - name: Test PE loader (host)
+        run: make test-host
+
       - name: Verify OpenOrbis installation and packaging tools
         run: |
           test -f "$OO_PS4_TOOLCHAIN/link.x"

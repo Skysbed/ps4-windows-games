@@ -50,6 +50,7 @@ GNM_OBJ   := $(INTDIR)/pcps4_gnm.o
 GPU_OBJ   := $(INTDIR)/pcps4_gpu.o
 D3D11_OBJ := $(INTDIR)/pcps4_d3d11.o
 SHADER_OBJ := $(INTDIR)/pcps4_shader.o
+PE_OBJ    := $(INTDIR)/pcps4_pe.o
 
 ELF := $(INTDIR)/$(PROJECT).elf
 OELF := $(INTDIR)/$(PROJECT).oelf
@@ -77,7 +78,12 @@ LDFLAGS := -m elf_x86_64 -pie \
            $(if $(filter 1,$(PCPS4_ENABLE_OPENGNM)),-L$(PCPS4_OPENGNM_DIR) -lopengnm,) \
            $(TOOLCHAIN)/lib/crt1.o
 
-.PHONY: all pkg eboot translate test clean info
+.PHONY: all pkg eboot translate test test-host clean info
+
+# Host-compiled unit tests (run on the CI host, not the PS4 target).
+HOST_CC    ?= clang
+HOST_CFLAGS := -std=c11 -Wall -Wextra -Werror -O2
+PE_HOST_TEST := $(INTDIR)/pe_host_test
 
 all: pkg
 
@@ -132,13 +138,17 @@ $(SHADER_OBJ): compat/pcps4_shader.c compat/pcps4_shader.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
 
+$(PE_OBJ): compat/pcps4_pe.c compat/pcps4_pe.h
+	@mkdir -p "$(dir $@)"
+	$(CC) $(CFLAGS) -o "$@" "$<"
+
 $(INTDIR):
 	@mkdir -p "$(INTDIR)"
 
-$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ)
+$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(PE_OBJ)
 	@test -n "$(OBJS)" || (echo "ERROR: no PC source files found in pc_source/."; exit 1)
 	$(LD) $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) \
-	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(GNM_RENDERER_OBJ) -o "$@" $(LDFLAGS)
+	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(GNM_RENDERER_OBJ) $(PE_OBJ) -o "$@" $(LDFLAGS)
 
 eboot.bin: $(ELF)
 	@test -n "$(OO_PS4_TOOLCHAIN)" || (echo "ERROR: OO_PS4_TOOLCHAIN is not set."; exit 1)
@@ -184,6 +194,12 @@ pkg: $(PKG)
 
 test:
 	$(PYTHON) -m unittest discover -s tests -v
+
+test-host: $(PE_HOST_TEST)
+	"$(PE_HOST_TEST)"
+
+$(PE_HOST_TEST): compat/pcps4_pe.c compat/pcps4_pe.h tests/pe_host_test.c | $(INTDIR)
+	$(HOST_CC) $(HOST_CFLAGS) -o "$@" compat/pcps4_pe.c tests/pe_host_test.c
 
 info:
 	@test -n "$(OO_PS4_TOOLCHAIN)" || (echo "ERROR: OO_PS4_TOOLCHAIN is not set."; exit 1)

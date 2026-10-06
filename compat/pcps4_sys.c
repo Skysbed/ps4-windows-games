@@ -322,6 +322,43 @@ int pcps4_sys_translate_path(
         cursor = end + 1;
     }
 
+    /*
+     * Native Windows programs use one current working directory for both
+     * reads and writes. PcPs4 keeps writable data under /data/pcps4 while
+     * packaged assets live under /app0/game, so for a relative read prefer
+     * a file that the game previously created in its writable data root.
+     * Fall back to the packaged game tree when it does not exist there.
+     */
+    if (!writing &&
+        native_game_root &&
+        !drive_path &&
+        !pcps4_path_is_absolute_unix(path)) {
+        char candidate[1024];
+        size_t candidate_len = strlen("/data/pcps4");
+
+        if (candidate_len + 1 < sizeof(candidate)) {
+            memcpy(candidate, "/data/pcps4", candidate_len);
+            n = candidate_len;
+
+            for (i = 0; i < segment_count; ++i) {
+                size_t len = strlen(segments[i]);
+                if (n + 1 + len >= sizeof(candidate)) {
+                    n = 0;
+                    break;
+                }
+                candidate[n++] = '/';
+                memcpy(candidate + n, segments[i], len);
+                n += len;
+            }
+
+            if (n != 0) {
+                candidate[n] = '\0';
+                if (stat(candidate, &(struct stat){0}) == 0)
+                    root = "/data/pcps4";
+            }
+        }
+    }
+
     n = 0;
     if (root[0] != '\0') {
         size_t root_len = strlen(root);

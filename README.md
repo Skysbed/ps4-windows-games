@@ -118,7 +118,7 @@ the existing startup tests:
 
 Set `PCPS4_RUN_GAME=0` to return to the old status-screen-only behaviour.
 
-## Open work
+## Current v3 diagnostic scope\n\nThe v3 Windows PE probe exercises LoadLibrary/GetProcAddress on a bundled DLL, DXGI adapter discovery, D3D11 swap-chain creation, vertex-buffer and input-layout setup, triangle-list Draw through the currently implemented CPU geometry backend, repeated Present calls, graphics cleanup, and return to the status screen. Its CPU draw path does not yet execute arbitrary DXBC shaders.\n\n## Open work
 
 - **Graphics:** the CPU backend currently covers a deliberately small D3D11
   subset: POSITION/COLOR float vertex layouts, triangle-list `Draw`, and

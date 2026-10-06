@@ -694,14 +694,20 @@ int pcps4_sys_mutex_release(pcps4_os_handle_t *handle)
 typedef struct {
     pcps4_sys_thread_fn function;
     void *argument;
+    uint32_t thread_id;
 } pcps4_thread_start_t;
 
 static void *thread_bootstrap(void *opaque)
 {
     pcps4_thread_start_t *start = (pcps4_thread_start_t *)opaque;
-    uint32_t exit_code = start->function(start->argument);
+    pcps4_sys_thread_fn function = start->function;
+    void *argument = start->argument;
+    uint32_t thread_id = start->thread_id;
+    uint32_t exit_code;
 
+    current_thread_id = thread_id;
     free(start);
+    exit_code = function(argument);
     return (void *)(uintptr_t)exit_code;
 }
 
@@ -733,6 +739,10 @@ pcps4_os_handle_t *pcps4_sys_thread_create(size_t stack_size,
 
     start->function = function;
     start->argument = argument;
+    start->thread_id = __atomic_fetch_add(
+        &next_thread_id, 1u, __ATOMIC_SEQ_CST);
+    if (thread_id != NULL)
+        *thread_id = start->thread_id;
 
     if (stack_size != 0) {
         rc = scePthreadAttrInit(&attr);
@@ -768,11 +778,6 @@ pcps4_os_handle_t *pcps4_sys_thread_create(size_t stack_size,
         free(start);
         free(handle);
         return NULL;
-    }
-
-    if (thread_id != NULL) {
-        *thread_id =
-            __atomic_fetch_add(&next_thread_id, 1, __ATOMIC_SEQ_CST);
     }
 
     return handle;

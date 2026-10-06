@@ -33,7 +33,8 @@ typedef enum pcps4_loader_status {
     PCPS4_LOADER_ERR_LOAD = -2,      /* parse/map/bind failed */
     PCPS4_LOADER_ERR_PROTECT = -3,   /* could not make memory executable */
     PCPS4_LOADER_ERR_UNRESOLVED = -4,/* binary needs APIs we don't provide */
-    PCPS4_LOADER_ERR_NULL = -5
+    PCPS4_LOADER_ERR_NULL = -5,
+    PCPS4_LOADER_ERR_PROCESS_EXIT = -6
 } pcps4_loader_status;
 
 /*

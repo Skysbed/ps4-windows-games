@@ -40,6 +40,15 @@ static void smoke_fail(UINT stage)
 {
     ExitProcess(stage);
 }
+static void smoke_stage_ok(UINT stage)
+{
+    /* Keep a unique stage marker in the process image so the loader/logging
+     * path can identify how far execution reached even if a later subsystem
+     * fails before ExitProcess. */
+    volatile UINT marker = stage;
+    (void)marker;
+}
+
 
 static int check_crt(void)
 {
@@ -839,34 +848,42 @@ void WINAPI WinMainCRTStartup(void)
     int rc;
 
     rc = check_crt();
+    smoke_stage_ok(1);
     if (rc != 0)
         smoke_fail(10u + (UINT)rc);
 
     rc = check_win32_file_api();
+    smoke_stage_ok(2);
     if (rc != 0)
         smoke_fail(30u + (UINT)rc);
 
     rc = check_sync_and_memory();
+    smoke_stage_ok(3);
     if (rc != 0)
         smoke_fail(50u + (UINT)rc);
 
     rc = check_timing_environment();
+    smoke_stage_ok(4);
     if (rc != 0)
         smoke_fail(70u + (UINT)rc);
 
     rc = check_dynamic_resolution();
+    smoke_stage_ok(5);
     if (rc != 0)
         smoke_fail(90u + (UINT)rc);
 
     rc = check_local_dll();
+    smoke_stage_ok(6);
     if (rc != 0)
         smoke_fail(105u + (UINT)rc);
 
     rc = check_winsock();
+    smoke_stage_ok(7);
     if (rc != 0)
         smoke_fail(120u + (UINT)rc);
 
     rc = check_xinput();
+    smoke_stage_ok(8);
     if (rc != 0)
         smoke_fail(140u + (UINT)rc);
 

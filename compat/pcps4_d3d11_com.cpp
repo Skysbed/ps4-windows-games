@@ -983,6 +983,18 @@ static void ctx_OMSetDepthStencilState(PCPS4ComContext *self, void *state, UINT 
 { self->impl->OMSetDepthStencilState(state?(ID3D11DepthStencilState *)((PCPS4ComResource *)state)->impl:NULL,(uint8_t)ref); }
 static void ctx_RSSetState(PCPS4ComContext *self, void *state)
 { self->impl->RSSetState(state?(ID3D11RasterizerState *)((PCPS4ComResource *)state)->impl:NULL); }
+static void ctx_RSSetViewports(
+    PCPS4ComContext *self,
+    UINT count,
+    const D3D11_VIEWPORT *viewports)
+{
+    if (self == NULL || self->impl == NULL ||
+        viewports == NULL || count == 0)
+        return;
+
+    self->impl->RSSetViewports(count, viewports);
+}
+
 static void ctx_UpdateSubresource(
     PCPS4ComContext *self, void *dst, UINT sub, const void *box, const void *src, UINT row, UINT depth)
 {
@@ -1138,7 +1150,7 @@ static void init_vtables(void)
     g_context_vtbl[35]=(const void *)ctx_OMSetBlendState;
     g_context_vtbl[36]=(const void *)ctx_OMSetDepthStencilState;
     g_context_vtbl[42]=(const void *)ctx_RSSetState;
-    g_context_vtbl[43]=(const void *)com_noop;
+    g_context_vtbl[43]=(const void *)ctx_RSSetViewports;
     g_context_vtbl[47]=(const void *)ctx_UpdateSubresource;
     g_context_vtbl[49]=(const void *)ctx_ClearRenderTargetView;
     g_context_vtbl[52]=(const void *)ctx_ClearDepthStencilView;

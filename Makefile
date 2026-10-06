@@ -61,6 +61,7 @@ STATUS_OBJ := $(INTDIR)/pcps4_status.o
 XINPUT_OBJ := $(INTDIR)/pcps4_xinput.o
 WINAPI_OBJ := $(INTDIR)/pcps4_winapi.o
 WINABI_OBJ := $(INTDIR)/pcps4_winabi.o
+MODULE_OBJ := $(INTDIR)/pcps4_module.o
 GAME_OBJ  := $(INTDIR)/pcps4_game.o
 D3D11_COM_OBJ := $(INTDIR)/pcps4_d3d11_com.o
 
@@ -192,6 +193,10 @@ $(WINABI_OBJ): compat/pcps4_winabi.cpp compat/pcps4_winabi.h compat/pcps4_msabi.
 	@mkdir -p "$(dir $@)"
 	$(CXX) $(CXXFLAGS) -o "$@" "$<"
 
+$(MODULE_OBJ): compat/pcps4_module.c compat/pcps4_module.h compat/pcps4_pe.h compat/pcps4_loader.h compat/pcps4_winapi.h
+	@mkdir -p "$(dir $@)"
+	$(CC) $(CFLAGS) -o "$@" "$<"
+
 $(GAME_OBJ): compat/pcps4_game.c compat/pcps4_game.h compat/pcps4_loader.h compat/pcps4_winapi.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
@@ -219,10 +224,10 @@ $(STATUS_OBJ): compat/pcps4_status.c compat/pcps4_status.h compat/pcps4_gfx.h
 $(INTDIR):
 	@mkdir -p "$(INTDIR)"
 
-$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(WINABI_OBJ) $(GAME_OBJ) $(D3D11_COM_OBJ)
+$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(WINABI_OBJ) $(MODULE_OBJ) $(GAME_OBJ) $(D3D11_COM_OBJ)
 	@test -n "$(OBJS)" || (echo "ERROR: no PC source files found in pc_source/."; exit 1)
 	$(LD) $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) \
-	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(GNM_RENDERER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(WINABI_OBJ) $(GAME_OBJ) $(D3D11_COM_OBJ) -o "$@" $(LDFLAGS)
+	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(GNM_RENDERER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(WINABI_OBJ) $(MODULE_OBJ) $(GAME_OBJ) $(D3D11_COM_OBJ) -o "$@" $(LDFLAGS)
 
 $(EBOOT): $(ELF)
 	@test -n "$(OO_PS4_TOOLCHAIN)" || (echo "ERROR: OO_PS4_TOOLCHAIN is not set."; exit 1)

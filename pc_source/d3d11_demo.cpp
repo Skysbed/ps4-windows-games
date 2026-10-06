@@ -89,12 +89,13 @@ extern "C" int pcps4_d3d11_smoke_test()
     if (FAILED(hr) || device == NULL || swap_chain == NULL)
         return -1;
 
-    device->GetImmediateContext(&context);
-    if (context == NULL) {
-        swap_chain->Release();
-        device->Release();
+    /*
+     * D3D11CreateDeviceAndSwapChain already returned the immediate context.
+     * Do not acquire a second one here; it only adds an unnecessary lifetime
+     * edge and obscures failures in the smoke path.
+     */
+    if (context == NULL)
         return -2;
-    }
 
     ID3D11Texture2D *back_buffer = NULL;
     hr = swap_chain->GetBuffer(0, &back_buffer);

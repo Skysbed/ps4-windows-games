@@ -25,6 +25,10 @@ static int map_dxgi_texture_format(
             *out = PCPS4_GPU_FORMAT_BGRA8_UNORM;
             return 1;
 
+        case DXGI_FORMAT_R32_FLOAT:
+            *out = PCPS4_GPU_FORMAT_R32_FLOAT;
+            return 1;
+
         default:
             return 0;
     }
@@ -39,6 +43,9 @@ static DXGI_FORMAT map_gpu_texture_format(
 
         case PCPS4_GPU_FORMAT_BGRA8_UNORM:
             return DXGI_FORMAT_B8G8R8A8_UNORM;
+
+        case PCPS4_GPU_FORMAT_R32_FLOAT:
+            return DXGI_FORMAT_R32_FLOAT;
 
         default:
             return DXGI_FORMAT_UNKNOWN;
@@ -247,10 +254,31 @@ ID3D11PixelShader::~ID3D11PixelShader()
     native = NULL;
 }
 
+ID3D11ShaderResourceView::~ID3D11ShaderResourceView()
+{
+    if (texture != NULL) {
+        texture->Release();
+        texture = NULL;
+    }
+}
+
 ID3D11RenderTargetView::~ID3D11RenderTargetView()
 {
     pcps4_gpu_render_target_destroy(native);
     native = NULL;
+    if (texture != NULL) {
+        texture->Release();
+        texture = NULL;
+    }
+}
+
+ID3D11DepthStencilView::~ID3D11DepthStencilView()
+{
+    native = NULL;
+    if (texture != NULL) {
+        texture->Release();
+        texture = NULL;
+    }
 }
 
 IDXGISwapChain::~IDXGISwapChain()
@@ -417,6 +445,163 @@ void ID3D11DeviceContext::ClearRenderTargetView(
     };
 
     (void)pcps4_gpu_context_clear(native, color);
+}
+
+
+void ID3D11DeviceContext::ClearDepthStencilView(
+    ID3D11DepthStencilView *pDepthStencilView,
+    UINT ClearFlags,
+    float Depth,
+    uint8_t Stencil)
+{
+    (void)Stencil;
+    if (native == NULL || pDepthStencilView == NULL)
+        return;
+
+    if ((ClearFlags & 0x1u) != 0) {
+        (void)pcps4_gpu_context_set_depth_target(
+            native, pDepthStencilView->native);
+        (void)pcps4_gpu_context_clear_depth(native, Depth);
+    }
+}
+
+void ID3D11DeviceContext::VSSetConstantBuffers(
+    UINT StartSlot, UINT NumBuffers,
+    ID3D11Buffer *const *ppConstantBuffers)
+{
+    if (native == NULL || ppConstantBuffers == NULL ||
+        StartSlot >= 16 || NumBuffers > 16 - StartSlot)
+        return;
+    for (UINT i = 0; i < NumBuffers; ++i)
+        (void)pcps4_gpu_context_set_constant_buffer(
+            native, PCPS4_GPU_SHADER_VERTEX, StartSlot + i,
+            ppConstantBuffers[i] != NULL ? ppConstantBuffers[i]->native : NULL);
+}
+
+void ID3D11DeviceContext::PSSetConstantBuffers(
+    UINT StartSlot, UINT NumBuffers,
+    ID3D11Buffer *const *ppConstantBuffers)
+{
+    if (native == NULL || ppConstantBuffers == NULL ||
+        StartSlot >= 16 || NumBuffers > 16 - StartSlot)
+        return;
+    for (UINT i = 0; i < NumBuffers; ++i)
+        (void)pcps4_gpu_context_set_constant_buffer(
+            native, PCPS4_GPU_SHADER_PIXEL, StartSlot + i,
+            ppConstantBuffers[i] != NULL ? ppConstantBuffers[i]->native : NULL);
+}
+
+void ID3D11DeviceContext::VSSetShaderResources(
+    UINT StartSlot, UINT NumViews,
+    ID3D11ShaderResourceView *const *ppViews)
+{
+    if (native == NULL || ppViews == NULL ||
+        StartSlot >= 16 || NumViews > 16 - StartSlot)
+        return;
+    for (UINT i = 0; i < NumViews; ++i)
+        (void)pcps4_gpu_context_set_shader_resource(
+            native, PCPS4_GPU_SHADER_VERTEX, StartSlot + i,
+            ppViews[i] != NULL && ppViews[i]->texture != NULL
+                ? ppViews[i]->texture->native : NULL);
+}
+
+void ID3D11DeviceContext::PSSetShaderResources(
+    UINT StartSlot, UINT NumViews,
+    ID3D11ShaderResourceView *const *ppViews)
+{
+    if (native == NULL || ppViews == NULL ||
+        StartSlot >= 16 || NumViews > 16 - StartSlot)
+        return;
+    for (UINT i = 0; i < NumViews; ++i)
+        (void)pcps4_gpu_context_set_shader_resource(
+            native, PCPS4_GPU_SHADER_PIXEL, StartSlot + i,
+            ppViews[i] != NULL && ppViews[i]->texture != NULL
+                ? ppViews[i]->texture->native : NULL);
+}
+
+void ID3D11DeviceContext::VSSetSamplers(
+    UINT StartSlot, UINT NumSamplers,
+    ID3D11SamplerState *const *ppSamplers)
+{
+    if (native == NULL || ppSamplers == NULL ||
+        StartSlot >= 16 || NumSamplers > 16 - StartSlot)
+        return;
+    for (UINT i = 0; i < NumSamplers; ++i) {
+        ID3D11SamplerState *s = ppSamplers[i];
+        if (s != NULL)
+            (void)pcps4_gpu_context_set_sampler(
+                native, PCPS4_GPU_SHADER_VERTEX, StartSlot + i,
+                s->desc.Filter, s->desc.AddressU,
+                s->desc.AddressV, s->desc.AddressW);
+    }
+}
+
+void ID3D11DeviceContext::PSSetSamplers(
+    UINT StartSlot, UINT NumSamplers,
+    ID3D11SamplerState *const *ppSamplers)
+{
+    if (native == NULL || ppSamplers == NULL ||
+        StartSlot >= 16 || NumSamplers > 16 - StartSlot)
+        return;
+    for (UINT i = 0; i < NumSamplers; ++i) {
+        ID3D11SamplerState *s = ppSamplers[i];
+        if (s != NULL)
+            (void)pcps4_gpu_context_set_sampler(
+                native, PCPS4_GPU_SHADER_PIXEL, StartSlot + i,
+                s->desc.Filter, s->desc.AddressU,
+                s->desc.AddressV, s->desc.AddressW);
+    }
+}
+
+void ID3D11DeviceContext::RSSetState(
+    ID3D11RasterizerState *pRasterizerState)
+{
+    if (native == NULL)
+        return;
+    (void)pcps4_gpu_context_set_cull_mode(
+        native,
+        pRasterizerState != NULL ? pRasterizerState->desc.CullMode : 0u);
+}
+
+void ID3D11DeviceContext::OMSetBlendState(
+    ID3D11BlendState *pBlendState,
+    const float BlendFactor[4],
+    UINT SampleMask)
+{
+    (void)BlendFactor;
+    (void)SampleMask;
+    if (native == NULL)
+        return;
+
+    if (pBlendState == NULL) {
+        (void)pcps4_gpu_context_set_blend_state(
+            native, 0u, D3D11_BLEND_ONE, D3D11_BLEND_ZERO);
+        return;
+    }
+
+    const D3D11_RENDER_TARGET_BLEND_DESC &rt =
+        pBlendState->desc.RenderTarget[0];
+    (void)pcps4_gpu_context_set_blend_state(
+        native, rt.BlendEnable, rt.SrcBlend, rt.DestBlend);
+}
+
+void ID3D11DeviceContext::OMSetDepthStencilState(
+    ID3D11DepthStencilState *pDepthStencilState,
+    uint8_t StencilRef)
+{
+    (void)StencilRef;
+    if (native == NULL)
+        return;
+
+    if (pDepthStencilState == NULL) {
+        (void)pcps4_gpu_context_set_depth_state(native, 0u, 0u);
+        return;
+    }
+
+    (void)pcps4_gpu_context_set_depth_state(
+        native,
+        pDepthStencilState->desc.DepthEnable,
+        pDepthStencilState->desc.DepthWriteMask != 0);
 }
 
 void ID3D11DeviceContext::IASetInputLayout(
@@ -599,6 +784,33 @@ void ID3D11DeviceContext::DrawIndexed(
         IndexCount,
         StartIndexLocation,
         BaseVertexLocation);
+}
+
+void ID3D11DeviceContext::UpdateSubresource(
+    ID3D11Buffer *pDstResource,
+    UINT DstSubresource,
+    const void *pDstBox,
+    const void *pSrcData,
+    UINT SrcRowPitch,
+    UINT SrcDepthPitch)
+{
+    (void)DstSubresource;
+    (void)pDstBox;
+    (void)SrcRowPitch;
+    (void)SrcDepthPitch;
+
+    if (pDstResource == NULL ||
+        pDstResource->native == NULL ||
+        pSrcData == NULL)
+        return;
+
+    size_t size = 0;
+    if (pcps4_gpu_buffer_get_size(
+            pDstResource->native, &size) != PCPS4_GPU_OK)
+        return;
+
+    (void)pcps4_gpu_buffer_update(
+        pDstResource->native, 0, pSrcData, size);
 }
 
 void ID3D11DeviceContext::UpdateSubresource(
@@ -909,7 +1121,7 @@ HRESULT ID3D11Device::CreateRenderTargetView(
         return E_OUTOFMEMORY;
 
     *ppRTView =
-        new (std::nothrow) ID3D11RenderTargetView(rt);
+        new (std::nothrow) ID3D11RenderTargetView(rt, pResource);
 
     if (*ppRTView == NULL) {
         pcps4_gpu_render_target_destroy(rt);
@@ -917,6 +1129,152 @@ HRESULT ID3D11Device::CreateRenderTargetView(
     }
 
     return S_OK;
+}
+
+
+HRESULT ID3D11Device::CreateShaderResourceView(
+    ID3D11Texture2D *pResource,
+    const D3D11_SHADER_RESOURCE_VIEW_DESC *pDesc,
+    ID3D11ShaderResourceView **ppSRView)
+{
+    if (pResource == NULL || pResource->native == NULL ||
+        ppSRView == NULL)
+        return E_INVALIDARG;
+
+    *ppSRView = NULL;
+
+    pcps4_gpu_texture_desc_t texture_desc = {};
+    if (pcps4_gpu_texture_get_desc(
+            pResource->native, &texture_desc) != PCPS4_GPU_OK)
+        return E_FAIL;
+
+    if ((texture_desc.bind_flags & D3D11_BIND_SHADER_RESOURCE) == 0)
+        return E_INVALIDARG;
+
+    if (pDesc != NULL &&
+        pDesc->Format != DXGI_FORMAT_UNKNOWN &&
+        pDesc->Format != map_gpu_texture_format(texture_desc.format))
+        return E_INVALIDARG;
+
+    ID3D11ShaderResourceView *view =
+        new (std::nothrow) ID3D11ShaderResourceView(pResource);
+    if (view == NULL)
+        return E_OUTOFMEMORY;
+
+    if (pDesc != NULL)
+        view->format = pDesc->Format;
+    else
+        view->format = map_gpu_texture_format(texture_desc.format);
+
+    *ppSRView = view;
+    return S_OK;
+}
+
+HRESULT ID3D11Device::CreateSamplerState(
+    const D3D11_SAMPLER_DESC *pDesc,
+    ID3D11SamplerState **ppSamplerState)
+{
+    if (pDesc == NULL || ppSamplerState == NULL)
+        return E_INVALIDARG;
+    *ppSamplerState = NULL;
+
+    if (pDesc->AddressU < D3D11_TEXTURE_ADDRESS_WRAP ||
+        pDesc->AddressU > D3D11_TEXTURE_ADDRESS_BORDER ||
+        pDesc->AddressV < D3D11_TEXTURE_ADDRESS_WRAP ||
+        pDesc->AddressV > D3D11_TEXTURE_ADDRESS_BORDER ||
+        pDesc->AddressW < D3D11_TEXTURE_ADDRESS_WRAP ||
+        pDesc->AddressW > D3D11_TEXTURE_ADDRESS_BORDER)
+        return E_INVALIDARG;
+
+    *ppSamplerState =
+        new (std::nothrow) ID3D11SamplerState(pDesc);
+    return *ppSamplerState != NULL ? S_OK : E_OUTOFMEMORY;
+}
+
+HRESULT ID3D11Device::CreateRasterizerState(
+    const D3D11_RASTERIZER_DESC *pDesc,
+    ID3D11RasterizerState **ppRasterizerState)
+{
+    if (pDesc == NULL || ppRasterizerState == NULL)
+        return E_INVALIDARG;
+    *ppRasterizerState = NULL;
+
+    if (pDesc->FillMode != D3D11_FILL_SOLID &&
+        pDesc->FillMode != D3D11_FILL_WIREFRAME)
+        return E_INVALIDARG;
+
+    if (pDesc->CullMode < D3D11_CULL_NONE ||
+        pDesc->CullMode > D3D11_CULL_BACK)
+        return E_INVALIDARG;
+
+    *ppRasterizerState =
+        new (std::nothrow) ID3D11RasterizerState(pDesc);
+    return *ppRasterizerState != NULL ? S_OK : E_OUTOFMEMORY;
+}
+
+HRESULT ID3D11Device::CreateBlendState(
+    const D3D11_BLEND_DESC *pDesc,
+    ID3D11BlendState **ppBlendState)
+{
+    if (pDesc == NULL || ppBlendState == NULL)
+        return E_INVALIDARG;
+    *ppBlendState = NULL;
+
+    if (pDesc->IndependentBlendEnable != 0)
+        return E_NOTIMPL;
+
+    *ppBlendState =
+        new (std::nothrow) ID3D11BlendState(pDesc);
+    return *ppBlendState != NULL ? S_OK : E_OUTOFMEMORY;
+}
+
+HRESULT ID3D11Device::CreateDepthStencilState(
+    const D3D11_DEPTH_STENCIL_DESC *pDesc,
+    ID3D11DepthStencilState **ppDepthStencilState)
+{
+    if (pDesc == NULL || ppDepthStencilState == NULL)
+        return E_INVALIDARG;
+    *ppDepthStencilState = NULL;
+
+    if (pDesc->DepthFunc != D3D11_COMPARISON_LESS &&
+        pDesc->DepthFunc != D3D11_COMPARISON_LESS_EQUAL &&
+        pDesc->DepthFunc != D3D11_COMPARISON_ALWAYS)
+        return E_NOTIMPL;
+
+    *ppDepthStencilState =
+        new (std::nothrow) ID3D11DepthStencilState(pDesc);
+    return *ppDepthStencilState != NULL ? S_OK : E_OUTOFMEMORY;
+}
+
+HRESULT ID3D11Device::CreateDepthStencilView(
+    ID3D11Texture2D *pResource,
+    const D3D11_DEPTH_STENCIL_VIEW_DESC *pDesc,
+    ID3D11DepthStencilView **ppDepthStencilView)
+{
+    if (pResource == NULL || pResource->native == NULL ||
+        ppDepthStencilView == NULL)
+        return E_INVALIDARG;
+
+    *ppDepthStencilView = NULL;
+
+    pcps4_gpu_texture_desc_t texture_desc = {};
+    if (pcps4_gpu_texture_get_desc(
+            pResource->native, &texture_desc) != PCPS4_GPU_OK)
+        return E_FAIL;
+
+    if (texture_desc.format != PCPS4_GPU_FORMAT_R32_FLOAT ||
+        (texture_desc.bind_flags & D3D11_BIND_DEPTH_STENCIL) == 0)
+        return E_INVALIDARG;
+
+    if (pDesc != NULL &&
+        pDesc->Format != DXGI_FORMAT_UNKNOWN &&
+        pDesc->Format != DXGI_FORMAT_R32_FLOAT)
+        return E_INVALIDARG;
+
+    *ppDepthStencilView =
+        new (std::nothrow) ID3D11DepthStencilView(
+            pResource->native, pResource);
+    return *ppDepthStencilView != NULL ? S_OK : E_OUTOFMEMORY;
 }
 
 HRESULT ID3D11Device::CreateVertexShader(

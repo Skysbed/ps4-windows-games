@@ -588,6 +588,43 @@ static PCPS4_MS_ABI BOOL win_QueryPerformanceFrequency(int64_t *frequency)
     return TRUE;
 }
 
+/*
+ * A small process-heap shim. Returned pointers remain ordinary malloc
+ * pointers; a side table records sizes so HeapSize and zero-on-grow
+ * HeapReAlloc can behave consistently without putting private headers in
+ * front of allocations shared with the CRT.
+ */
+#define PCPS4_HEAP_ZERO_MEMORY 0x00000008u
+#define PCPS4_HEAP_TRACK_SLOTS 4096
+
+typedef struct pcps4_heap_track_entry {
+    void *memory;
+    SIZE_T size;
+} pcps4_heap_track_entry;
+
+static pcps4_heap_track_entry g_heap_tracks[PCPS4_HEAP_TRACK_SLOTS];
+static volatile uint32_t g_heap_track_lock;
+
+static void heap_track_lock(void)
+{
+    while (__atomic_exchange_n(
+               &g_heap_track_lock, 1u, __ATOMIC_ACQUIRE) != 0u) {
+    }
+}
+
+static void heap_track_unlock(void)
+{
+    __atomic_store_n(&g_heap_track_lock, 0u, __ATOMIC_RELEASE);
+}
+
+static int heap_track_find_locked(const void *memory)
+{
+    for (int i = 0; i < PCPS4_HEAP_TRACK_SLOTS; ++i)
+        if (g_heap_tracks[i].memory == memory)
+            return i;
+    return -1;
+}
+
 static PCPS4_MS_ABI HANDLE win_GetProcessHeap(void)
 {
     return (HANDLE)(intptr_t)1;
@@ -595,9 +632,36 @@ static PCPS4_MS_ABI HANDLE win_GetProcessHeap(void)
 
 static PCPS4_MS_ABI LPVOID win_HeapAlloc(HANDLE heap, DWORD flags, SIZE_T size)
 {
-    (void)heap;
-    (void)flags;
-    return malloc(size);
+    void *memory;
+    SIZE_T allocation_size = size ? size : 1u;
+    int free_slot = -1;
+
+    if (heap != win_GetProcessHeap())
+        return NULL;
+    memory = malloc(allocation_size);
+    if (memory == NULL)
+        return NULL;
+    if ((flags & PCPS4_HEAP_ZERO_MEMORY) != 0)
+        memset(memory, 0, allocation_size);
+
+    heap_track_lock();
+    for (int i = 0; i < PCPS4_HEAP_TRACK_SLOTS; ++i) {
+        if (g_heap_tracks[i].memory == NULL) {
+            free_slot = i;
+            break;
+        }
+    }
+    if (free_slot >= 0) {
+        g_heap_tracks[free_slot].memory = memory;
+        g_heap_tracks[free_slot].size = size;
+    }
+    heap_track_unlock();
+
+    if (free_slot < 0) {
+        free(memory);
+        return NULL;
+    }
+    return memory;
 }
 
 static PCPS4_MS_ABI LPVOID win_HeapReAlloc(
@@ -606,17 +670,82 @@ static PCPS4_MS_ABI LPVOID win_HeapReAlloc(
     LPVOID memory,
     SIZE_T size)
 {
-    (void)heap;
-    (void)flags;
-    return realloc(memory, size);
+    void *resized;
+    SIZE_T old_size;
+    SIZE_T allocation_size = size ? size : 1u;
+    int slot;
+
+    if (heap != win_GetProcessHeap() || memory == NULL || size == 0)
+        return NULL;
+
+    heap_track_lock();
+    slot = heap_track_find_locked(memory);
+    if (slot < 0) {
+        heap_track_unlock();
+        return NULL;
+    }
+    old_size = g_heap_tracks[slot].size;
+    resized = realloc(memory, allocation_size);
+    if (resized == NULL) {
+        heap_track_unlock();
+        return NULL;
+    }
+    g_heap_tracks[slot].memory = resized;
+    g_heap_tracks[slot].size = size;
+    heap_track_unlock();
+
+    if ((flags & PCPS4_HEAP_ZERO_MEMORY) != 0 && size > old_size)
+        memset((unsigned char *)resized + old_size, 0, size - old_size);
+    return resized;
 }
 
 static PCPS4_MS_ABI BOOL win_HeapFree(HANDLE heap, DWORD flags, LPVOID memory)
 {
-    (void)heap;
+    int slot;
     (void)flags;
+
+    if (heap != win_GetProcessHeap() || memory == NULL)
+        return FALSE;
+    heap_track_lock();
+    slot = heap_track_find_locked(memory);
+    if (slot >= 0) {
+        g_heap_tracks[slot].memory = NULL;
+        g_heap_tracks[slot].size = 0;
+    }
+    heap_track_unlock();
+    if (slot < 0)
+        return FALSE;
     free(memory);
     return TRUE;
+}
+
+static PCPS4_MS_ABI SIZE_T win_HeapSize(HANDLE heap, DWORD flags, LPCVOID memory)
+{
+    SIZE_T size = (SIZE_T)-1;
+    int slot;
+    (void)flags;
+
+    if (heap != win_GetProcessHeap() || memory == NULL)
+        return (SIZE_T)-1;
+    heap_track_lock();
+    slot = heap_track_find_locked(memory);
+    if (slot >= 0)
+        size = g_heap_tracks[slot].size;
+    heap_track_unlock();
+    return size;
+}
+
+static PCPS4_MS_ABI BOOL win_HeapValidate(HANDLE heap, DWORD flags, LPCVOID memory)
+{
+    int slot;
+    (void)flags;
+
+    if (heap != win_GetProcessHeap() || memory == NULL)
+        return FALSE;
+    heap_track_lock();
+    slot = heap_track_find_locked(memory);
+    heap_track_unlock();
+    return slot >= 0 ? TRUE : FALSE;
 }
 
 static PCPS4_MS_ABI void win_RtlMoveMemory(PVOID dst, const void *src, SIZE_T length)
@@ -670,6 +799,8 @@ static void register_kernel32(
     KREG("HeapAlloc", win_HeapAlloc);
     KREG("HeapReAlloc", win_HeapReAlloc);
     KREG("HeapFree", win_HeapFree);
+    KREG("HeapSize", win_HeapSize);
+    KREG("HeapValidate", win_HeapValidate);
     KREG("RtlMoveMemory", win_RtlMoveMemory);
     KREG("ExitProcess", win_ExitProcess);
     KREG("LoadLibraryA", win_LoadLibraryA);

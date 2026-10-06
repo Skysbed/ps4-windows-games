@@ -410,12 +410,14 @@ int pcps4_gfx_present(pcps4_gfx_context_t *context,
             return PCPS4_GFX_OK;
         }
 
+        OrbisKernelUseconds timeout = 100000;
+
         rc = sceKernelWaitEqueue(
             *queue,
             &event,
             1,
             &count,
-            100000);
+            &timeout);
 
         if (rc != 0) {
             break;

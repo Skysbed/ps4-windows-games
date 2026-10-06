@@ -184,7 +184,7 @@ $(INTDIR)/pcps4_xinput.o: compat/pcps4_xinput.c compat/pcps4_xinput.h compat/pcp
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
 
-$(WINAPI_OBJ): compat/pcps4_winapi.c compat/pcps4_winapi.h compat/pcps4_compat.h compat/pcps4_xinput.h compat/pcps4_pe.h
+$(WINAPI_OBJ): compat/pcps4_winapi.c compat/pcps4_winapi.h compat/pcps4_compat.h compat/pcps4_xinput.h compat/pcps4_pe.h compat/pcps4_win32.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
 
@@ -192,7 +192,7 @@ $(DLL_OBJ): compat/pcps4_dll.c compat/pcps4_dll.h compat/pcps4_pe.h compat/pcps4
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
 
-$(GAME_OBJ): compat/pcps4_game.c compat/pcps4_game.h compat/pcps4_loader.h compat/pcps4_winapi.h
+$(GAME_OBJ): compat/pcps4_game.c compat/pcps4_game.h compat/pcps4_loader.h compat/pcps4_winapi.h compat/pcps4_status.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
 

@@ -6,6 +6,7 @@
 #include "pcps4_d3d11_com.h"
 #include "pcps4_abi.h"
 #include "pcps4_loader.h"
+#include "pcps4_dll.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,9 +23,127 @@ typedef struct pcps4_module_handle {
 
 static pcps4_pe_resolver *g_resolver = NULL;
 
+static void *pcps4_dynamic_resolve(
+    void *user,
+    const char *dll,
+    int by_name,
+    const char *name,
+    uint16_t ordinal)
+{
+    char normalized[128];
+    char path[1024];
+    void *module;
+    void *fn;
+
+    (void)user;
+
+    if (dll == NULL)
+        return NULL;
+
+    module = pcps4_dll_find(dll);
+
+    /*
+     * Windows API-set contracts usually forward to one of the core Win32
+     * implementation DLLs. PcPs4 already implements a focused kernel32 /
+     * kernelbase set, so consult those built-ins before trying the filesystem.
+     */
+    if (module == NULL &&
+        (strncmp(dll, "api-ms-win-core-", 16) == 0 ||
+         strncmp(dll, "ext-ms-win-", 11) == 0)) {
+        fn = by_name
+            ? pcps4_pe_resolver_lookup(g_resolver, "KERNELBASE.dll", name)
+            : pcps4_pe_resolver_lookup_ordinal(g_resolver, "KERNELBASE.dll", ordinal);
+        if (fn != NULL)
+            return fn;
+
+        fn = by_name
+            ? pcps4_pe_resolver_lookup(g_resolver, "KERNEL32.dll", name)
+            : pcps4_pe_resolver_lookup_ordinal(g_resolver, "KERNEL32.dll", ordinal);
+        if (fn != NULL)
+            return fn;
+    }
+
+    if (module == NULL) {
+        size_t i = 0;
+        const char *base = strrchr(dll, '/');
+        const char *back = strrchr(dll, 92);
+        if (back != NULL && (base == NULL || back > base))
+            base = back;
+        base = base != NULL ? base + 1 : dll;
+
+        while (base[i] != '\0' && i + 1 < sizeof(normalized)) {
+            char ch = base[i];
+            if (ch >= 'A' && ch <= 'Z')
+                ch = (char)(ch - 'A' + 'a');
+            normalized[i] = ch;
+            ++i;
+        }
+        normalized[i] = '\0';
+
+        if (strchr(normalized, '.') == NULL && i + 4 < sizeof(normalized))
+            memcpy(normalized + i, ".dll", 5);
+
+        if (snprintf(path, sizeof(path), "/app0/game/%s", normalized) >=
+            (int)sizeof(path))
+            return NULL;
+
+        module = pcps4_dll_load(path, g_resolver);
+        if (module == NULL)
+            return NULL;
+    }
+
+    fn = pcps4_dll_get_export(module, by_name ? name : NULL, ordinal);
+    if (fn == NULL)
+        pcps4_status_log(
+            "[pcps4] unresolved dynamic export: %s!%s%s",
+            dll,
+            by_name ? name : "#",
+            by_name ? "" : "(ordinal)");
+
+    return fn;
+}
+
 static PCPS4_MS_ABI void win_SetLastError(DWORD value);
-static PCPS4_MS_ABI HMODULE win_LoadLibraryA(LPCSTR name);
-static PCPS4_MS_ABI HMODULE win_LoadLibraryW(LPCWSTR name);
+static PCPS4_MS_ABI HMODULE win_LoadLibraryA(LPCSTR name)
+{
+    pcps4_module_handle *module;
+    char normalized[128];
+    char path[1024];
+    void *loaded;
+
+    if (module_name_normalize(name, normalized, sizeof(normalized)) != 0) {
+        win_SetLastError(87);
+        return NULL;
+    }
+
+    loaded = pcps4_dll_find(normalized);
+    if (loaded != NULL)
+        return (HMODULE)loaded;
+
+    if (g_resolver != NULL) {
+        if (snprintf(path, sizeof(path), "/app0/game/%s", normalized) <
+            (int)sizeof(path)) {
+            loaded = pcps4_dll_load(path, g_resolver);
+            if (loaded != NULL)
+                return (HMODULE)loaded;
+        }
+    }
+
+    /*
+     * Built-in DLLs such as kernel32/d3d11/xinput do not have a PE image on
+     * disk in this runtime. Keep a lightweight module token for them.
+     */
+    module = (pcps4_module_handle *)calloc(1, sizeof(*module));
+    if (module == NULL) {
+        win_SetLastError(8);
+        return NULL;
+    }
+
+    module->magic = PCPS4_MODULE_MAGIC;
+    memcpy(module->name, normalized, strlen(normalized) + 1);
+    return (HMODULE)module;
+}
+
 static PCPS4_MS_ABI HMODULE win_GetModuleHandleA(LPCSTR name);
 static PCPS4_MS_ABI HMODULE win_GetModuleHandleW(LPCWSTR name);
 static PCPS4_MS_ABI DWORD win_GetEnvironmentVariableA(
@@ -127,13 +246,28 @@ static PCPS4_MS_ABI FARPROC win_GetProcAddress(
     HMODULE module,
     LPCSTR name)
 {
-    pcps4_module_handle *handle = (pcps4_module_handle *)module;
-    void *fn = NULL;
+    pcps4_module_handle *handle;
+    void *fn;
 
-    if (name == NULL || g_resolver == NULL)
+    if (module == NULL || name == NULL)
         return NULL;
 
-    if (handle == NULL || handle->magic != PCPS4_MODULE_MAGIC) {
+    if (pcps4_dll_is_module((void *)module)) {
+        if (name[0] >= '0' && name[0] <= '9') {
+            uint16_t ordinal = (uint16_t)strtoul(name, NULL, 10);
+            fn = pcps4_dll_get_export(
+                (void *)module, NULL, ordinal);
+        } else {
+            fn = pcps4_dll_get_export(
+                (void *)module, name, 0);
+        }
+        if (fn == NULL)
+            win_SetLastError(127);
+        return (FARPROC)fn;
+    }
+
+    handle = (pcps4_module_handle *)module;
+    if (handle->magic != PCPS4_MODULE_MAGIC || g_resolver == NULL) {
         win_SetLastError(6);
         return NULL;
     }
@@ -189,16 +323,21 @@ static PCPS4_MS_ABI DWORD win_GetEnvironmentVariableW(
 
 static PCPS4_MS_ABI BOOL win_FreeLibrary(HMODULE module)
 {
-    pcps4_module_handle *handle = (pcps4_module_handle *)module;
-
-    if (handle == NULL || handle->magic != PCPS4_MODULE_MAGIC)
+    if (module == NULL)
         return FALSE;
 
-    handle->magic = 0;
-    free(handle);
+    if (pcps4_dll_is_module((void *)module))
+        return pcps4_dll_free((void *)module) == 0;
+
+    {
+        pcps4_module_handle *handle = (pcps4_module_handle *)module;
+        if (handle->magic != PCPS4_MODULE_MAGIC)
+            return FALSE;
+        handle->magic = 0;
+        free(handle);
+    }
     return TRUE;
 }
-
 
 static PCPS4_MS_ABI DWORD win_GetLastError(void)
 {
@@ -503,6 +642,8 @@ void pcps4_winapi_build_resolver(pcps4_pe_resolver *resolver)
 
     pcps4_pe_resolver_init(resolver);
     g_resolver = resolver;
+    resolver->fallback = pcps4_dynamic_resolve;
+    resolver->fallback_user = NULL;
 
     register_kernel32(resolver, "KERNEL32.dll");
     register_kernel32(resolver, "KERNELBASE.dll");

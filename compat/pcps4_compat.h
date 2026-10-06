@@ -317,6 +317,44 @@ static inline int pcps4_closesocket(SOCKET socket_fd)
 #define CopyMemory(Destination, Source, Length) memcpy((Destination), (Source), (Length))
 #define MoveMemory(Destination, Source, Length) memmove((Destination), (Source), (Length))
 
+static inline DWORD pcps4_GetFileSize(HANDLE handle, DWORD *high)
+{
+    int64_t size = pcps4_sys_file_size((pcps4_os_handle_t *)handle);
+    if (size < 0) {
+        if (high != NULL) *high = 0xFFFFFFFFu;
+        return 0xFFFFFFFFu;
+    }
+    if (high != NULL) *high = (DWORD)((uint64_t)size >> 32);
+    return (DWORD)((uint64_t)size & 0xFFFFFFFFu);
+}
+
+static inline DWORD pcps4_SetFilePointer(
+    HANDLE handle, int32_t distance_low, int32_t *distance_high, DWORD move_method)
+{
+    int64_t offset = (int64_t)(int32_t)distance_low;
+    if (distance_high != NULL)
+        offset |= (int64_t)(*distance_high) << 32;
+    int64_t result = pcps4_sys_file_seek(
+        (pcps4_os_handle_t *)handle, offset, (int)move_method);
+    if (result < 0) return 0xFFFFFFFFu;
+    if (distance_high != NULL)
+        *distance_high = (int32_t)((uint64_t)result >> 32);
+    return (DWORD)((uint64_t)result & 0xFFFFFFFFu);
+}
+
+static inline BOOL pcps4_DeleteFileA(const char *path)
+{
+    return pcps4_sys_file_delete(path) == 0;
+}
+
+static inline BOOL pcps4_CreateDirectoryA(const char *path, void *security)
+{
+    (void)security;
+    return pcps4_sys_file_mkdir(path) == 0;
+}
+
+
+
 static inline SOCKET pcps4_socket(int domain, int type, int protocol) { return socket(domain, type, protocol); }
 static inline int pcps4_connect(SOCKET s, const struct sockaddr *a, socklen_t l) { return connect(s, a, l); }
 static inline int pcps4_send(SOCKET s, const char *b, int l, int f) { return (int)send(s, b, (size_t)l, f); }

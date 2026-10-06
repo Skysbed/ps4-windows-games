@@ -6,6 +6,7 @@
 #include "pcps4_d3d11_com.h"
 #include "pcps4_loader.h"
 #include "pcps4_msabi.h"
+#include "pcps4_winabi.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,16 +23,16 @@ typedef struct pcps4_module_handle {
 
 static pcps4_pe_resolver *g_resolver = NULL;
 
-static void win_SetLastError(DWORD value);
-static HMODULE win_LoadLibraryA(LPCSTR name);
-static HMODULE win_LoadLibraryW(LPCWSTR name);
-static HMODULE win_GetModuleHandleA(LPCSTR name);
-static HMODULE win_GetModuleHandleW(LPCWSTR name);
-static DWORD win_GetEnvironmentVariableA(
+static void PCPS4_MS_ABI win_SetLastError(DWORD value);
+static HMODULE PCPS4_MS_ABI win_LoadLibraryA(LPCSTR name);
+static HMODULE PCPS4_MS_ABI win_LoadLibraryW(LPCWSTR name);
+static HMODULE PCPS4_MS_ABI win_GetModuleHandleA(LPCSTR name);
+static HMODULE PCPS4_MS_ABI win_GetModuleHandleW(LPCWSTR name);
+static DWORD PCPS4_MS_ABI win_GetEnvironmentVariableA(
     LPCSTR name,
     LPSTR buffer,
     DWORD size);
-static DWORD win_GetEnvironmentVariableW(
+static DWORD PCPS4_MS_ABI win_GetEnvironmentVariableW(
     LPCWSTR name,
     LPWSTR buffer,
     DWORD size);
@@ -75,7 +76,7 @@ static int module_name_normalize(
     return 0;
 }
 
-static HMODULE win_LoadLibraryW(LPCWSTR name)
+static HMODULE PCPS4_MS_ABI win_LoadLibraryW(LPCWSTR name)
 {
     char utf8[1024];
 
@@ -87,12 +88,12 @@ static HMODULE win_LoadLibraryW(LPCWSTR name)
     return win_LoadLibraryA(utf8);
 }
 
-static HMODULE win_GetModuleHandleW(LPCWSTR name)
+static HMODULE PCPS4_MS_ABI win_GetModuleHandleW(LPCWSTR name)
 {
     return win_LoadLibraryW(name);
 }
 
-static HMODULE win_LoadLibraryA(LPCSTR name)
+static HMODULE PCPS4_MS_ABI win_LoadLibraryA(LPCSTR name)
 {
     pcps4_module_handle *module;
     char normalized[128];
@@ -113,12 +114,12 @@ static HMODULE win_LoadLibraryA(LPCSTR name)
     return (HMODULE)module;
 }
 
-static HMODULE win_GetModuleHandleA(LPCSTR name)
+static HMODULE PCPS4_MS_ABI win_GetModuleHandleA(LPCSTR name)
 {
     return win_LoadLibraryA(name);
 }
 
-static FARPROC win_GetProcAddress(
+static FARPROC PCPS4_MS_ABI win_GetProcAddress(
     HMODULE module,
     LPCSTR name)
 {
@@ -148,7 +149,7 @@ static FARPROC win_GetProcAddress(
     return (FARPROC)fn;
 }
 
-static DWORD win_GetEnvironmentVariableW(
+static DWORD PCPS4_MS_ABI win_GetEnvironmentVariableW(
     LPCWSTR name,
     LPWSTR buffer,
     DWORD size)
@@ -182,7 +183,7 @@ static DWORD win_GetEnvironmentVariableW(
     return result;
 }
 
-static BOOL win_FreeLibrary(HMODULE module)
+static BOOL PCPS4_MS_ABI win_FreeLibrary(HMODULE module)
 {
     pcps4_module_handle *handle = (pcps4_module_handle *)module;
 
@@ -195,22 +196,22 @@ static BOOL win_FreeLibrary(HMODULE module)
 }
 
 
-static DWORD win_GetLastError(void)
+static DWORD PCPS4_MS_ABI win_GetLastError(void)
 {
     return g_last_error;
 }
 
-static void win_SetLastError(DWORD value)
+static void PCPS4_MS_ABI win_SetLastError(DWORD value)
 {
     g_last_error = value;
 }
 
-static HANDLE win_GetCurrentProcess(void)
+static HANDLE PCPS4_MS_ABI win_GetCurrentProcess(void)
 {
     return (HANDLE)(intptr_t)1;
 }
 
-static HANDLE win_GetCurrentThread(void)
+static HANDLE PCPS4_MS_ABI win_GetCurrentThread(void)
 {
     return (HANDLE)(intptr_t)1;
 }
@@ -225,7 +226,7 @@ static void PCPS4_MS_ABI win_ExitProcess(UINT code)
     pcps4_loader_request_exit((int)code);
 }
 
-static DWORD win_GetEnvironmentVariableA(
+static DWORD PCPS4_MS_ABI win_GetEnvironmentVariableA(
     LPCSTR name,
     LPSTR buffer,
     DWORD size)
@@ -263,13 +264,13 @@ static DWORD win_GetEnvironmentVariableA(
     return (DWORD)length;
 }
 
-static LPSTR win_GetCommandLineA(void)
+static LPSTR PCPS4_MS_ABI win_GetCommandLineA(void)
 {
     static char command_line[] = "game.exe";
     return command_line;
 }
 
-static DWORD win_GetModuleFileNameA(
+static DWORD PCPS4_MS_ABI win_GetModuleFileNameA(
     HANDLE module,
     LPSTR filename,
     DWORD size)
@@ -296,7 +297,7 @@ static DWORD win_GetModuleFileNameA(
     return (DWORD)length;
 }
 
-static BOOL win_QueryPerformanceCounter(int64_t *counter)
+static BOOL PCPS4_MS_ABI win_QueryPerformanceCounter(int64_t *counter)
 {
     struct timespec now;
 
@@ -311,7 +312,7 @@ static BOOL win_QueryPerformanceCounter(int64_t *counter)
     return TRUE;
 }
 
-static BOOL win_QueryPerformanceFrequency(int64_t *frequency)
+static BOOL PCPS4_MS_ABI win_QueryPerformanceFrequency(int64_t *frequency)
 {
     if (frequency == NULL)
         return FALSE;
@@ -320,19 +321,19 @@ static BOOL win_QueryPerformanceFrequency(int64_t *frequency)
     return TRUE;
 }
 
-static HANDLE win_GetProcessHeap(void)
+static HANDLE PCPS4_MS_ABI win_GetProcessHeap(void)
 {
     return (HANDLE)(intptr_t)1;
 }
 
-static LPVOID win_HeapAlloc(HANDLE heap, DWORD flags, SIZE_T size)
+static LPVOID PCPS4_MS_ABI win_HeapAlloc(HANDLE heap, DWORD flags, SIZE_T size)
 {
     (void)heap;
     (void)flags;
     return malloc(size);
 }
 
-static LPVOID win_HeapReAlloc(
+static LPVOID PCPS4_MS_ABI win_HeapReAlloc(
     HANDLE heap,
     DWORD flags,
     LPVOID memory,
@@ -343,7 +344,7 @@ static LPVOID win_HeapReAlloc(
     return realloc(memory, size);
 }
 
-static BOOL win_HeapFree(HANDLE heap, DWORD flags, LPVOID memory)
+static BOOL PCPS4_MS_ABI win_HeapFree(HANDLE heap, DWORD flags, LPVOID memory)
 {
     (void)heap;
     (void)flags;
@@ -351,7 +352,7 @@ static BOOL win_HeapFree(HANDLE heap, DWORD flags, LPVOID memory)
     return TRUE;
 }
 
-static void win_RtlMoveMemory(PVOID dst, const void *src, SIZE_T length)
+static void PCPS4_MS_ABI win_RtlMoveMemory(PVOID dst, const void *src, SIZE_T length)
 {
     memmove(dst, src, length);
 }
@@ -365,30 +366,33 @@ static void register_kernel32(
     KREG("SetLastError", win_SetLastError);
     KREG("GetCurrentProcess", win_GetCurrentProcess);
     KREG("GetCurrentThread", win_GetCurrentThread);
-    KREG("GetCurrentProcessId", pcps4_get_current_process_id);
-    KREG("GetCurrentThreadId", pcps4_get_current_thread_id);
-    KREG("GetTickCount", pcps4_monotonic_ms);
-    KREG("GetTickCount64", pcps4_monotonic_ms);
-    KREG("Sleep", pcps4_sleep_ms);
-    KREG("InterlockedIncrement", pcps4_interlocked_increment);
-    KREG("InterlockedDecrement", pcps4_interlocked_decrement);
-    KREG("CreateFileA", pcps4_CreateFileA);
-    KREG("ReadFile", pcps4_ReadFile);
-    KREG("WriteFile", pcps4_WriteFile);
-    KREG("GetFileSize", pcps4_GetFileSize);
-    KREG("SetFilePointer", pcps4_SetFilePointer);
-    KREG("DeleteFileA", pcps4_DeleteFileA);
-    KREG("CreateDirectoryA", pcps4_CreateDirectoryA);
-    KREG("CloseHandle", pcps4_CloseHandle);
-    KREG("CreateThread", pcps4_CreateThread);
-    KREG("CreateMutexA", pcps4_CreateMutexA);
-    KREG("CreateEventA", pcps4_CreateEventA);
-    KREG("SetEvent", pcps4_SetEvent);
-    KREG("ResetEvent", pcps4_ResetEvent);
-    KREG("WaitForSingleObject", pcps4_WaitForSingleObject);
-    KREG("ReleaseMutex", pcps4_ReleaseMutex);
-    KREG("VirtualAlloc", pcps4_VirtualAlloc);
-    KREG("VirtualFree", pcps4_VirtualFree);
+    KREG("GetCurrentProcessId", abi.get_current_process_id);
+    KREG("GetCurrentThreadId", abi.get_current_thread_id);
+    KREG("GetTickCount", abi.get_tick_count);
+    KREG("GetTickCount64", abi.get_tick_count64);
+    KREG("Sleep", abi.sleep_ms);
+    KREG("InterlockedIncrement", abi.interlocked_increment);
+    KREG("InterlockedDecrement", abi.interlocked_decrement);
+    KREG("CreateFileA", abi.create_file_a);
+    KREG("CreateFileW", abi.create_file_w);
+    KREG("ReadFile", abi.read_file);
+    KREG("WriteFile", abi.write_file);
+    KREG("GetFileSize", abi.get_file_size);
+    KREG("SetFilePointer", abi.set_file_pointer);
+    KREG("DeleteFileA", abi.delete_file_a);
+    KREG("DeleteFileW", abi.delete_file_w);
+    KREG("CreateDirectoryA", abi.create_directory_a);
+    KREG("CreateDirectoryW", abi.create_directory_w);
+    KREG("CloseHandle", abi.close_handle);
+    KREG("CreateThread", abi.create_thread);
+    KREG("CreateMutexA", abi.create_mutex_a);
+    KREG("CreateEventA", abi.create_event_a);
+    KREG("SetEvent", abi.set_event);
+    KREG("ResetEvent", abi.reset_event);
+    KREG("WaitForSingleObject", abi.wait_for_single_object);
+    KREG("ReleaseMutex", abi.release_mutex);
+    KREG("VirtualAlloc", abi.virtual_alloc);
+    KREG("VirtualFree", abi.virtual_free);
     KREG("GetEnvironmentVariableA", win_GetEnvironmentVariableA);
     KREG("GetCommandLineA", win_GetCommandLineA);
     KREG("GetModuleFileNameA", win_GetModuleFileNameA);
@@ -431,24 +435,24 @@ static void register_winsock(
     const char *dll)
 {
 #define WREG(name, fn) (void)pcps4_pe_resolver_register(resolver, dll, name, (void *)(fn))
-    WREG("WSAStartup", pcps4_WSAStartup);
-    WREG("WSACleanup", pcps4_WSACleanup);
-    WREG("WSAGetLastError", pcps4_WSAGetLastError);
-    WREG("socket", pcps4_socket);
-    WREG("connect", pcps4_connect);
-    WREG("send", pcps4_send);
-    WREG("recv", pcps4_recv);
-    WREG("shutdown", pcps4_shutdown);
-    WREG("setsockopt", pcps4_setsockopt);
-    WREG("getsockopt", pcps4_getsockopt);
-    WREG("getaddrinfo", pcps4_getaddrinfo);
-    WREG("freeaddrinfo", pcps4_freeaddrinfo);
-    WREG("htons", pcps4_htons);
-    WREG("ntohs", pcps4_ntohs);
-    WREG("htonl", pcps4_htonl);
-    WREG("ntohl", pcps4_ntohl);
-    WREG("inet_addr", pcps4_inet_addr);
-    WREG("closesocket", pcps4_closesocket);
+    WREG("WSAStartup", abi.wsa_startup);
+    WREG("WSACleanup", abi.wsa_cleanup);
+    WREG("WSAGetLastError", abi.wsa_get_last_error);
+    WREG("socket", abi.socket_fn);
+    WREG("connect", abi.connect_fn);
+    WREG("send", abi.send_fn);
+    WREG("recv", abi.recv_fn);
+    WREG("shutdown", abi.shutdown_fn);
+    WREG("setsockopt", abi.setsockopt_fn);
+    WREG("getsockopt", abi.getsockopt_fn);
+    WREG("getaddrinfo", abi.getaddrinfo_fn);
+    WREG("freeaddrinfo", abi.freeaddrinfo_fn);
+    WREG("htons", abi.htons_fn);
+    WREG("ntohs", abi.ntohs_fn);
+    WREG("htonl", abi.htonl_fn);
+    WREG("ntohl", abi.ntohl_fn);
+    WREG("inet_addr", abi.inet_addr_fn);
+    WREG("closesocket", abi.closesocket_fn);
 #undef WREG
 }
 
@@ -457,10 +461,10 @@ static void register_xinput(
     const char *dll)
 {
 #define XREG(name, fn) (void)pcps4_pe_resolver_register(resolver, dll, name, (void *)(fn))
-    XREG("XInputGetState", pcps4_XInputGetState);
-    XREG("XInputSetState", pcps4_XInputSetState);
-    XREG("XInputGetCapabilities", pcps4_XInputGetCapabilities);
-    XREG("XInputEnable", pcps4_XInputEnable);
+    XREG("XInputGetState", abi.xinput_get_state);
+    XREG("XInputSetState", abi.xinput_set_state);
+    XREG("XInputGetCapabilities", abi.xinput_get_capabilities);
+    XREG("XInputEnable", abi.xinput_enable);
 #undef XREG
 }
 
@@ -469,54 +473,56 @@ static void register_ucrt(
     const char *dll)
 {
 #define UREG(name, fn) (void)pcps4_pe_resolver_register(resolver, dll, name, (void *)(fn))
-    UREG("malloc", malloc);
-    UREG("calloc", calloc);
-    UREG("realloc", realloc);
-    UREG("free", free);
-    UREG("memcpy", memcpy);
-    UREG("memmove", memmove);
-    UREG("memset", memset);
-    UREG("memcmp", memcmp);
-    UREG("strlen", strlen);
-    UREG("strcmp", strcmp);
-    UREG("strncmp", strncmp);
-    UREG("strstr", strstr);
-    UREG("strchr", strchr);
-    UREG("strrchr", strrchr);
-    UREG("atoi", atoi);
-    UREG("atol", atol);
-    UREG("strtol", strtol);
-    UREG("strtoul", strtoul);
-    UREG("strtoll", strtoll);
-    UREG("strtoull", strtoull);
-    UREG("abort", abort);
-    UREG("exit", exit);
-    UREG("fopen", fopen);
-    UREG("fclose", fclose);
-    UREG("fread", fread);
-    UREG("fwrite", fwrite);
-    UREG("fseek", fseek);
-    UREG("ftell", ftell);
+    UREG("malloc", abi.malloc_fn);
+    UREG("calloc", abi.calloc_fn);
+    UREG("realloc", abi.realloc_fn);
+    UREG("free", abi.free_fn);
+    UREG("memcpy", abi.memcpy_fn);
+    UREG("memmove", abi.memmove_fn);
+    UREG("memset", abi.memset_fn);
+    UREG("memcmp", abi.memcmp_fn);
+    UREG("strlen", abi.strlen_fn);
+    UREG("strcmp", abi.strcmp_fn);
+    UREG("strncmp", abi.strncmp_fn);
+    UREG("strstr", abi.strstr_fn);
+    UREG("strchr", abi.strchr_fn);
+    UREG("strrchr", abi.strrchr_fn);
+    UREG("atoi", abi.atoi_fn);
+    UREG("atol", abi.atol_fn);
+    UREG("strtol", abi.strtol_fn);
+    UREG("strtoul", abi.strtoul_fn);
+    UREG("strtoll", abi.strtoll_fn);
+    UREG("strtoull", abi.strtoull_fn);
+    UREG("abort", abi.abort_fn);
+    UREG("exit", abi.exit_fn);
+    UREG("fopen", abi.fopen_fn);
+    UREG("fclose", abi.fclose_fn);
+    UREG("fread", abi.fread_fn);
+    UREG("fwrite", abi.fwrite_fn);
+    UREG("fseek", abi.fseek_fn);
+    UREG("ftell", abi.ftell_fn);
 #undef UREG
 }
 
 void pcps4_winapi_build_resolver(pcps4_pe_resolver *resolver)
 {
+    pcps4_winabi_exports abi;
+
     if (resolver == NULL)
         return;
 
+    pcps4_winabi_fill(&abi);
     pcps4_pe_resolver_init(resolver);
     g_resolver = resolver;
 
     /*
-     * ABI NOTE: a loaded PE calls every import the Microsoft-x64 way, so each
-     * registered entry must be an MS-ABI function (see pcps4_msabi.h). The
-     * D3D11 entries and ExitProcess below are wrapped; the remaining kernel32 /
-     * ucrt / winsock / xinput handlers are still registered as their System V
-     * implementations. That is enough for the D3D11 smoke binary (it imports
-     * only ExitProcess + D3D11CreateDeviceAndSwapChain), but a real game that
-     * imports e.g. memcpy or CreateFileA needs those wrapped the same way
-     * before it can call them without corrupting its own state.
+     * ABI NOTE: every function pointer placed in a native Windows PE import
+     * table must use the Microsoft x64 convention. The compatibility layer's
+     * real implementations remain System V; pcps4_winabi_fill() supplies
+     * compiler-generated MS-ABI forwarding thunks for those functions.
+     *
+     * The special win_* helpers in this file are themselves declared
+     * PCPS4_MS_ABI because they are import entry points directly.
      */
     register_kernel32(resolver, "KERNEL32.dll");
     register_kernel32(resolver, "KERNELBASE.dll");

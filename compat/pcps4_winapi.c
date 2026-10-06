@@ -5,6 +5,7 @@
 #include "pcps4_xinput.h"
 #include "pcps4_d3d11_com.h"
 #include "pcps4_loader.h"
+#include "pcps4_module.h"
 #include "pcps4_msabi.h"
 #include "pcps4_winabi.h"
 
@@ -22,6 +23,7 @@ typedef struct pcps4_module_handle {
 #define PCPS4_MODULE_MAGIC 0x504d4f44u
 
 static pcps4_pe_resolver *g_resolver = NULL;
+static pcps4_module_loader *g_module_loader = NULL;
 
 static void PCPS4_MS_ABI win_SetLastError(DWORD value);
 static uint64_t g_tls_bitmap;
@@ -305,6 +307,16 @@ static HMODULE PCPS4_MS_ABI win_LoadLibraryA(LPCSTR name)
     if (module_name_normalize(name, normalized, sizeof(normalized)) != 0) {
         win_SetLastError(87);
         return NULL;
+    }
+
+    if (g_module_loader != NULL) {
+        pcps4_module_status module_status =
+            pcps4_module_loader_load(g_module_loader, normalized);
+        if (module_status != PCPS4_MODULE_OK &&
+            module_status != PCPS4_MODULE_NOT_FOUND) {
+            win_SetLastError(126); /* ERROR_MOD_NOT_FOUND */
+            return NULL;
+        }
     }
 
     module = (pcps4_module_handle *)calloc(1, sizeof(*module));
@@ -721,6 +733,11 @@ static void register_ucrt(
     UREG("fseek", abi.fseek_fn);
     UREG("ftell", abi.ftell_fn);
 #undef UREG
+}
+
+void pcps4_winapi_set_module_loader(pcps4_module_loader *loader)
+{
+    g_module_loader = loader;
 }
 
 void pcps4_winapi_build_resolver(pcps4_pe_resolver *resolver)

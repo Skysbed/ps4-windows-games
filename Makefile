@@ -44,6 +44,7 @@ GFX_OBJ   := $(INTDIR)/pcps4_gfx.o
 GNM_OBJ   := $(INTDIR)/pcps4_gnm.o
 GPU_OBJ   := $(INTDIR)/pcps4_gpu.o
 D3D11_OBJ := $(INTDIR)/pcps4_d3d11.o
+SHADER_OBJ := $(INTDIR)/pcps4_shader.o
 
 ELF := $(INTDIR)/$(PROJECT).elf
 OELF := $(INTDIR)/$(PROJECT).oelf
@@ -107,17 +108,21 @@ $(GPU_OBJ): compat/pcps4_gpu.c compat/pcps4_gpu.h compat/pcps4_gfx.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
 
-$(D3D11_OBJ): compat/pcps4_d3d11.cpp compat/pcps4_d3d11.h compat/pcps4_gpu.h
+$(D3D11_OBJ): compat/pcps4_d3d11.cpp compat/pcps4_d3d11.h compat/pcps4_gpu.h compat/pcps4_shader.h
 	@mkdir -p "$(dir $@)"
 	$(CXX) $(CXXFLAGS) -o "$@" "$<"
+
+$(SHADER_OBJ): compat/pcps4_shader.c compat/pcps4_shader.h
+	@mkdir -p "$(dir $@)"
+	$(CC) $(CFLAGS) -o "$@" "$<"
 
 $(INTDIR):
 	@mkdir -p "$(INTDIR)"
 
-$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GPU_OBJ) $(D3D11_OBJ)
+$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ)
 	@test -n "$(OBJS)" || (echo "ERROR: no PC source files found in pc_source/."; exit 1)
 	$(LD) $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) \
-	       $(GPU_OBJ) $(D3D11_OBJ) -o "$@" $(LDFLAGS)
+	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) -o "$@" $(LDFLAGS)
 
 eboot.bin: $(ELF)
 	@test -n "$(OO_PS4_TOOLCHAIN)" || (echo "ERROR: OO_PS4_TOOLCHAIN is not set."; exit 1)
@@ -173,6 +178,7 @@ info:
 	@echo "Graphics backend: compat/pcps4_gfx.[ch]"
 	@echo "GPU resources: compat/pcps4_gpu.[ch]"
 	@echo "D3D11 façade: compat/pcps4_d3d11.[h/cpp]"
+	@echo "DXBC parser: compat/pcps4_shader.[h/c]"
 	@echo "GNM bridge: compat/pcps4_gnm.[ch]"
 	@echo "Fault boundary: compat/pcps4_fault.[ch]"
 	@echo "Content ID: $(CONTENT_ID)"

@@ -1,4 +1,5 @@
 #include "pcps4_d3d11.h"
+#include "pcps4_shader.h"
 
 #include <new>
 #include <string.h>
@@ -448,6 +449,13 @@ HRESULT ID3D11Device::CreateVertexShader(
 
     *ppVertexShader = NULL;
 
+    pcps4_dxbc_info_t dxbc = {};
+    if (pcps4_dxbc_inspect(
+            pShaderBytecode,
+            BytecodeLength,
+            &dxbc) != PCPS4_DXBC_OK)
+        return E_FAIL;
+
     pcps4_gpu_shader_desc_t desc = {
         pShaderBytecode,
         BytecodeLength,
@@ -485,6 +493,13 @@ HRESULT ID3D11Device::CreatePixelShader(
         return E_INVALIDARG;
 
     *ppPixelShader = NULL;
+
+    pcps4_dxbc_info_t dxbc = {};
+    if (pcps4_dxbc_inspect(
+            pShaderBytecode,
+            BytecodeLength,
+            &dxbc) != PCPS4_DXBC_OK)
+        return E_FAIL;
 
     pcps4_gpu_shader_desc_t desc = {
         pShaderBytecode,

@@ -307,6 +307,30 @@ static int check_sync_and_memory(void)
     if (InterlockedDecrement(&g_thread_value) != 0)
         return 17;
 
+    {
+        CRITICAL_SECTION critical_section;
+        int tls_marker = 0x13579BDF;
+        DWORD tls_slot;
+
+        InitializeCriticalSection(&critical_section);
+        EnterCriticalSection(&critical_section);
+        EnterCriticalSection(&critical_section);
+        if (!TryEnterCriticalSection(&critical_section))
+            return 18;
+        LeaveCriticalSection(&critical_section);
+        LeaveCriticalSection(&critical_section);
+        LeaveCriticalSection(&critical_section);
+        DeleteCriticalSection(&critical_section);
+
+        tls_slot = TlsAlloc();
+        if (tls_slot == TLS_OUT_OF_INDEXES)
+            return 19;
+        if (!TlsSetValue(tls_slot, &tls_marker) ||
+            TlsGetValue(tls_slot) != &tls_marker ||
+            !TlsFree(tls_slot))
+            return 20;
+    }
+
     return 0;
 }
 

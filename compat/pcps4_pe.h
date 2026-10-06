@@ -42,6 +42,7 @@ typedef enum pcps4_pe_status {
 #define PCPS4_PE_MACHINE_AMD64 0x8664u
 #define PCPS4_PE_MAGIC_PE32PLUS 0x20bu
 #define PCPS4_PE_NUM_DATA_DIRECTORIES 16
+#define PCPS4_PE_DIRECTORY_EXPORT 0
 #define PCPS4_PE_DIRECTORY_IMPORT 1
 #define PCPS4_PE_DIRECTORY_BASERELOC 5
 #define PCPS4_PE_DIRECTORY_TLS 9
@@ -131,6 +132,27 @@ pcps4_pe_status pcps4_pe_iterate_imports(const pcps4_pe_image *image,
 pcps4_pe_status pcps4_pe_map_image(const pcps4_pe_image *image,
                                    uint8_t *dest, size_t dest_size,
                                    uint64_t load_base);
+
+/*
+ * Callback invoked once per exported function. ordinal is the Windows
+ * export ordinal (the DLL's export base plus the function-table index).
+ * function_rva is relative to the module image base. forwarder is non-NULL
+ * for a forwarded export and contains its DLL.Function target.
+ */
+typedef int (*pcps4_pe_export_fn)(void *user,
+                                  const char *name,
+                                  uint32_t ordinal,
+                                  uint32_t function_rva,
+                                  const char *forwarder);
+
+/*
+ * Walk the export directory. Named exports are reported with their names;
+ * ordinal-only exports have name == NULL. Invalid tables are rejected, and
+ * forwarded exports are reported with forwarder rather than as code pointers.
+ */
+pcps4_pe_status pcps4_pe_iterate_exports(const pcps4_pe_image *image,
+                                         pcps4_pe_export_fn cb,
+                                         void *user);
 
 /* --- import resolution ------------------------------------------------- */
 

@@ -3,6 +3,7 @@
 #include "pcps4_shader.h"
 #include "pcps4_gnm_renderer.h"
 
+#include <limits.h>
 #include <new>
 #include <string.h>
 

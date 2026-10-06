@@ -90,6 +90,25 @@ typedef enum D3D11_PRIMITIVE_TOPOLOGY {
     D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP = 5
 } D3D11_PRIMITIVE_TOPOLOGY;
 
+typedef enum D3D11_INPUT_CLASSIFICATION {
+    D3D11_INPUT_PER_VERTEX_DATA = 0,
+    D3D11_INPUT_PER_INSTANCE_DATA = 1
+} D3D11_INPUT_CLASSIFICATION;
+
+#ifndef D3D11_APPEND_ALIGNED_ELEMENT
+#define D3D11_APPEND_ALIGNED_ELEMENT (0xffffffffu)
+#endif
+
+typedef struct D3D11_INPUT_ELEMENT_DESC {
+    const char *SemanticName;
+    UINT SemanticIndex;
+    DXGI_FORMAT Format;
+    UINT InputSlot;
+    UINT AlignedByteOffset;
+    D3D11_INPUT_CLASSIFICATION InputSlotClass;
+    UINT InstanceDataStepRate;
+} D3D11_INPUT_ELEMENT_DESC;
+
 typedef struct D3D11_MAPPED_SUBRESOURCE {
     void *pData;
     UINT RowPitch;
@@ -218,6 +237,26 @@ private:
     ~ID3D11PixelShader();
 };
 
+/* Validated copy of an application's vertex layout. At most 16 elements,
+ * semantic names are stored inline so the layout owns all of its data. */
+class ID3D11InputLayout {
+public:
+    D3D11_INPUT_ELEMENT_DESC elements[16];
+    char semantic_names[16][32];
+    UINT count;
+    uint32_t refs;
+
+    ID3D11InputLayout() : count(0), refs(1) {
+        memset(elements, 0, sizeof(elements));
+        memset(semantic_names, 0, sizeof(semantic_names));
+    }
+
+    HRESULT apply(pcps4_gpu_context_t *context);
+
+    UINT AddRef() { return ++refs; }
+    UINT Release() { if (refs > 1) return --refs; delete this; return 0; }
+};
+
 class ID3D11RenderTargetView {
 public:
     pcps4_gpu_render_target_t *native;
@@ -279,6 +318,7 @@ public:
                           DXGI_FORMAT Format,
                           UINT Offset);
     void IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY Topology);
+    void IASetInputLayout(ID3D11InputLayout *pInputLayout);
 
     HRESULT Map(ID3D11Buffer *pResource,
                 UINT Subresource,
@@ -337,6 +377,11 @@ public:
     HRESULT CreatePixelShader(const void *pShaderBytecode,
                               size_t BytecodeLength, void *pClassLinkage,
                               ID3D11PixelShader **ppPixelShader);
+    HRESULT CreateInputLayout(const D3D11_INPUT_ELEMENT_DESC *pInputElementDescs,
+                              UINT NumElements,
+                              const void *pShaderBytecodeWithInputSignature,
+                              size_t BytecodeLength,
+                              ID3D11InputLayout **ppInputLayout);
     void GetImmediateContext(ID3D11DeviceContext **ppImmediateContext);
 
     UINT AddRef() { return ++refs; }

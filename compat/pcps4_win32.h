@@ -93,3 +93,14 @@ PCPS4_MS_ABI UINT pcps4_abi_timeBeginPeriod(UINT);
 PCPS4_MS_ABI UINT pcps4_abi_timeEndPeriod(UINT);
 
 #endif
+
+PCPS4_MS_ABI HANDLE pcps4_abi_FindFirstFileA(LPCSTR, void *);
+PCPS4_MS_ABI HANDLE pcps4_abi_FindFirstFileW(LPCWSTR, void *);
+PCPS4_MS_ABI BOOL pcps4_abi_FindNextFileA(HANDLE, void *);
+PCPS4_MS_ABI BOOL pcps4_abi_FindNextFileW(HANDLE, void *);
+PCPS4_MS_ABI BOOL pcps4_abi_FindClose(HANDLE);
+PCPS4_MS_ABI BOOL pcps4_abi_GetFileAttributesExA(LPCSTR, DWORD, void *);
+PCPS4_MS_ABI BOOL pcps4_abi_GetFileAttributesExW(LPCWSTR, DWORD, void *);
+PCPS4_MS_ABI DWORD pcps4_abi_GetLogicalDrives(void);
+PCPS4_MS_ABI UINT pcps4_abi_GetDriveTypeA(LPCSTR);
+PCPS4_MS_ABI UINT pcps4_abi_GetDriveTypeW(LPCWSTR);

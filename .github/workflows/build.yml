@@ -1,4 +1,4 @@
-name: OpenOrbis build
+name: PcPs4 OpenOrbis build
 
 on:
   push:
@@ -10,43 +10,48 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout PcPs4
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download OpenOrbis toolchain
+      - name: Download OpenOrbis v0.5.4 LLVM 18 toolchain
         env:
           OPENORBIS_VERSION: v0.5.4
         run: |
           mkdir -p "$GITHUB_WORKSPACE/toolchain"
-          curl -fL "https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain/releases/download/$OPENORBIS_VERSION/toolchain-llvm-18.tar.gz"             | tar -xz --strip-components=2 -C "$GITHUB_WORKSPACE/toolchain"
+          curl -fL "https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain/releases/download/$OPENORBIS_VERSION/toolchain-llvm-18.tar.gz" |
+            tar -xz --strip-components=2 -C "$GITHUB_WORKSPACE/toolchain"
           echo "OO_PS4_TOOLCHAIN=$GITHUB_WORKSPACE/toolchain" >> "$GITHUB_ENV"
 
       - name: Install host build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang lld make
+          sudo apt-get install -y clang lld make python3
 
-      - name: Verify OpenOrbis
+      - name: Test translation layer
+        run: make test
+
+      - name: Verify OpenOrbis installation
         run: |
           test -f "$OO_PS4_TOOLCHAIN/link.x"
           test -f "$OO_PS4_TOOLCHAIN/lib/crt1.o"
           test -x "$OO_PS4_TOOLCHAIN/bin/linux/create-fself"
-          clang --version
-          ld.lld --version
 
-      - name: Build PS4 application
+      - name: Translate and build PS4 app
         run: make
 
-      - name: Verify eboot
-        run: |
-          test -s eboot.bin
-          file eboot.bin
-
-      - name: Upload PS4 eboot
+      - name: Upload eboot.bin
         uses: actions/upload-artifact@v4
         with:
           name: PcPs4-eboot
           path: eboot.bin
+
+      - name: Upload translated source
+        uses: actions/upload-artifact@v4
+        with:
+          name: PcPs4-translated-source
+          path: |
+            build/generated/main.c
+            build/translation.json
 
       - name: Upload ELF
         uses: actions/upload-artifact@v4

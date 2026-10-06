@@ -3,6 +3,7 @@
 
 #include "pcps4_compat.h"
 #include "pcps4_xinput.h"
+#include "pcps4_d3d11_com.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -214,6 +215,18 @@ static void register_kernel32(
 #undef KREG
 }
 
+static void register_d3d11(
+    pcps4_pe_resolver *resolver,
+    const char *dll)
+{
+    (void)pcps4_pe_resolver_register(
+        resolver, dll, "D3D11CreateDeviceAndSwapChain",
+        (void *)pcps4_d3d11_com_create_device_and_swap_chain);
+    (void)pcps4_pe_resolver_register(
+        resolver, dll, "D3D11CreateDevice",
+        (void *)pcps4_d3d11_com_create_device);
+}
+
 static void register_winsock(
     pcps4_pe_resolver *resolver,
     const char *dll)
@@ -298,6 +311,7 @@ void pcps4_winapi_build_resolver(pcps4_pe_resolver *resolver)
     register_kernel32(resolver, "KERNEL32.dll");
     register_kernel32(resolver, "KERNELBASE.dll");
     register_winsock(resolver, "WS2_32.dll");
+    register_d3d11(resolver, "d3d11.dll");
     register_xinput(resolver, "XINPUT1_4.dll");
     register_xinput(resolver, "XINPUT1_3.dll");
     register_ucrt(resolver, "ucrtbase.dll");

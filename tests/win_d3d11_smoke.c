@@ -3,7 +3,7 @@
 
 /*
  * Freestanding x64 Windows compatibility diagnostic, run on PS4 as
- * /app0/game/game.exe. It probes DLL loading, DXGI adapter discovery, D3D11
+ * /app0/game/game.exe. It probes process-heap APIs, DLL loading, DXGI adapter discovery, D3D11
  * device/swap-chain setup, vertex-buffer/input-layout binding, triangle Draw,
  * repeated Present calls, cleanup, and return to the PcPs4 status screen.
  *
@@ -72,6 +72,48 @@ void WINAPI WinMainCRTStartup(void)
     g_swap_desc.BufferCount = 2;
     g_swap_desc.Windowed = TRUE;
     g_swap_desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+
+    /*
+     * Process-heap ABI smoke: allocate zeroed memory, query its size, grow it
+     * with HEAP_ZERO_MEMORY, verify preserved bytes and the cleared extension,
+     * then validate and free the block.
+     */
+    {
+        HANDLE heap = GetProcessHeap();
+        unsigned char *memory;
+        unsigned char *grown;
+
+        if (heap == 0)
+            ExitProcess(12);
+        memory = (unsigned char *)HeapAlloc(heap, HEAP_ZERO_MEMORY, 16);
+        if (memory == 0)
+            ExitProcess(13);
+        if (HeapSize(heap, 0, memory) != 16 ||
+            memory[0] != 0 ||
+            !HeapValidate(heap, 0, memory)) {
+            (void)HeapFree(heap, 0, memory);
+            ExitProcess(14);
+        }
+
+        memory[0] = 0xA5;
+        grown = (unsigned char *)HeapReAlloc(
+            heap, HEAP_ZERO_MEMORY, memory, 32);
+        if (grown == 0) {
+            (void)HeapFree(heap, 0, memory);
+            ExitProcess(15);
+        }
+        memory = grown;
+
+        if (HeapSize(heap, 0, memory) != 32 ||
+            memory[0] != 0xA5 ||
+            memory[16] != 0 ||
+            !HeapValidate(heap, 0, memory)) {
+            (void)HeapFree(heap, 0, memory);
+            ExitProcess(16);
+        }
+        if (!HeapFree(heap, 0, memory))
+            ExitProcess(17);
+    }
 
     /* Probe a real adjacent PE DLL and its exported function. */
     {

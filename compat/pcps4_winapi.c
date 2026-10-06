@@ -26,10 +26,10 @@ static pcps4_pe_resolver *g_resolver = NULL;
 static pcps4_module_loader *g_module_loader = NULL;
 
 static void PCPS4_MS_ABI win_SetLastError(DWORD value);
-static uint64_t g_tls_bitmap;
-static __thread void *g_tls_values[PCPS4_MAX_TLS_SLOTS];
 #define PCPS4_MAX_TLS_SLOTS 64u
 #define TLS_OUT_OF_INDEXES 0xFFFFFFFFu
+static uint64_t g_tls_bitmap;
+static __thread void *g_tls_values[PCPS4_MAX_TLS_SLOTS]
 
 typedef struct pcps4_win_critical_section {
     void *DebugInfo;

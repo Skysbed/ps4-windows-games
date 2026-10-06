@@ -288,24 +288,29 @@ extern "C" int pcps4_d3d11_game_run(void)
 
         int32_t dx = 0;
         int32_t dy = 0;
+        int input_connected = 0;
+        int action_pressed = 0;
 
         if (input_rc == ERROR_SUCCESS) {
+            input_connected = 1;
+
             int32_t lx = (int32_t)state.Gamepad.sThumbLX;
             int32_t ly = (int32_t)state.Gamepad.sThumbLY;
 
-            if (lx > 8000) dx += 3;
-            if (lx < -8000) dx -= 3;
-            if (ly > 8000) dy -= 3;
-            if (ly < -8000) dy += 3;
+            /* Make movement deliberately obvious in this compatibility test. */
+            if (lx > 8000) dx += 5;
+            if (lx < -8000) dx -= 5;
+            if (ly > 8000) dy -= 5;
+            if (ly < -8000) dy += 5;
 
             if ((state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_LEFT) != 0)
-                dx -= 3;
+                dx -= 5;
             if ((state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_RIGHT) != 0)
-                dx += 3;
+                dx += 5;
             if ((state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_UP) != 0)
-                dy -= 3;
+                dy -= 5;
             if ((state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_DOWN) != 0)
-                dy += 3;
+                dy += 5;
 
             /*
              * Options is the XInput Start button in the PS4 bridge. It exits
@@ -316,6 +321,7 @@ extern "C" int pcps4_d3d11_game_run(void)
                 break;
 
             if ((state.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0) {
+                action_pressed = 1;
                 XINPUT_VIBRATION vibration = {0, 0, 12000, 12000};
                 (void)XInputSetState(0, &vibration);
             } else {
@@ -343,14 +349,28 @@ extern "C" int pcps4_d3d11_game_run(void)
         float sx = 0.10f;
         float sy = 0.14f;
 
+        /*
+         * Input diagnostics:
+         * - connected controller => slightly larger triangle
+         * - Cross/A held         => warm highlight + rumble
+         *
+         * This makes it visually obvious that the XInput bridge is alive even
+         * before movement is tested.
+         */
+        float input_scale = input_connected ? 1.15f : 1.0f;
+        sx *= input_scale;
+        sy *= input_scale;
+
+        float tint = action_pressed ? 1.0f : 0.0f;
+
         vertices[0] = {{cx,        cy - sy, 0.0f},
-                       {0.25f, 0.85f, 1.0f, 1.0f},
+                       {0.25f + 0.65f * tint, 0.85f, 1.0f - 0.55f * tint, 1.0f},
                        {0.5f, 0.0f}};
         vertices[1] = {{cx + sx,   cy + sy, 0.0f},
-                       {0.15f, 0.45f, 1.0f, 1.0f},
+                       {0.15f + 0.65f * tint, 0.45f, 1.0f - 0.55f * tint, 1.0f},
                        {1.0f, 1.0f}};
         vertices[2] = {{cx - sx,   cy + sy, 0.0f},
-                       {0.75f, 0.95f, 1.0f, 1.0f},
+                       {0.75f + 0.25f * tint, 0.95f, 1.0f - 0.55f * tint, 1.0f},
                        {0.0f, 1.0f}};
 
         D3D11_MAPPED_SUBRESOURCE mapped = {};

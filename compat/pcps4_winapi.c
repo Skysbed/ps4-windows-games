@@ -207,6 +207,95 @@ static int module_name_normalize(
     return 0;
 }
 
+static PCPS4_MS_ABI HANDLE win_CreateFileW(
+    LPCWSTR path,
+    uint32_t desired_access,
+    uint32_t share_mode,
+    void *security_attributes,
+    uint32_t creation_disposition,
+    uint32_t attributes,
+    void *template_file)
+{
+    char utf8[1024];
+
+    if (pcps4_wide_to_utf8(path, utf8, sizeof(utf8)) != 0) {
+        win_SetLastError(87);
+        return INVALID_HANDLE_VALUE;
+    }
+
+    return pcps4_CreateFileA(
+        utf8, desired_access, share_mode, security_attributes,
+        creation_disposition, attributes, template_file);
+}
+
+static PCPS4_MS_ABI BOOL win_GetFileSizeEx(HANDLE handle, void *file_size)
+{
+    int64_t value;
+
+    if (file_size == NULL) {
+        win_SetLastError(87);
+        return FALSE;
+    }
+
+    value = pcps4_sys_file_size((pcps4_os_handle_t *)handle);
+    if (value < 0) {
+        win_SetLastError(6);
+        return FALSE;
+    }
+
+    memcpy(file_size, &value, sizeof(value));
+    return TRUE;
+}
+
+static PCPS4_MS_ABI BOOL win_SetFilePointerEx(
+    HANDLE handle, int64_t distance, void *new_pointer, DWORD move_method)
+{
+    int64_t result;
+
+    result = pcps4_sys_file_seek(
+        (pcps4_os_handle_t *)handle,
+        distance,
+        (int)move_method);
+    if (result < 0) {
+        win_SetLastError(6);
+        return FALSE;
+    }
+
+    if (new_pointer != NULL)
+        memcpy(new_pointer, &result, sizeof(result));
+
+    return TRUE;
+}
+
+static PCPS4_MS_ABI DWORD win_GetModuleFileNameW(
+    HANDLE module,
+    LPWSTR filename,
+    DWORD size)
+{
+    const char *path = "/app0/game/game.exe";
+    size_t length = strlen(path);
+
+    (void)module;
+
+    if (filename == NULL || size == 0) {
+        win_SetLastError(87);
+        return 0;
+    }
+
+    if (length + 1 > size) {
+        for (size_t i = 0; i + 1 < size; ++i)
+            filename[i] = (WCHAR)(unsigned char)path[i];
+        filename[size - 1] = 0;
+        win_SetLastError(122);
+        return size;
+    }
+
+    for (size_t i = 0; i < length; ++i)
+        filename[i] = (WCHAR)(unsigned char)path[i];
+    filename[length] = 0;
+    return (DWORD)length;
+}
+
 static PCPS4_MS_ABI HMODULE win_LoadLibraryW(LPCWSTR name)
 {
     char utf8[1024];
@@ -553,9 +642,12 @@ static void register_kernel32(
     KREG("InterlockedDecrement", pcps4_abi_InterlockedDecrement);
     KREG("CreateFileA", pcps4_abi_CreateFileA);
     KREG("ReadFile", pcps4_abi_ReadFile);
+    KREG("CreateFileW", win_CreateFileW);
     KREG("WriteFile", pcps4_abi_WriteFile);
     KREG("GetFileSize", pcps4_abi_GetFileSize);
+    KREG("GetFileSizeEx", win_GetFileSizeEx);
     KREG("SetFilePointer", pcps4_abi_SetFilePointer);
+    KREG("SetFilePointerEx", win_SetFilePointerEx);
     KREG("DeleteFileA", pcps4_abi_DeleteFileA);
     KREG("CreateDirectoryA", pcps4_abi_CreateDirectoryA);
     KREG("CloseHandle", pcps4_abi_CloseHandle);
@@ -571,6 +663,7 @@ static void register_kernel32(
     KREG("GetEnvironmentVariableA", win_GetEnvironmentVariableA);
     KREG("GetCommandLineA", win_GetCommandLineA);
     KREG("GetModuleFileNameA", win_GetModuleFileNameA);
+    KREG("GetModuleFileNameW", win_GetModuleFileNameW);
     KREG("QueryPerformanceCounter", win_QueryPerformanceCounter);
     KREG("QueryPerformanceFrequency", win_QueryPerformanceFrequency);
     KREG("GetProcessHeap", win_GetProcessHeap);

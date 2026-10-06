@@ -58,11 +58,17 @@ int main(void)
 
 #if PCPS4_RUN_GAME
     /*
-     * Enter the real interactive path after the compatibility tests. The
-     * demo is intentionally ordinary PC-style D3D11 + XInput source so the
-     * translator and runtime are exercised together.
+     * The status screen owns VideoOut while the compatibility tests run.
+     * Release it before the D3D11 path creates its own graphics context.
      */
-    (void)pcps4_d3d11_game_run();
+    pcps4_status_suspend_display();
+
+    /* Enter the interactive PC-style D3D11 + XInput path. */
+    int game_rc = pcps4_d3d11_game_run();
+    pcps4_status_log("[pcps4] interactive D3D11 demo returned %d", game_rc);
+
+    /* Reacquire VideoOut if the user exited the interactive demo. */
+    pcps4_status_resume_display();
 #endif
 
     /* Stay on the result screen if the game path is disabled or returns. */

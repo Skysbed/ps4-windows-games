@@ -43,6 +43,7 @@ jobs:
           make CC=clang AR=ar -j2
 
           cd "$GITHUB_WORKSPACE/external/ps4-graphics/dxbc-spirv"
+          git submodule update --init --recursive
           meson setup builddir -Denable_tools=true
           ninja -C builddir
 

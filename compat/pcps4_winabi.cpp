@@ -1,11 +1,27 @@
 #include "pcps4_winabi.h"
 
 #include "pcps4_compat.h"
+#include "pcps4_xinput.h"
 #include "pcps4_msabi.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* C++ exposes const/non-const overloads for these libc names; use explicit
+ * adapters so PCPS4_MSW receives one unambiguous function type. */
+static const char *pcps4_winabi_strstr(const char *a, const char *b)
+{
+    return strstr(a, b);
+}
+static const char *pcps4_winabi_strchr(const char *a, int c)
+{
+    return strchr(a, c);
+}
+static const char *pcps4_winabi_strrchr(const char *a, int c)
+{
+    return strrchr(a, c);
+}
 
 /*
  * Each assignment below is a compiler-generated MS-x64 thunk. The original
@@ -84,9 +100,9 @@ void pcps4_winabi_fill(pcps4_winabi_exports *exports)
     WABI(strlen_fn, strlen);
     WABI(strcmp_fn, strcmp);
     WABI(strncmp_fn, strncmp);
-    WABI(strstr_fn, strstr);
-    WABI(strchr_fn, strchr);
-    WABI(strrchr_fn, strrchr);
+    WABI(strstr_fn, pcps4_winabi_strstr);
+    WABI(strchr_fn, pcps4_winabi_strchr);
+    WABI(strrchr_fn, pcps4_winabi_strrchr);
     WABI(atoi_fn, atoi);
     WABI(atol_fn, atol);
     WABI(strtol_fn, strtol);

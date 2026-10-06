@@ -212,6 +212,24 @@ static inline DWORD pcps4_WaitForSingleObject(HANDLE handle,
     return (DWORD)rc;
 }
 
+static inline HANDLE pcps4_CreateEventA(
+    void *attributes, BOOL manual_reset, BOOL initial_state, const char *name)
+{
+    (void)attributes;
+    return (HANDLE)pcps4_sys_event_create(
+        manual_reset, initial_state, name);
+}
+
+static inline BOOL pcps4_SetEvent(HANDLE handle)
+{
+    return pcps4_sys_event_set((pcps4_os_handle_t *)handle) == 0;
+}
+
+static inline BOOL pcps4_ResetEvent(HANDLE handle)
+{
+    return pcps4_sys_event_reset((pcps4_os_handle_t *)handle) == 0;
+}
+
 static inline BOOL pcps4_ReleaseMutex(HANDLE handle)
 {
     return pcps4_sys_mutex_release(

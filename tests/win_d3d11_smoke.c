@@ -54,7 +54,7 @@ void WINAPI WinMainCRTStartup(void)
     hr = swap_chain->lpVtbl->GetBuffer(
         swap_chain,
         0,
-        &IID_ID3D11Texture2D,
+        0,
         (void **)&back_buffer);
 
     if (FAILED(hr) || !back_buffer)
@@ -62,7 +62,7 @@ void WINAPI WinMainCRTStartup(void)
 
     hr = device->lpVtbl->CreateRenderTargetView(
         device,
-        back_buffer,
+        (ID3D11Resource *)back_buffer,
         0,
         &rtv);
 

@@ -64,14 +64,14 @@ extern int32_t sceKernelMunmap(void *addr, size_t len);
 
 static void vm_lock(void)
 {
-    while (__atomic_test_and_set(&vm_regions_lock, __ATOMIC_ACQUIRE)) {
+    while (__atomic_exchange_n(&vm_regions_lock, 1, __ATOMIC_ACQUIRE) != 0) {
         (void)sceKernelUsleep(50);
     }
 }
 
 static void vm_unlock(void)
 {
-    __atomic_clear(&vm_regions_lock, __ATOMIC_RELEASE);
+    __atomic_store_n(&vm_regions_lock, 0, __ATOMIC_RELEASE);
 }
 
 static int vm_round_length(size_t length, size_t *rounded)

@@ -1,4 +1,5 @@
 #include "pcps4_d3d11_com.h"
+#include "pcps4_abi.h"
 
 #include <new>
 #include <stdlib.h>
@@ -11,27 +12,27 @@ typedef struct PCPS4Guid {
     uint8_t data4[8];
 } PCPS4Guid;
 
-static const PCPS4Guid IID_IUnknown_PCPS4 = {
+static PCPS4_MS_ABI const PCPS4Guid IID_IUnknown_PCPS4 = {
     0x00000000u, 0x0000u, 0x0000u,
     {0xC0,0x00,0x00,0x00,0x00,0x00,0x00,0x46}
 };
 
-static const PCPS4Guid IID_ID3D11Device_PCPS4 = {
+static PCPS4_MS_ABI const PCPS4Guid IID_ID3D11Device_PCPS4 = {
     0xdb6f6ddbu, 0xac77u, 0x4e88u,
     {0x82,0x53,0x81,0x9d,0xf9,0xbb,0xf1,0x40}
 };
 
-static const PCPS4Guid IID_ID3D11DeviceContext_PCPS4 = {
+static PCPS4_MS_ABI const PCPS4Guid IID_ID3D11DeviceContext_PCPS4 = {
     0xc0bfa96cu, 0xe089u, 0x44fbu,
     {0x8e,0xaf,0x26,0xf8,0x79,0x61,0x90,0xda}
 };
 
-static const PCPS4Guid IID_IDXGISwapChain_PCPS4 = {
+static PCPS4_MS_ABI const PCPS4Guid IID_IDXGISwapChain_PCPS4 = {
     0x310d36a0u, 0xd2e7u, 0x4c0au,
     {0xaa,0x04,0x6a,0x9d,0x23,0xb8,0x88,0x6a}
 };
 
-static int pcps4_guid_equal(
+static PCPS4_MS_ABI int pcps4_guid_equal(
     const void *a,
     const PCPS4Guid *b)
 {
@@ -89,9 +90,9 @@ struct PCPS4ComSwapChain {
 };
 
 /* Forward declarations used by proxy release paths. */
-static UINT com_device_release(PCPS4ComDevice *self);
-static UINT com_context_release(PCPS4ComContext *self);
-static UINT com_resource_release(PCPS4ComResource *self);
+static PCPS4_MS_ABI UINT com_device_release(PCPS4ComDevice *self);
+static PCPS4_MS_ABI UINT com_context_release(PCPS4ComContext *self);
+static PCPS4_MS_ABI UINT com_resource_release(PCPS4ComResource *self);
 
 #define PCPS4_COM_DEVICE_SLOTS 43
 #define PCPS4_COM_CONTEXT_SLOTS 114
@@ -102,25 +103,25 @@ static UINT com_resource_release(PCPS4ComResource *self);
 #define PCPS4_COM_RESOURCE_DESC_SLOTS 8
 #define PCPS4_COM_RESOURCE_DESC_FULL_SLOTS 11
 
-static void com_noop(void) {}
-static HRESULT com_nyi(void) { return E_NOTIMPL; }
+static PCPS4_MS_ABI void com_noop(void) {}
+static PCPS4_MS_ABI HRESULT com_nyi(void) { return E_NOTIMPL; }
 
-static UINT com_device_addref(PCPS4ComDevice *self)
+static PCPS4_MS_ABI UINT com_device_addref(PCPS4ComDevice *self)
 {
     return ++self->refs;
 }
 
-static UINT com_context_addref(PCPS4ComContext *self)
+static PCPS4_MS_ABI UINT com_context_addref(PCPS4ComContext *self)
 {
     return ++self->refs;
 }
 
-static UINT com_swap_addref(PCPS4ComSwapChain *self)
+static PCPS4_MS_ABI UINT com_swap_addref(PCPS4ComSwapChain *self)
 {
     return ++self->refs;
 }
 
-static HRESULT com_resource_query(
+static PCPS4_MS_ABI HRESULT com_resource_query(
     PCPS4ComResource *self,
     void *riid,
     void **out)
@@ -132,12 +133,12 @@ static HRESULT com_resource_query(
     return E_NOTIMPL;
 }
 
-static UINT com_resource_addref(PCPS4ComResource *self)
+static PCPS4_MS_ABI UINT com_resource_addref(PCPS4ComResource *self)
 {
     return ++self->refs;
 }
 
-static void com_release_internal_resource(PCPS4ComResource *self)
+static PCPS4_MS_ABI void com_release_internal_resource(PCPS4ComResource *self)
 {
     if (self->impl == NULL)
         return;
@@ -184,7 +185,7 @@ static void com_release_internal_resource(PCPS4ComResource *self)
     }
 }
 
-static UINT com_resource_release(PCPS4ComResource *self)
+static PCPS4_MS_ABI UINT com_resource_release(PCPS4ComResource *self)
 {
     if (self == NULL || self->refs == 0)
         return 0;
@@ -210,7 +211,7 @@ static UINT com_resource_release(PCPS4ComResource *self)
     return 0;
 }
 
-static void com_resource_get_device(
+static PCPS4_MS_ABI void com_resource_get_device(
     PCPS4ComResource *self,
     void **out)
 {
@@ -226,7 +227,7 @@ static void com_resource_get_device(
     *out = self->device;
 }
 
-static void com_resource_get_type(
+static PCPS4_MS_ABI void com_resource_get_type(
     PCPS4ComResource *self,
     UINT *out)
 {
@@ -244,7 +245,7 @@ static void com_resource_get_type(
     }
 }
 
-static void com_buffer_get_desc(
+static PCPS4_MS_ABI void com_buffer_get_desc(
     PCPS4ComResource *self,
     D3D11_BUFFER_DESC *desc)
 {
@@ -267,7 +268,7 @@ static void com_buffer_get_desc(
                       D3D11_BIND_CONSTANT_BUFFER;
 }
 
-static void com_texture_get_desc(
+static PCPS4_MS_ABI void com_texture_get_desc(
     PCPS4ComResource *self,
     D3D11_TEXTURE2D_DESC *desc)
 {
@@ -279,7 +280,7 @@ static void com_texture_get_desc(
         ((ID3D11Texture2D *)self->impl)->GetDesc(desc);
 }
 
-static HRESULT com_view_get_resource(
+static PCPS4_MS_ABI HRESULT com_view_get_resource(
     PCPS4ComResource *self,
     void **out)
 {
@@ -296,12 +297,12 @@ static HRESULT com_view_get_resource(
     return S_OK;
 }
 
-static UINT com_texture_release(PCPS4ComResource *self)
+static PCPS4_MS_ABI UINT com_texture_release(PCPS4ComResource *self)
 {
     return com_resource_release(self);
 }
 
-static PCPS4ComResource *wrap_resource(
+static PCPS4_MS_ABI PCPS4ComResource *wrap_resource(
     PCPS4ComDevice *device,
     uint32_t kind,
     void *impl,
@@ -329,16 +330,16 @@ static PCPS4ComResource *wrap_resource(
     return out;
 }
 
-/* Forward declarations for the static vtables. */
-static const void *g_device_vtbl[PCPS4_COM_DEVICE_SLOTS];
-static const void *g_context_vtbl[PCPS4_COM_CONTEXT_SLOTS];
-static const void *g_swap_vtbl[PCPS4_COM_SWAP_SLOTS];
-static const void *g_devicechild_vtbl[PCPS4_COM_RESOURCE_DEVICECHILD_SLOTS];
-static const void *g_view_vtbl[PCPS4_COM_RESOURCE_VIEW_SLOTS];
-static const void *g_desc_vtbl[PCPS4_COM_RESOURCE_DESC_SLOTS];
-static const void *g_resource_full_vtbl[PCPS4_COM_RESOURCE_DESC_FULL_SLOTS];
+/* Forward declarations for the static PCPS4_MS_ABI vtables. */
+static PCPS4_MS_ABI const void *g_device_vtbl[PCPS4_COM_DEVICE_SLOTS];
+static PCPS4_MS_ABI const void *g_context_vtbl[PCPS4_COM_CONTEXT_SLOTS];
+static PCPS4_MS_ABI const void *g_swap_vtbl[PCPS4_COM_SWAP_SLOTS];
+static PCPS4_MS_ABI const void *g_devicechild_vtbl[PCPS4_COM_RESOURCE_DEVICECHILD_SLOTS];
+static PCPS4_MS_ABI const void *g_view_vtbl[PCPS4_COM_RESOURCE_VIEW_SLOTS];
+static PCPS4_MS_ABI const void *g_desc_vtbl[PCPS4_COM_RESOURCE_DESC_SLOTS];
+static PCPS4_MS_ABI const void *g_resource_full_vtbl[PCPS4_COM_RESOURCE_DESC_FULL_SLOTS];
 
-static HRESULT com_device_query(
+static PCPS4_MS_ABI HRESULT com_device_query(
     PCPS4ComDevice *self,
     void *riid,
     void **out)
@@ -358,7 +359,7 @@ static HRESULT com_device_query(
     return E_NOINTERFACE;
 }
 
-static UINT com_device_release(PCPS4ComDevice *self)
+static PCPS4_MS_ABI UINT com_device_release(PCPS4ComDevice *self)
 {
     if (self == NULL || self->refs == 0)
         return 0;
@@ -376,7 +377,7 @@ static UINT com_device_release(PCPS4ComDevice *self)
     return 0;
 }
 
-static void com_context_get_device(
+static PCPS4_MS_ABI void com_context_get_device(
     PCPS4ComContext *self,
     void **out)
 {
@@ -389,7 +390,7 @@ static void com_context_get_device(
     }
 }
 
-static HRESULT com_context_query(
+static PCPS4_MS_ABI HRESULT com_context_query(
     PCPS4ComContext *self,
     void *riid,
     void **out)
@@ -409,7 +410,7 @@ static HRESULT com_context_query(
     return E_NOINTERFACE;
 }
 
-static UINT com_context_release(PCPS4ComContext *self)
+static PCPS4_MS_ABI UINT com_context_release(PCPS4ComContext *self)
 {
     if (self == NULL || self->refs == 0)
         return 0;
@@ -430,7 +431,7 @@ static UINT com_context_release(PCPS4ComContext *self)
     return 0;
 }
 
-static HRESULT com_swap_query(
+static PCPS4_MS_ABI HRESULT com_swap_query(
     PCPS4ComSwapChain *self,
     void *riid,
     void **out)
@@ -450,7 +451,7 @@ static HRESULT com_swap_query(
     return E_NOINTERFACE;
 }
 
-static UINT com_swap_release(PCPS4ComSwapChain *self)
+static PCPS4_MS_ABI UINT com_swap_release(PCPS4ComSwapChain *self)
 {
     if (self == NULL || self->refs == 0)
         return 0;
@@ -478,25 +479,25 @@ static UINT com_swap_release(PCPS4ComSwapChain *self)
 }
 
 /* IUnknown / DXGI base methods. */
-static HRESULT swap_private_data(PCPS4ComSwapChain *self, void *a, UINT b, const void *c)
+static PCPS4_MS_ABI HRESULT swap_private_data(PCPS4ComSwapChain *self, void *a, UINT b, const void *c)
 { (void)self; (void)a; (void)b; (void)c; return E_NOTIMPL; }
-static HRESULT swap_private_data_i(PCPS4ComSwapChain *self, void *a, const void *b)
+static PCPS4_MS_ABI HRESULT swap_private_data_i(PCPS4ComSwapChain *self, void *a, const void *b)
 { (void)self; (void)a; (void)b; return E_NOTIMPL; }
-static HRESULT swap_get_private_data(PCPS4ComSwapChain *self, void *a, UINT *b, void *c)
+static PCPS4_MS_ABI HRESULT swap_get_private_data(PCPS4ComSwapChain *self, void *a, UINT *b, void *c)
 { (void)self; (void)a; (void)b; (void)c; return E_NOTIMPL; }
-static HRESULT swap_get_parent(PCPS4ComSwapChain *self, void *a, void **b)
+static PCPS4_MS_ABI HRESULT swap_get_parent(PCPS4ComSwapChain *self, void *a, void **b)
 { (void)self; (void)a; if (b) *b=NULL; return E_NOTIMPL; }
-static HRESULT swap_get_device(PCPS4ComSwapChain *self, void *a, void **b)
+static PCPS4_MS_ABI HRESULT swap_get_device(PCPS4ComSwapChain *self, void *a, void **b)
 { (void)a; if (b == NULL) return E_INVALIDARG; *b=NULL; if (self->device) { ++self->device->refs; *b=self->device; return S_OK; } return E_FAIL; }
 
-static HRESULT swap_present(PCPS4ComSwapChain *self, UINT sync, UINT flags)
+static PCPS4_MS_ABI HRESULT swap_present(PCPS4ComSwapChain *self, UINT sync, UINT flags)
 {
     if (self == NULL || self->impl == NULL)
         return E_FAIL;
     return self->impl->Present(sync, flags);
 }
 
-static HRESULT swap_get_buffer(
+static PCPS4_MS_ABI HRESULT swap_get_buffer(
     PCPS4ComSwapChain *self,
     UINT buffer,
     void *riid,
@@ -531,12 +532,12 @@ static HRESULT swap_get_buffer(
     return S_OK;
 }
 
-static HRESULT swap_set_fullscreen(
+static PCPS4_MS_ABI HRESULT swap_set_fullscreen(
     PCPS4ComSwapChain *self, int fullscreen, void *target)
 {
     (void)self; (void)fullscreen; (void)target; return S_OK;
 }
-static HRESULT swap_get_fullscreen(
+static PCPS4_MS_ABI HRESULT swap_get_fullscreen(
     PCPS4ComSwapChain *self, int *fullscreen, void **target)
 {
     if (fullscreen) *fullscreen = 0;
@@ -544,7 +545,7 @@ static HRESULT swap_get_fullscreen(
     (void)self;
     return S_OK;
 }
-static HRESULT swap_get_desc(
+static PCPS4_MS_ABI HRESULT swap_get_desc(
     PCPS4ComSwapChain *self, DXGI_SWAP_CHAIN_DESC *desc)
 {
     if (self == NULL || desc == NULL)
@@ -559,34 +560,34 @@ static HRESULT swap_get_desc(
     desc->SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
     return S_OK;
 }
-static HRESULT swap_resize_buffers(
+static PCPS4_MS_ABI HRESULT swap_resize_buffers(
     PCPS4ComSwapChain *self, UINT count, UINT width, UINT height,
     DXGI_FORMAT format, UINT flags)
 {
     (void)self; (void)count; (void)width; (void)height; (void)format; (void)flags;
     return E_NOTIMPL;
 }
-static HRESULT swap_resize_target(PCPS4ComSwapChain *self, const DXGI_MODE_DESC *desc)
+static PCPS4_MS_ABI HRESULT swap_resize_target(PCPS4ComSwapChain *self, const DXGI_MODE_DESC *desc)
 { (void)self; (void)desc; return E_NOTIMPL; }
-static HRESULT swap_get_output(PCPS4ComSwapChain *self, void **output)
+static PCPS4_MS_ABI HRESULT swap_get_output(PCPS4ComSwapChain *self, void **output)
 { if (output) *output=NULL; (void)self; return E_NOTIMPL; }
-static HRESULT swap_get_stats(PCPS4ComSwapChain *self, void *stats)
+static PCPS4_MS_ABI HRESULT swap_get_stats(PCPS4ComSwapChain *self, void *stats)
 { (void)self; (void)stats; return E_NOTIMPL; }
-static HRESULT swap_get_last_present(PCPS4ComSwapChain *self, UINT *count)
+static PCPS4_MS_ABI HRESULT swap_get_last_present(PCPS4ComSwapChain *self, UINT *count)
 { if (count) *count=0; (void)self; return S_OK; }
 
 /* Resource vtable entries. */
-static HRESULT res_get_private(PCPS4ComResource *s, void *g, UINT *n, void *p)
+static PCPS4_MS_ABI HRESULT res_get_private(PCPS4ComResource *s, void *g, UINT *n, void *p)
 { (void)s; (void)g; (void)n; (void)p; return E_NOTIMPL; }
-static HRESULT res_set_private(PCPS4ComResource *s, void *g, UINT n, const void *p)
+static PCPS4_MS_ABI HRESULT res_set_private(PCPS4ComResource *s, void *g, UINT n, const void *p)
 { (void)s; (void)g; (void)n; (void)p; return E_NOTIMPL; }
-static HRESULT res_set_private_i(PCPS4ComResource *s, void *g, const void *p)
+static PCPS4_MS_ABI HRESULT res_set_private_i(PCPS4ComResource *s, void *g, const void *p)
 { (void)s; (void)g; (void)p; return E_NOTIMPL; }
-static void res_set_eviction(PCPS4ComResource *s, UINT p)
+static PCPS4_MS_ABI void res_set_eviction(PCPS4ComResource *s, UINT p)
 { (void)s; (void)p; }
-static UINT res_get_eviction(PCPS4ComResource *s)
+static PCPS4_MS_ABI UINT res_get_eviction(PCPS4ComResource *s)
 { (void)s; return 0; }
-static void res_get_desc(PCPS4ComResource *s, void *desc)
+static PCPS4_MS_ABI void res_get_desc(PCPS4ComResource *s, void *desc)
 {
     if (s->kind == PCPS4_COM_RES_BUFFER)
         com_buffer_get_desc(s, (D3D11_BUFFER_DESC *)desc);
@@ -594,10 +595,10 @@ static void res_get_desc(PCPS4ComResource *s, void *desc)
         com_texture_get_desc(s, (D3D11_TEXTURE2D_DESC *)desc);
 }
 
-static HRESULT res_view_get_resource(PCPS4ComResource *s, void **out)
+static PCPS4_MS_ABI HRESULT res_view_get_resource(PCPS4ComResource *s, void **out)
 { return com_view_get_resource(s, out); }
 
-static HRESULT device_create_buffer(
+static PCPS4_MS_ABI HRESULT device_create_buffer(
     PCPS4ComDevice *self,
     const D3D11_BUFFER_DESC *desc,
     const D3D11_SUBRESOURCE_DATA *data,
@@ -627,7 +628,7 @@ static HRESULT device_create_buffer(
     return S_OK;
 }
 
-static HRESULT device_create_texture2d(
+static PCPS4_MS_ABI HRESULT device_create_texture2d(
     PCPS4ComDevice *self,
     const D3D11_TEXTURE2D_DESC *desc,
     const D3D11_SUBRESOURCE_DATA *data,
@@ -657,7 +658,7 @@ static HRESULT device_create_texture2d(
     return S_OK;
 }
 
-static HRESULT device_create_rtv(
+static PCPS4_MS_ABI HRESULT device_create_rtv(
     PCPS4ComDevice *self,
     void *resource,
     const D3D11_RENDER_TARGET_VIEW_DESC *desc,
@@ -687,7 +688,7 @@ static HRESULT device_create_rtv(
     return S_OK;
 }
 
-static HRESULT device_create_dsv(
+static PCPS4_MS_ABI HRESULT device_create_dsv(
     PCPS4ComDevice *self,
     void *resource,
     const D3D11_DEPTH_STENCIL_VIEW_DESC *desc,
@@ -717,7 +718,7 @@ static HRESULT device_create_dsv(
     return S_OK;
 }
 
-static HRESULT device_create_srv(
+static PCPS4_MS_ABI HRESULT device_create_srv(
     PCPS4ComDevice *self,
     void *resource,
     const D3D11_SHADER_RESOURCE_VIEW_DESC *desc,
@@ -747,7 +748,7 @@ static HRESULT device_create_srv(
     return S_OK;
 }
 
-static HRESULT device_create_sampler(
+static PCPS4_MS_ABI HRESULT device_create_sampler(
     PCPS4ComDevice *self,
     const D3D11_SAMPLER_DESC *desc,
     void **out)
@@ -773,7 +774,7 @@ static HRESULT device_create_sampler(
     return S_OK;
 }
 
-static HRESULT device_create_rasterizer(
+static PCPS4_MS_ABI HRESULT device_create_rasterizer(
     PCPS4ComDevice *self,
     const D3D11_RASTERIZER_DESC *desc,
     void **out)
@@ -795,7 +796,7 @@ static HRESULT device_create_rasterizer(
     return S_OK;
 }
 
-static HRESULT device_create_blend(
+static PCPS4_MS_ABI HRESULT device_create_blend(
     PCPS4ComDevice *self,
     const D3D11_BLEND_DESC *desc,
     void **out)
@@ -817,7 +818,7 @@ static HRESULT device_create_blend(
     return S_OK;
 }
 
-static HRESULT device_create_depth_state(
+static PCPS4_MS_ABI HRESULT device_create_depth_state(
     PCPS4ComDevice *self,
     const D3D11_DEPTH_STENCIL_DESC *desc,
     void **out)
@@ -839,7 +840,7 @@ static HRESULT device_create_depth_state(
     return S_OK;
 }
 
-static HRESULT device_create_vs(
+static PCPS4_MS_ABI HRESULT device_create_vs(
     PCPS4ComDevice *self,
     const void *bytecode,
     size_t size,
@@ -864,7 +865,7 @@ static HRESULT device_create_vs(
     return S_OK;
 }
 
-static HRESULT device_create_ps(
+static PCPS4_MS_ABI HRESULT device_create_ps(
     PCPS4ComDevice *self,
     const void *bytecode,
     size_t size,
@@ -889,7 +890,7 @@ static HRESULT device_create_ps(
     return S_OK;
 }
 
-static HRESULT device_create_input_layout(
+static PCPS4_MS_ABI HRESULT device_create_input_layout(
     PCPS4ComDevice *self,
     const D3D11_INPUT_ELEMENT_DESC *descs,
     UINT count,
@@ -917,7 +918,7 @@ static HRESULT device_create_input_layout(
 }
 
 /* Context forwarding. */
-static void ctx_VSSetConstantBuffers(
+static PCPS4_MS_ABI void ctx_VSSetConstantBuffers(
     PCPS4ComContext *self, UINT start, UINT count, void *const *buffers)
 {
     ID3D11Buffer *tmp[16];
@@ -925,7 +926,7 @@ static void ctx_VSSetConstantBuffers(
     for (UINT i=0;i<n;++i) tmp[i] = buffers && buffers[i] ? (ID3D11Buffer *)((PCPS4ComResource *)buffers[i])->impl : NULL;
     self->impl->VSSetConstantBuffers(start, n, tmp);
 }
-static void ctx_PSSetShaderResources(
+static PCPS4_MS_ABI void ctx_PSSetShaderResources(
     PCPS4ComContext *self, UINT start, UINT count, void *const *views)
 {
     ID3D11ShaderResourceView *tmp[16];
@@ -933,7 +934,7 @@ static void ctx_PSSetShaderResources(
     for (UINT i=0;i<n;++i) tmp[i] = views && views[i] ? (ID3D11ShaderResourceView *)((PCPS4ComResource *)views[i])->impl : NULL;
     self->impl->PSSetShaderResources(start, n, tmp);
 }
-static void ctx_PSSetShader(
+static PCPS4_MS_ABI void ctx_PSSetShader(
     PCPS4ComContext *self, void *shader, void *const *classes, UINT count)
 {
     (void)classes; (void)count;
@@ -941,7 +942,7 @@ static void ctx_PSSetShader(
         shader ? (ID3D11PixelShader *)((PCPS4ComResource *)shader)->impl : NULL,
         NULL, 0);
 }
-static void ctx_PSSetSamplers(
+static PCPS4_MS_ABI void ctx_PSSetSamplers(
     PCPS4ComContext *self, UINT start, UINT count, void *const *samplers)
 {
     ID3D11SamplerState *tmp[16];
@@ -949,7 +950,7 @@ static void ctx_PSSetSamplers(
     for (UINT i=0;i<n;++i) tmp[i] = samplers && samplers[i] ? (ID3D11SamplerState *)((PCPS4ComResource *)samplers[i])->impl : NULL;
     self->impl->PSSetSamplers(start, n, tmp);
 }
-static void ctx_VSSetShader(
+static PCPS4_MS_ABI void ctx_VSSetShader(
     PCPS4ComContext *self, void *shader, void *const *classes, UINT count)
 {
     (void)classes; (void)count;
@@ -957,11 +958,11 @@ static void ctx_VSSetShader(
         shader ? (ID3D11VertexShader *)((PCPS4ComResource *)shader)->impl : NULL,
         NULL, 0);
 }
-static void ctx_DrawIndexed(PCPS4ComContext *self, UINT a, UINT b, int c)
+static PCPS4_MS_ABI void ctx_DrawIndexed(PCPS4ComContext *self, UINT a, UINT b, int c)
 { self->impl->DrawIndexed(a,b,c); }
-static void ctx_Draw(PCPS4ComContext *self, UINT a, UINT b)
+static PCPS4_MS_ABI void ctx_Draw(PCPS4ComContext *self, UINT a, UINT b)
 { self->impl->Draw(a,b); }
-static HRESULT ctx_Map(
+static PCPS4_MS_ABI HRESULT ctx_Map(
     PCPS4ComContext *self, void *resource, UINT sub, D3D11_MAP map, UINT flags,
     D3D11_MAPPED_SUBRESOURCE *mapped)
 {
@@ -970,12 +971,12 @@ static HRESULT ctx_Map(
         ? self->impl->Map((ID3D11Buffer *)r->impl,sub,map,flags,mapped)
         : E_NOTIMPL;
 }
-static void ctx_Unmap(PCPS4ComContext *self, void *resource, UINT sub)
+static PCPS4_MS_ABI void ctx_Unmap(PCPS4ComContext *self, void *resource, UINT sub)
 {
     PCPS4ComResource *r=(PCPS4ComResource *)resource;
     if (r && r->kind==PCPS4_COM_RES_BUFFER) self->impl->Unmap((ID3D11Buffer *)r->impl,sub);
 }
-static void ctx_PSSetConstantBuffers(
+static PCPS4_MS_ABI void ctx_PSSetConstantBuffers(
     PCPS4ComContext *self, UINT start, UINT count, void *const *buffers)
 {
     ID3D11Buffer *tmp[16];
@@ -986,9 +987,9 @@ static void ctx_PSSetConstantBuffers(
             : NULL;
     self->impl->PSSetConstantBuffers(start, n, tmp);
 }
-static void ctx_IASetInputLayout(PCPS4ComContext *self, void *layout)
+static PCPS4_MS_ABI void ctx_IASetInputLayout(PCPS4ComContext *self, void *layout)
 { self->impl->IASetInputLayout(layout ? (ID3D11InputLayout *)((PCPS4ComResource *)layout)->impl : NULL); }
-static void ctx_IASetVertexBuffers(
+static PCPS4_MS_ABI void ctx_IASetVertexBuffers(
     PCPS4ComContext *self, UINT start, UINT count, void *const *buffers,
     const UINT *strides, const UINT *offsets)
 {
@@ -1000,11 +1001,11 @@ static void ctx_IASetVertexBuffers(
             : NULL;
     self->impl->IASetVertexBuffers(start, n, tmp, strides, offsets);
 }
-static void ctx_IASetIndexBuffer(PCPS4ComContext *self, void *buffer, DXGI_FORMAT fmt, UINT offset)
+static PCPS4_MS_ABI void ctx_IASetIndexBuffer(PCPS4ComContext *self, void *buffer, DXGI_FORMAT fmt, UINT offset)
 { self->impl->IASetIndexBuffer(buffer ? (ID3D11Buffer *)((PCPS4ComResource *)buffer)->impl : NULL,fmt,offset); }
-static void ctx_IASetPrimitiveTopology(PCPS4ComContext *self, D3D11_PRIMITIVE_TOPOLOGY topology)
+static PCPS4_MS_ABI void ctx_IASetPrimitiveTopology(PCPS4ComContext *self, D3D11_PRIMITIVE_TOPOLOGY topology)
 { self->impl->IASetPrimitiveTopology(topology); }
-static void ctx_VSSetShaderResources(
+static PCPS4_MS_ABI void ctx_VSSetShaderResources(
     PCPS4ComContext *self, UINT start, UINT count, void *const *views)
 {
     ID3D11ShaderResourceView *tmp[16];
@@ -1015,7 +1016,7 @@ static void ctx_VSSetShaderResources(
             : NULL;
     self->impl->VSSetShaderResources(start, n, tmp);
 }
-static void ctx_VSSetSamplers(
+static PCPS4_MS_ABI void ctx_VSSetSamplers(
     PCPS4ComContext *self, UINT start, UINT count, void *const *samplers)
 {
     ID3D11SamplerState *tmp[16];
@@ -1026,7 +1027,7 @@ static void ctx_VSSetSamplers(
             : NULL;
     self->impl->VSSetSamplers(start, n, tmp);
 }
-static void ctx_OMSetRenderTargets(
+static PCPS4_MS_ABI void ctx_OMSetRenderTargets(
     PCPS4ComContext *self, UINT count, void *const *rtvs, void *dsv)
 {
     ID3D11RenderTargetView *tmp[8];
@@ -1036,13 +1037,13 @@ static void ctx_OMSetRenderTargets(
         n, tmp,
         dsv ? ((ID3D11DepthStencilView *)((PCPS4ComResource *)dsv)->impl) : NULL);
 }
-static void ctx_OMSetBlendState(PCPS4ComContext *self, void *state, const float *factor, UINT mask)
+static PCPS4_MS_ABI void ctx_OMSetBlendState(PCPS4ComContext *self, void *state, const float *factor, UINT mask)
 { self->impl->OMSetBlendState(state?(ID3D11BlendState *)((PCPS4ComResource *)state)->impl:NULL,factor,mask); }
-static void ctx_OMSetDepthStencilState(PCPS4ComContext *self, void *state, UINT ref)
+static PCPS4_MS_ABI void ctx_OMSetDepthStencilState(PCPS4ComContext *self, void *state, UINT ref)
 { self->impl->OMSetDepthStencilState(state?(ID3D11DepthStencilState *)((PCPS4ComResource *)state)->impl:NULL,(uint8_t)ref); }
-static void ctx_RSSetState(PCPS4ComContext *self, void *state)
+static PCPS4_MS_ABI void ctx_RSSetState(PCPS4ComContext *self, void *state)
 { self->impl->RSSetState(state?(ID3D11RasterizerState *)((PCPS4ComResource *)state)->impl:NULL); }
-static void ctx_RSSetViewports(
+static PCPS4_MS_ABI void ctx_RSSetViewports(
     PCPS4ComContext *self,
     UINT count,
     const D3D11_VIEWPORT *viewports)
@@ -1054,7 +1055,7 @@ static void ctx_RSSetViewports(
     self->impl->RSSetViewports(count, viewports);
 }
 
-static void ctx_UpdateSubresource(
+static PCPS4_MS_ABI void ctx_UpdateSubresource(
     PCPS4ComContext *self, void *dst, UINT sub, const void *box, const void *src, UINT row, UINT depth)
 {
     PCPS4ComResource *r=(PCPS4ComResource *)dst;
@@ -1064,32 +1065,32 @@ static void ctx_UpdateSubresource(
     else if (r->kind==PCPS4_COM_RES_TEXTURE2D)
         self->impl->UpdateSubresource((ID3D11Texture2D *)r->impl,sub,box,src,row,depth);
 }
-static void ctx_ClearRenderTargetView(PCPS4ComContext *self, void *rtv, const float c[4])
+static PCPS4_MS_ABI void ctx_ClearRenderTargetView(PCPS4ComContext *self, void *rtv, const float c[4])
 { if(rtv) self->impl->ClearRenderTargetView((ID3D11RenderTargetView *)((PCPS4ComResource *)rtv)->impl,c); }
-static void ctx_ClearDepthStencilView(PCPS4ComContext *self, void *dsv, UINT flags, float depth, uint8_t stencil)
+static PCPS4_MS_ABI void ctx_ClearDepthStencilView(PCPS4ComContext *self, void *dsv, UINT flags, float depth, uint8_t stencil)
 { if(dsv) self->impl->ClearDepthStencilView((ID3D11DepthStencilView *)((PCPS4ComResource *)dsv)->impl,flags,depth,stencil); }
-static void ctx_Flush(PCPS4ComContext *self)
+static PCPS4_MS_ABI void ctx_Flush(PCPS4ComContext *self)
 { self->impl->Flush(); }
 
-static D3D_FEATURE_LEVEL device_get_feature_level(PCPS4ComDevice *self)
+static PCPS4_MS_ABI D3D_FEATURE_LEVEL device_get_feature_level(PCPS4ComDevice *self)
 {
     (void)self;
     return D3D_FEATURE_LEVEL_11_0;
 }
 
-static UINT device_get_creation_flags(PCPS4ComDevice *self)
+static PCPS4_MS_ABI UINT device_get_creation_flags(PCPS4ComDevice *self)
 {
     (void)self;
     return 0;
 }
 
-static HRESULT device_get_removed_reason(PCPS4ComDevice *self)
+static PCPS4_MS_ABI HRESULT device_get_removed_reason(PCPS4ComDevice *self)
 {
     (void)self;
     return S_OK;
 }
 
-static void device_get_immediate_context(
+static PCPS4_MS_ABI void device_get_immediate_context(
     PCPS4ComDevice *self,
     void **out)
 {
@@ -1103,7 +1104,7 @@ static void device_get_immediate_context(
     }
 }
 
-static HRESULT device_set_exception_mode(
+static PCPS4_MS_ABI HRESULT device_set_exception_mode(
     PCPS4ComDevice *self, UINT flags)
 {
     (void)self;
@@ -1111,43 +1112,43 @@ static HRESULT device_set_exception_mode(
     return S_OK;
 }
 
-static UINT device_get_exception_mode(PCPS4ComDevice *self)
+static PCPS4_MS_ABI UINT device_get_exception_mode(PCPS4ComDevice *self)
 {
     (void)self;
     return 0;
 }
 
-static void ctx_clear_state(PCPS4ComContext *self)
+static PCPS4_MS_ABI void ctx_clear_state(PCPS4ComContext *self)
 {
     if (self != NULL && self->impl != NULL)
         self->impl->Flush();
 }
 
-static UINT ctx_get_type(PCPS4ComContext *self)
+static PCPS4_MS_ABI UINT ctx_get_type(PCPS4ComContext *self)
 {
     (void)self;
     return 0;
 }
 
-static UINT ctx_get_flags(PCPS4ComContext *self)
+static PCPS4_MS_ABI UINT ctx_get_flags(PCPS4ComContext *self)
 {
     (void)self;
     return 0;
 }
 
 /* vtable population helpers. */
-static void vtbl_clear(const void **v, size_t n)
+static PCPS4_MS_ABI void vtbl_clear(const void **v, size_t n)
 {
     for (size_t i=0;i<n;++i) v[i]=(const void *)com_noop;
 }
-static void vtbl_fill_hresult(const void **v, size_t n)
+static PCPS4_MS_ABI void vtbl_fill_hresult(const void **v, size_t n)
 {
     for (size_t i=0;i<n;++i) v[i]=(const void *)com_nyi;
 }
 
-static void init_vtables(void)
+static PCPS4_MS_ABI void init_vtables(void)
 {
-    static int initialized = 0;
+    static PCPS4_MS_ABI int initialized = 0;
     if (initialized) return;
     initialized = 1;
 
@@ -1243,7 +1244,7 @@ static void init_vtables(void)
     g_resource_full_vtbl[10]=(const void *)res_get_desc;
 }
 
-static HRESULT com_create_wrappers(
+static PCPS4_MS_ABI HRESULT com_create_wrappers(
     ID3D11Device *impl_device,
     ID3D11DeviceContext *impl_context,
     IDXGISwapChain *impl_swap,

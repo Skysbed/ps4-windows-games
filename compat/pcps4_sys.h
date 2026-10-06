@@ -42,6 +42,10 @@ int pcps4_sys_file_write(pcps4_os_handle_t *handle,
                          const void *buffer,
                          uint32_t bytes_to_write,
                          uint32_t *bytes_written);
+int64_t pcps4_sys_file_size(pcps4_os_handle_t *handle);
+int64_t pcps4_sys_file_seek(pcps4_os_handle_t *handle, int64_t offset, int origin);
+int pcps4_sys_file_delete(const char *path);
+int pcps4_sys_file_mkdir(const char *path);
 
 /* Generic handles */
 int pcps4_sys_handle_close(pcps4_os_handle_t *handle);

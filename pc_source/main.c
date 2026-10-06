@@ -8,6 +8,7 @@
 #include <windows.h>
 
 void pcps4_runtime_demo(char *buffer, size_t buffer_size);
+int pcps4_gnm_smoke_run(void);
 
 static volatile LONG demo_value = 0;
 
@@ -26,5 +27,10 @@ int main(void)
     printf("Value: %d\n", (int)demo_value);
     printf("Buffer: %s\n", buffer);
 
+#ifdef PCPS4_ENABLE_OPENGNM
+    printf("Starting real GNM graphics smoke...\n");
+    return pcps4_gnm_smoke_run();
+#else
     return 0;
+#endif
 }

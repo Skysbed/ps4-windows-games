@@ -7,6 +7,9 @@ TITLE_ID      := PCPS00001
 CONTENT_ID    := IV0000-PCPS00001_00-PCPS4TRANSLATE01
 
 TOOLCHAIN     := $(OO_PS4_TOOLCHAIN)
+PCPS4_ENABLE_OPENGNM ?= 0
+PCPS4_GRAPHICS_ROOT ?= external/ps4-graphics
+PCPS4_OPENGNM_DIR := $(PCPS4_GRAPHICS_ROOT)/opengnm
 INTDIR        := build
 GENERATED     := $(INTDIR)/generated
 PACKAGE_ROOT  := $(INTDIR)/package
@@ -28,7 +31,7 @@ LD  := ld.lld
 COMMONFLAGS := --target=x86_64-pc-freebsd12-elf -fPIC -funwind-tables \
                -isysroot $(TOOLCHAIN) \
                -isystem $(TOOLCHAIN)/include \
-               -Icompat
+               -Icompat $(if $(filter 1,$(PCPS4_ENABLE_OPENGNM)),-I$(PCPS4_OPENGNM_DIR)/include,)
 CFLAGS   := $(COMMONFLAGS) -std=c11 \
             $(if $(PCPS4_ENABLE_GNM),-DPCPS4_ENABLE_GNM=1,) -c
 CXXFLAGS := $(COMMONFLAGS) \
@@ -104,6 +107,11 @@ $(GNM_OBJ): compat/pcps4_gnm.c compat/pcps4_gnm.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
 
+
+$(GNM_RENDERER_OBJ): compat/pcps4_gnm_renderer.c compat/pcps4_gnm_renderer.h
+	@mkdir -p "$(dir $@)"
+	$(CC) $(CFLAGS) -DPCPS4_ENABLE_OPENGNM=$(PCPS4_ENABLE_OPENGNM) -o "$@" "$<"
+
 $(GPU_OBJ): compat/pcps4_gpu.c compat/pcps4_gpu.h compat/pcps4_gfx.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
@@ -119,10 +127,10 @@ $(SHADER_OBJ): compat/pcps4_shader.c compat/pcps4_shader.h
 $(INTDIR):
 	@mkdir -p "$(INTDIR)"
 
-$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ)
+$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ)
 	@test -n "$(OBJS)" || (echo "ERROR: no PC source files found in pc_source/."; exit 1)
 	$(LD) $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) \
-	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) -o "$@" $(LDFLAGS)
+	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(GNM_RENDERER_OBJ) -o "$@" $(LDFLAGS)
 
 eboot.bin: $(ELF)
 	@test -n "$(OO_PS4_TOOLCHAIN)" || (echo "ERROR: OO_PS4_TOOLCHAIN is not set."; exit 1)
@@ -180,6 +188,8 @@ info:
 	@echo "D3D11 façade: compat/pcps4_d3d11.[h/cpp]"
 	@echo "DXBC parser: compat/pcps4_shader.[h/c]"
 	@echo "GNM bridge: compat/pcps4_gnm.[ch]"
+	@echo "Real GNM renderer: compat/pcps4_gnm_renderer.[ch]"
+	@echo "OpenGNM enabled: $(PCPS4_ENABLE_OPENGNM)"
 	@echo "Fault boundary: compat/pcps4_fault.[ch]"
 	@echo "Content ID: $(CONTENT_ID)"
 	@echo "Title ID: $(TITLE_ID)"

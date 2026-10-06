@@ -24,7 +24,33 @@ jobs:
       - name: Install host build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang lld make python3
+          sudo apt-get install -y clang lld make python3 python3-mako meson ninja-build glslang-tools git
+
+      - name: Prepare PS4 graphics stack
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/external/ps4-graphics"
+          git clone --depth 1 https://github.com/PS4-OpenGNM/opengnm.git             "$GITHUB_WORKSPACE/external/ps4-graphics/opengnm"
+          git clone --depth 1 https://github.com/PS4-OpenGNM/opengnm-psbc.git             "$GITHUB_WORKSPACE/external/ps4-graphics/opengnm-psbc"
+          git clone --depth 1 https://github.com/doitsujin/dxbc-spirv.git             "$GITHUB_WORKSPACE/external/ps4-graphics/dxbc-spirv"
+          git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git             "$GITHUB_WORKSPACE/external/ps4-graphics/Vulkan-Headers"
+          git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git             "$GITHUB_WORKSPACE/external/ps4-graphics/SPIRV-Headers"
+
+          cd "$GITHUB_WORKSPACE/external/ps4-graphics/opengnm"
+          cp config.orbis.mak config.mak
+          make -j2
+
+          cd "$GITHUB_WORKSPACE/external/ps4-graphics/dxbc-spirv"
+          meson setup builddir -Denable_tools=true
+          ninja -C builddir
+
+          cd "$GITHUB_WORKSPACE/external/ps4-graphics/opengnm-psbc"
+          make -j2
+          make -f Makefile.orbis -j2
+
+      - name: Build PS4 smoke shaders
+        run: |
+          python3 tools/pcps4_shader_pipeline.py             --kind glsl             --stage vertex             --input pc_source/shaders/tri.vert.glsl             --output build/package/assets/shaders/tri.vert.sb             --psbc external/ps4-graphics/opengnm-psbc/opengnm-psbc
+          python3 tools/pcps4_shader_pipeline.py             --kind glsl             --stage fragment             --input pc_source/shaders/tri.frag.glsl             --output build/package/assets/shaders/tri.frag.sb             --psbc external/ps4-graphics/opengnm-psbc/opengnm-psbc
 
       - name: Test translation layer
         run: make test
@@ -38,7 +64,7 @@ jobs:
           test -x "$OO_PS4_TOOLCHAIN/bin/linux/PkgTool.Core"
 
       - name: Translate, build and package
-        run: make pkg
+        run: PCPS4_ENABLE_OPENGNM=1 make pkg
 
       - name: Upload installable PS4 package
         uses: actions/upload-artifact@v4

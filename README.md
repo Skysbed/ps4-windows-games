@@ -110,6 +110,19 @@ Run the translator directly:
       --report build/translation.json \
       --strict
 
+## Shader pipeline
+
+For D3D Shader Model 5.x bytecode, use:
+
+    python3 tools/pcps4_shader_pipeline.py \
+      --kind dxbc --stage vertex \
+      --input game.vert.dxbc \
+      --output build/game.vert.sb \
+      --dxbc-compiler /path/to/dxbc_compiler \
+      --psbc /path/to/opengnm-psbc
+
+The pipeline is intentionally explicit: `dxbc-spirv` handles the D3D shader front-end, then `opengnm-psbc` targets the PS4 base/GFX7 profile. Neither step pretends that a DXBC blob can be executed directly by the PS4 GPU.
+
 ## Build
 
 Install OpenOrbis and set its root:

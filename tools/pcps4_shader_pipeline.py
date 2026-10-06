@@ -59,12 +59,26 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--stage", choices=["vertex", "fragment", "pixel"], required=True)
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--cache-dir", type=Path)
     parser.add_argument("--kind", choices=["glsl", "dxbc"], required=True)
     parser.add_argument("--dxbc-compiler", type=Path)
     parser.add_argument("--psbc", type=Path, required=True)
     parser.add_argument("--work-dir", type=Path, default=Path("build/shader-work"))
     args = parser.parse_args()
+
+    if args.output is None and args.cache_dir is None:
+        raise SystemExit("--output or --cache-dir is required")
+
+    if args.kind == "dxbc" and args.cache_dir is not None:
+        raw = args.input.read_bytes()
+        if len(raw) < 20 or raw[:4] != b"DXBC":
+            raise SystemExit("DXBC input does not contain a valid DXBC header")
+        key = raw[4:20].hex()
+        args.output = args.cache_dir / f"{key}-{args.stage if args.stage != 'fragment' else 'ps'}.sb"
+
+    if args.output is None:
+        raise SystemExit("--output is required for GLSL input")
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.work_dir.mkdir(parents=True, exist_ok=True)

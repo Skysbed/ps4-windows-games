@@ -5,6 +5,126 @@
 #include <new>
 #include <string.h>
 
+
+static int is_dxbc_blob(
+    const void *data,
+    size_t size)
+{
+    const uint8_t *bytes = (const uint8_t *)data;
+
+    return bytes != NULL &&
+           size >= 20 &&
+           bytes[0] == 'D' &&
+           bytes[1] == 'X' &&
+           bytes[2] == 'B' &&
+           bytes[3] == 'C';
+}
+
+static int try_load_shader_cache(
+    const void *dxbc,
+    size_t dxbc_size,
+    const char *stage,
+    void **out_data,
+    size_t *out_size)
+{
+    const uint8_t *bytes;
+    char path[96];
+    FILE *file;
+    long length;
+    void *data;
+
+    if (!is_dxbc_blob(dxbc, dxbc_size) ||
+        stage == NULL ||
+        out_data == NULL ||
+        out_size == NULL)
+        return 0;
+
+    *out_data = NULL;
+    *out_size = 0;
+
+    bytes = (const uint8_t *)dxbc;
+
+    /*
+     * DXBC contains a 128-bit compiler-generated container key at bytes
+     * 4..19. PcPs4 uses that stable key for the offline-converted .sb cache.
+     */
+    int written = snprintf(
+        path,
+        sizeof(path),
+        "/app0/pcps4-shaders/");
+
+    if (written <= 0 ||
+        (size_t)written >= sizeof(path))
+        return 0;
+
+    size_t cursor = (size_t)written;
+
+    for (size_t i = 0; i < 16; ++i) {
+        if (cursor + 2 >= sizeof(path))
+            return 0;
+
+        written = snprintf(
+            path + cursor,
+            sizeof(path) - cursor,
+            "%02x",
+            (unsigned)bytes[4 + i]);
+
+        if (written != 2)
+            return 0;
+
+        cursor += 2;
+    }
+
+    written = snprintf(
+        path + cursor,
+        sizeof(path) - cursor,
+        "-%s.sb",
+        stage);
+
+    if (written < 0 ||
+        (size_t)written >= sizeof(path))
+        return 0;
+
+    file = fopen(path, "rb");
+    if (file == NULL)
+        return 0;
+
+    if (fseek(file, 0, SEEK_END) != 0) {
+        fclose(file);
+        return 0;
+    }
+
+    length = ftell(file);
+    if (length <= 0) {
+        fclose(file);
+        return 0;
+    }
+
+    if (fseek(file, 0, SEEK_SET) != 0) {
+        fclose(file);
+        return 0;
+    }
+
+    data = malloc((size_t)length);
+    if (data == NULL) {
+        fclose(file);
+        return 0;
+    }
+
+    if (fread(data, 1, (size_t)length, file) !=
+        (size_t)length) {
+        free(data);
+        fclose(file);
+        return 0;
+    }
+
+    fclose(file);
+
+    *out_data = data;
+    *out_size = (size_t)length;
+    return 1;
+}
+
 static uint8_t component(float value)
 {
     if (value <= 0.0f) return 0;
@@ -574,14 +694,34 @@ HRESULT ID3D11Device::CreateVertexShader(
             return E_FAIL;
     }
 
+    void *cached_shader = NULL;
+    size_t cached_size = 0;
+    const void *shader_data = pShaderBytecode;
+    size_t shader_size = BytecodeLength;
+
+#if PCPS4_ENABLE_OPENGNM
+    if (!is_gnm &&
+        try_load_shader_cache(
+            pShaderBytecode,
+            BytecodeLength,
+            "vs",
+            &cached_shader,
+            &cached_size)) {
+        shader_data = cached_shader;
+        shader_size = cached_size;
+    }
+#endif
+
     pcps4_gpu_shader_desc_t desc = {
-        pShaderBytecode,
-        BytecodeLength,
+        shader_data,
+        shader_size,
         PCPS4_GPU_SHADER_VERTEX
     };
 
     pcps4_gpu_shader_t *shader =
         pcps4_gpu_shader_create(native, &desc);
+
+    free(cached_shader);
 
     if (shader == NULL)
         return E_OUTOFMEMORY;
@@ -628,14 +768,34 @@ HRESULT ID3D11Device::CreatePixelShader(
             return E_FAIL;
     }
 
+    void *cached_shader = NULL;
+    size_t cached_size = 0;
+    const void *shader_data = pShaderBytecode;
+    size_t shader_size = BytecodeLength;
+
+#if PCPS4_ENABLE_OPENGNM
+    if (!is_gnm &&
+        try_load_shader_cache(
+            pShaderBytecode,
+            BytecodeLength,
+            "ps",
+            &cached_shader,
+            &cached_size)) {
+        shader_data = cached_shader;
+        shader_size = cached_size;
+    }
+#endif
+
     pcps4_gpu_shader_desc_t desc = {
-        pShaderBytecode,
-        BytecodeLength,
+        shader_data,
+        shader_size,
         PCPS4_GPU_SHADER_PIXEL
     };
 
     pcps4_gpu_shader_t *shader =
         pcps4_gpu_shader_create(native, &desc);
+
+    free(cached_shader);
 
     if (shader == NULL)
         return E_OUTOFMEMORY;

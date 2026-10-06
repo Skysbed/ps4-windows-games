@@ -8,6 +8,7 @@
 #include <string.h>
 #include <windows.h>
 #include "pcps4_status.h"
+#include "pcps4_game.h"
 
 void pcps4_runtime_demo(char *buffer, size_t buffer_size);
 int pcps4_gnm_smoke_run(void);
@@ -64,11 +65,22 @@ int main(void)
      */
     pcps4_status_suspend_display();
 
+#if PCPS4_BUNDLED_GAME
+    /* Run a staged Windows x86-64 PE executable through the PcPs4 runtime. */
+    pcps4_status_step("Bundled Windows game");
+    int32_t game_entry_ret = 0;
+    int game_rc = pcps4_game_run_bundled(&game_entry_ret);
+    pcps4_status_log(
+        "[pcps4] bundled Windows game returned rc=%d entry=%d",
+        game_rc, (int)game_entry_ret);
+    pcps4_status_report("Bundled Windows game", game_rc == 0);
+#else
     /* Enter the interactive PC-style D3D11 + XInput path. */
     int game_rc = pcps4_d3d11_game_run();
     pcps4_status_log("[pcps4] interactive D3D11 demo returned %d", game_rc);
+#endif
 
-    /* Reacquire VideoOut if the user exited the interactive demo. */
+    /* Reacquire VideoOut if the user exited the interactive path. */
     pcps4_status_resume_display();
 #endif
 

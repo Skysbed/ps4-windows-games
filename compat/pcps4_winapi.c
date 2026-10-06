@@ -10,8 +10,6 @@
 
 static __thread DWORD g_last_error = 0;
 
-static DWORD WINAPI_HasNoWinError = 0;
-
 static DWORD win_GetLastError(void)
 {
     return g_last_error;
@@ -32,7 +30,7 @@ static HANDLE win_GetCurrentThread(void)
     return (HANDLE)(intptr_t)1;
 }
 
-static void WINAPI win_ExitProcess(UINT code)
+static void win_ExitProcess(UINT code)
 {
     exit((int)code);
 }
@@ -316,6 +314,4 @@ void pcps4_winapi_build_resolver(pcps4_pe_resolver *resolver)
     register_ucrt(resolver, "api-ms-win-crt-runtime-l1-1-0.dll");
     register_ucrt(resolver, "api-ms-win-crt-string-l1-1-0.dll");
     register_ucrt(resolver, "api-ms-win-crt-heap-l1-1-0.dll");
-
-    (void)WINAPI_HasNoWinError;
-}
+\n}

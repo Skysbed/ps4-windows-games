@@ -137,14 +137,12 @@ pcps4_pe_status pcps4_pe_map_image(const pcps4_pe_image *image,
 
 #define PCPS4_PE_MAX_RESOLVER_SYMBOLS 512
 
-typedef struct pcps4_pe_symbol {
-    char     dll[32];   /* importing module, matched case-insensitively */
-    char     name[64];  /* function name, matched case-sensitively */
-    uint16_t ordinal;   /* non-zero when this entry is ordinal-based */
-    uint8_t  by_ordinal;
-    uint8_t  reserved;
-    void    *fn;        /* handler to bind into the IAT */
-} pcps4_pe_symbol;
+typedef void *(*pcps4_pe_resolver_fallback_fn)(
+    void *user,
+    const char *dll,
+    int by_name,
+    const char *name,
+    uint16_t ordinal);
 
 /*
  * A flat registry of Win32 (or any DLL) symbols that PcPs4 provides. The host
@@ -181,19 +179,6 @@ void *pcps4_pe_resolver_lookup_ordinal(
     const pcps4_pe_resolver *resolver,
     const char *dll,
     uint16_t ordinal);
-
-typedef void *(*pcps4_pe_resolver_fallback_fn)(
-    void *user,
-    const char *dll,
-    int by_name,
-    const char *name,
-    uint16_t ordinal);
-
-/*
- * Optional lazy resolver used for DLL-backed imports. The flat registry is
- * consulted first; this callback is only invoked when the registry has no
- * match.
- */
 
 /*
  * Look up an exported symbol in a mapped PE image. Names are matched exactly;

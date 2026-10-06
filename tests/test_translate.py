@@ -69,6 +69,23 @@ VirtualFree(p, 4096, MEM_RELEASE);
         self.assertIn('pcps4_VirtualFree', translated)
         self.assertEqual(report["blockers"], [])
 
+    def test_extended_file_surface(self):
+        source = """
+#include <windows.h>
+DWORD hi = 0;
+DWORD size = GetFileSize(file, &hi);
+DWORD pos = SetFilePointer(file, 0, NULL, 0);
+BOOL removed = DeleteFileA("tmp.bin");
+BOOL made = CreateDirectoryA("save", NULL);
+"""
+        translated, report, status = translate(source, strict=True)
+        self.assertEqual(status, 0)
+        self.assertIn('pcps4_GetFileSize', translated)
+        self.assertIn('pcps4_SetFilePointer', translated)
+        self.assertIn('pcps4_DeleteFileA', translated)
+        self.assertIn('pcps4_CreateDirectoryA', translated)
+        self.assertEqual(report["blockers"], [])
+
     def test_extended_event_and_socket_surface(self):
         source = """
 #include <windows.h>

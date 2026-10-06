@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include "pcps4_d3d11.h"
 #include "pcps4_shader.h"
 #include "pcps4_gnm_renderer.h"

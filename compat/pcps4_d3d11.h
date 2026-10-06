@@ -29,6 +29,9 @@ typedef void *HWND;
 #ifndef E_OUTOFMEMORY
 #define E_OUTOFMEMORY ((HRESULT)0x8007000EL)
 #endif
+#ifndef E_NOTIMPL
+#define E_NOTIMPL ((HRESULT)0x80004001L)
+#endif
 
 #define FAILED(hr) ((HRESULT)(hr) < 0)
 #define SUCCEEDED(hr) ((HRESULT)(hr) >= 0)
@@ -271,6 +274,18 @@ public:
     void IASetVertexBuffers(UINT StartSlot, UINT NumBuffers,
                             ID3D11Buffer *const *ppVertexBuffers,
                             const UINT *pStrides, const UINT *pOffsets);
+    void IASetIndexBuffer(ID3D11Buffer *pIndexBuffer,
+                          DXGI_FORMAT Format,
+                          UINT Offset);
+    void IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY Topology);
+
+    HRESULT Map(ID3D11Buffer *pResource,
+                UINT Subresource,
+                D3D11_MAP MapType,
+                UINT MapFlags,
+                D3D11_MAPPED_SUBRESOURCE *pMappedResource);
+    void Unmap(ID3D11Buffer *pResource, UINT Subresource);
+
     void VSSetShader(ID3D11VertexShader *pVertexShader,
                      void *const *ppClassInstances, UINT NumClassInstances);
     void PSSetShader(ID3D11PixelShader *pPixelShader,

@@ -86,6 +86,20 @@ BOOL made = CreateDirectoryA("save", NULL);
         self.assertIn('pcps4_CreateDirectoryA', translated)
         self.assertEqual(report["blockers"], [])
 
+    def test_unicode_file_surface(self):
+        source = """
+#include <windows.h>
+HANDLE f = CreateFileW(L"save\\file.bin", GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+BOOL removed = DeleteFileW(L"save\\file.bin");
+BOOL made = CreateDirectoryW(L"save\\nested", NULL);
+"""
+        translated, report, status = translate(source, strict=True)
+        self.assertEqual(status, 0)
+        self.assertIn('pcps4_CreateFileW', translated)
+        self.assertIn('pcps4_DeleteFileW', translated)
+        self.assertIn('pcps4_CreateDirectoryW', translated)
+        self.assertEqual(report["blockers"], [])
+
     def test_extended_event_and_socket_surface(self):
         source = """
 #include <windows.h>

@@ -16,7 +16,8 @@
 enum {
     PCPS4_HANDLE_FILE = 1,
     PCPS4_HANDLE_THREAD = 2,
-    PCPS4_HANDLE_MUTEX = 3
+    PCPS4_HANDLE_MUTEX = 3,
+    PCPS4_HANDLE_EVENT = 4
 };
 
 struct pcps4_os_handle {
@@ -26,6 +27,10 @@ struct pcps4_os_handle {
         int fd;
         OrbisPthread thread;
         OrbisPthreadMutex mutex;
+        struct {
+            volatile int signaled;
+            int manual_reset;
+        } event;
     } value;
     uint32_t joined;
 };
@@ -235,6 +240,38 @@ pcps4_os_handle_t *pcps4_sys_mutex_create(const char *name)
     return handle;
 }
 
+
+pcps4_os_handle_t *pcps4_sys_event_create(
+    int manual_reset,
+    int initial_state,
+    const char *name)
+{
+    pcps4_os_handle_t *handle =
+        make_handle(PCPS4_HANDLE_EVENT);
+    (void)name;
+    if (handle == NULL)
+        return NULL;
+    handle->value.event.signaled = initial_state ? 1 : 0;
+    handle->value.event.manual_reset = manual_reset ? 1 : 0;
+    return handle;
+}
+
+int pcps4_sys_event_set(pcps4_os_handle_t *handle)
+{
+    if (!valid_handle(handle) || handle->kind != PCPS4_HANDLE_EVENT)
+        return -1;
+    __atomic_store_n(&handle->value.event.signaled, 1, __ATOMIC_SEQ_CST);
+    return 0;
+}
+
+int pcps4_sys_event_reset(pcps4_os_handle_t *handle)
+{
+    if (!valid_handle(handle) || handle->kind != PCPS4_HANDLE_EVENT)
+        return -1;
+    __atomic_store_n(&handle->value.event.signaled, 0, __ATOMIC_SEQ_CST);
+    return 0;
+}
+
 int pcps4_sys_handle_close(pcps4_os_handle_t *handle)
 {
     int result = 0;
@@ -258,6 +295,10 @@ int pcps4_sys_handle_close(pcps4_os_handle_t *handle)
             result = scePthreadMutexDestroy(&handle->value.mutex);
             break;
 
+        case PCPS4_HANDLE_EVENT:
+            result = 0;
+            break;
+
         default:
             result = -1;
             break;
@@ -274,13 +315,30 @@ int pcps4_sys_handle_wait(pcps4_os_handle_t *handle, uint32_t milliseconds)
         return -1;
     }
 
-    /*
-     * First implementation: support the common infinite wait exactly.
-     * Timed waits need a separate semantics adapter because Win32 handles
-     * can represent several object kinds while pthread timed APIs differ.
-     */
+    if (handle->kind == PCPS4_HANDLE_EVENT) {
+        uint64_t start = pcps4_sys_monotonic_ms();
+        for (;;) {
+            int signaled = __atomic_load_n(
+                &handle->value.event.signaled, __ATOMIC_SEQ_CST);
+            if (signaled) {
+                if (!handle->value.event.manual_reset)
+                    (void)__atomic_exchange_n(
+                        &handle->value.event.signaled, 0, __ATOMIC_SEQ_CST);
+                return 0;
+            }
+
+            if (milliseconds != 0xFFFFFFFFu) {
+                uint64_t now = pcps4_sys_monotonic_ms();
+                if (now - start >= milliseconds)
+                    return 258;
+            }
+
+            (void)sceKernelUsleep(1000);
+        }
+    }
+
     if (milliseconds != 0xFFFFFFFFu) {
-        return 258; /* WAIT_TIMEOUT */
+        return 258;
     }
 
     if (handle->kind == PCPS4_HANDLE_THREAD) {
@@ -289,7 +347,7 @@ int pcps4_sys_handle_wait(pcps4_os_handle_t *handle, uint32_t milliseconds)
 
         if (rc == 0) {
             handle->joined = 1;
-            return 0; /* WAIT_OBJECT_0 */
+            return 0;
         }
 
         return rc;

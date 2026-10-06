@@ -1,3 +1,4 @@
+#include <stdlib.h>
 /*
  * PcPs4 PE32+ parser. See pcps4_pe.h for the role this plays.
  *

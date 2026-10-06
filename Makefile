@@ -52,6 +52,7 @@ D3D11_OBJ := $(INTDIR)/pcps4_d3d11.o
 SHADER_OBJ := $(INTDIR)/pcps4_shader.o
 PE_OBJ    := $(INTDIR)/pcps4_pe.o
 LOADER_OBJ := $(INTDIR)/pcps4_loader.o
+STATUS_OBJ := $(INTDIR)/pcps4_status.o
 
 ELF := $(INTDIR)/$(PROJECT).elf
 OELF := $(INTDIR)/$(PROJECT).oelf
@@ -61,7 +62,19 @@ PACKAGE_EBOOT := $(PACKAGE_ROOT)/eboot.bin
 GP4 := $(PACKAGE_ROOT)/$(CONTENT_ID).gp4
 PKG := $(PACKAGE_ROOT)/$(CONTENT_ID).pkg
 
-PACKAGE_FILES := eboot.bin sce_sys/param.sfo
+# Files every OpenOrbis package needs, matching the toolchain's own samples:
+# the libc / Fios2 runtime modules the ELF loads at startup, the about/right
+# module and the app icon. Without sce_module/libc.prx the app cannot start
+# (the PS4 reports it as corrupted).
+PACKAGE_FILES := eboot.bin sce_sys/param.sfo sce_sys/icon0.png \
+                 sce_sys/about/right.sprx \
+                 sce_module/libc.prx sce_module/libSceFios2.prx
+PACKAGE_SUPPORT := $(PACKAGE_ROOT)/sce_sys/icon0.png \
+                   $(PACKAGE_ROOT)/sce_sys/about/right.sprx \
+                   $(PACKAGE_ROOT)/sce_module/libc.prx \
+                   $(PACKAGE_ROOT)/sce_module/libSceFios2.prx
+OO_MODULES := $(TOOLCHAIN)/src/modules
+OO_ICON    := $(TOOLCHAIN)/samples/hello_world/sce_sys/icon0.png
 ifeq ($(PCPS4_ENABLE_OPENGNM),1)
 PACKAGE_FILES += assets/shaders/tri.vert.sb assets/shaders/tri.frag.sb
 endif
@@ -150,13 +163,17 @@ $(LOADER_OBJ): compat/pcps4_loader.c compat/pcps4_loader.h compat/pcps4_pe.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
 
+$(STATUS_OBJ): compat/pcps4_status.c compat/pcps4_status.h compat/pcps4_gfx.h
+	@mkdir -p "$(dir $@)"
+	$(CC) $(CFLAGS) -o "$@" "$<"
+
 $(INTDIR):
 	@mkdir -p "$(INTDIR)"
 
-$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(PE_OBJ) $(LOADER_OBJ)
+$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ)
 	@test -n "$(OBJS)" || (echo "ERROR: no PC source files found in pc_source/."; exit 1)
 	$(LD) $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) \
-	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(GNM_RENDERER_OBJ) $(PE_OBJ) $(LOADER_OBJ) -o "$@" $(LDFLAGS)
+	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(GNM_RENDERER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) -o "$@" $(LDFLAGS)
 
 eboot.bin: $(ELF)
 	@test -n "$(OO_PS4_TOOLCHAIN)" || (echo "ERROR: OO_PS4_TOOLCHAIN is not set."; exit 1)
@@ -183,7 +200,19 @@ $(PACKAGE_EBOOT): eboot.bin
 	@mkdir -p "$(PACKAGE_ROOT)"
 	cp "$<" "$@"
 
-$(GP4): $(SFO) $(PACKAGE_EBOOT)
+$(PACKAGE_ROOT)/sce_module/%.prx: $(OO_MODULES)/%.prx
+	@mkdir -p "$(dir $@)"
+	cp "$<" "$@"
+
+$(PACKAGE_ROOT)/sce_sys/about/right.sprx: $(OO_MODULES)/right.sprx
+	@mkdir -p "$(dir $@)"
+	cp "$<" "$@"
+
+$(PACKAGE_ROOT)/sce_sys/icon0.png: $(OO_ICON)
+	@mkdir -p "$(dir $@)"
+	cp "$<" "$@"
+
+$(GP4): $(SFO) $(PACKAGE_EBOOT) $(PACKAGE_SUPPORT)
 	@test -x "$(CREATE_GP4)" || (echo "ERROR: $(CREATE_GP4) not found."; exit 1)
 	cd "$(PACKAGE_ROOT)" && "$(CREATE_GP4)" \
 	    -out "$(notdir $@)" \

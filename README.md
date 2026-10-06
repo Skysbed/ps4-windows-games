@@ -155,3 +155,8 @@ The OpenOrbis integration follows the upstream sample build model: PS4-compatibl
 The architecture is ready for deeper adapters. The next substantial layer is filesystem/path handling, threading/synchronization, socket translation, and eventually a graphics abstraction for PC projects that currently talk directly to DirectX.
 
 OpenOrbis: https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain
+
+
+## CI
+
+The normal build workflow intentionally uses the stable VideoOut fallback so optional GPU dependencies do not make ordinary commits unbuildable. The separate graphics workflow exercises the real OpenGNM renderer and shader compiler.

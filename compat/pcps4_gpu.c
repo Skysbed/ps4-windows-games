@@ -888,6 +888,23 @@ int pcps4_gpu_context_clear(
                    : PCPS4_GPU_ERR_BACKEND;
     }
 
+#if PCPS4_ENABLE_OPENGNM
+    if (texture->external_gnm != NULL) {
+        if (context->gnm_renderer == NULL)
+            return PCPS4_GPU_ERR_STATE;
+
+        return pcps4_gnm_renderer_clear(
+                   context->gnm_renderer,
+                   context->gnm_frame_id,
+                   color.r,
+                   color.g,
+                   color.b,
+                   color.a) == PCPS4_GNM_OK
+                   ? PCPS4_GPU_OK
+                   : PCPS4_GPU_ERR_BACKEND;
+    }
+#endif
+
     if (texture->data == NULL)
         return PCPS4_GPU_ERR_STATE;
 

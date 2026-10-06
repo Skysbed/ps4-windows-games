@@ -1,6 +1,7 @@
 #include "pcps4_game.h"
 
 #include "pcps4_loader.h"
+#include "pcps4_module.h"
 #include "pcps4_winapi.h"
 
 #include <errno.h>
@@ -110,7 +111,9 @@ static void log_game_read_diagnostic(const char *path, int read_rc)
 
 int pcps4_game_run_file(const char *path, int32_t *out_entry_ret)
 {
-    pcps4_pe_resolver resolver;
+    pcps4_pe_resolver *resolver;
+    pcps4_module_loader module_loader;
+    pcps4_pe_image main_image;
     uint8_t *exe = NULL;
     size_t exe_size = 0;
     pcps4_loader_status rc;
@@ -125,17 +128,49 @@ int pcps4_game_run_file(const char *path, int32_t *out_entry_ret)
         return read_rc;
     }
 
-    pcps4_winapi_build_resolver(&resolver);
+    resolver = (pcps4_pe_resolver *)calloc(1, sizeof(*resolver));
+    if (resolver == NULL) {
+        free(exe);
+        printf("[pcps4] game load: resolver allocation failed\n");
+        return PCPS4_LOADER_ERR_ALLOC;
+    }
+
+    pcps4_winapi_build_resolver(resolver);
+    pcps4_module_loader_init(&module_loader, resolver);
+    pcps4_winapi_set_module_loader(&module_loader);
 
     printf("[pcps4] game load: %s (%u bytes)\n",
            path, (unsigned)exe_size);
 
+    if (pcps4_pe_parse(exe, exe_size, &main_image) != PCPS4_PE_OK) {
+        pcps4_winapi_set_module_loader(NULL);
+        free(resolver);
+        free(exe);
+        printf("[pcps4] game load: main PE parse failed\n");
+        return PCPS4_LOADER_ERR_LOAD;
+    }
+
+    {
+        pcps4_module_status mrc =
+            pcps4_module_loader_preload_imports(&module_loader, &main_image);
+        if (mrc != PCPS4_MODULE_OK) {
+            pcps4_winapi_set_module_loader(NULL);
+            free(resolver);
+            free(exe);
+            printf("[pcps4] game load: local DLL preload failed: %s\n",
+                   pcps4_module_status_str(mrc));
+            return PCPS4_LOADER_ERR_LOAD;
+        }
+    }
+
     rc = pcps4_loader_run(
         exe,
         exe_size,
-        &resolver,
+        resolver,
         out_entry_ret);
 
+    pcps4_winapi_set_module_loader(NULL);
+    free(resolver);
     free(exe);
 
     if (rc != PCPS4_LOADER_OK) {

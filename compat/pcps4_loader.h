@@ -49,6 +49,14 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
                                      const pcps4_pe_resolver *resolver,
                                      int32_t *out_entry_ret);
 
+/* Shared PE-module runtime helpers used by the optional local-DLL loader. */
+int pcps4_loader_apply_image_protections(
+    const pcps4_pe_image *image, uint8_t *mem, size_t map_size);
+int pcps4_loader_run_tls_callbacks(
+    const pcps4_pe_image *image, uint8_t *mem, size_t map_size);
+int pcps4_loader_run_dll_attach(
+    const pcps4_pe_image *image, uint8_t *mem, size_t map_size);
+
 /*
  * Self-contained hardware smoke test: builds a tiny PE whose entry is
  * `mov eax, 0x1234; ret`, runs it through pcps4_loader_run, and verifies the

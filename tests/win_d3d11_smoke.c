@@ -1,5 +1,6 @@
-#include <windows.h>
+#define _WIN32_WINNT 0x0601
 #include <winsock2.h>
+#include <windows.h>
 #include <xinput.h>
 #include <d3d11.h>
 
@@ -632,7 +633,7 @@ static int check_d3d11(void)
     ZeroMemory(&rtv_desc, sizeof(rtv_desc));
     rtv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     if (device->lpVtbl->CreateRenderTargetView(
-            device, back_buffer, &rtv_desc, &rtv) != S_OK || !rtv)
+            device, (ID3D11Resource *)back_buffer, &rtv_desc, &rtv) != S_OK || !rtv)
         return 5;
 
     ZeroMemory(&vertex_desc, sizeof(vertex_desc));
@@ -647,12 +648,12 @@ static int check_d3d11(void)
 
     ZeroMemory(&mapped, sizeof(mapped));
     if (context->lpVtbl->Map(
-            context, vertex_buffer, 0, D3D11_MAP_WRITE_DISCARD, 0,
+            context, (ID3D11Resource *)vertex_buffer, 0, D3D11_MAP_WRITE_DISCARD, 0,
             &mapped) != S_OK || mapped.pData == NULL)
         return 7;
 
     memcpy(mapped.pData, vertices, sizeof(vertices));
-    context->lpVtbl->Unmap(context, vertex_buffer, 0);
+    context->lpVtbl->Unmap(context, (ID3D11Resource *)vertex_buffer, 0);
 
     ZeroMemory(&constant_desc, sizeof(constant_desc));
     constant_desc.ByteWidth = 64;
@@ -683,7 +684,7 @@ static int check_d3d11(void)
     ZeroMemory(&srv_desc, sizeof(srv_desc));
     srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     if (device->lpVtbl->CreateShaderResourceView(
-            device, texture, &srv_desc, &srv) != S_OK || !srv)
+            device, (ID3D11Resource *)texture, &srv_desc, &srv) != S_OK || !srv)
         return 10;
 
     ZeroMemory(&sampler_desc, sizeof(sampler_desc));
@@ -748,7 +749,7 @@ static int check_d3d11(void)
     dsv_desc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
     dsv_desc.Texture2D.MipSlice = 0;
     if (device->lpVtbl->CreateDepthStencilView(
-            device, depth_texture, &dsv_desc, &dsv) != S_OK || !dsv)
+            device, (ID3D11Resource *)depth_texture, &dsv_desc, &dsv) != S_OK || !dsv)
         return 16;
 
     ZeroMemory(&input_desc, sizeof(input_desc));
@@ -870,11 +871,11 @@ void WINAPI WinMainCRTStartup(void)
 
     rc = check_xinput();
     if (rc != 0)
-        smoke_fail(140u + (UINT)rc)
+        smoke_fail(140u + (UINT)rc);
 
     rc = check_d3d11();
     if (rc != 0)
-        smoke_fail(160u + (UINT)rc)
+        smoke_fail(160u + (UINT)rc);
 
     ExitProcess(0);
 }

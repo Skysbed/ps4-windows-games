@@ -835,6 +835,7 @@ static void register_ucrt(
     UREG("abort", abi.abort_fn);
     UREG("exit", abi.exit_fn);
     UREG("fopen", abi.fopen_fn);
+    UREG("_wfopen", abi.wfopen_fn);
     UREG("fclose", abi.fclose_fn);
     UREG("fread", abi.fread_fn);
     UREG("fwrite", abi.fwrite_fn);

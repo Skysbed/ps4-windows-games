@@ -186,6 +186,81 @@ void ID3D11DeviceContext::IASetVertexBuffers(
         pOffsets[0]);
 }
 
+
+void ID3D11DeviceContext::IASetIndexBuffer(
+    ID3D11Buffer *pIndexBuffer,
+    DXGI_FORMAT Format,
+    UINT Offset)
+{
+    if (native == NULL || pIndexBuffer == NULL)
+        return;
+
+    (void)pcps4_gpu_set_index_buffer(
+        native,
+        pIndexBuffer->native,
+        (uint32_t)Format,
+        Offset);
+}
+
+void ID3D11DeviceContext::IASetPrimitiveTopology(
+    D3D11_PRIMITIVE_TOPOLOGY Topology)
+{
+    /*
+     * Topology is retained by the command backend in the next GPU stage.
+     * Rejecting an unknown value is preferable to fabricating commands.
+     */
+    if (native == NULL)
+        return;
+
+    if (Topology < D3D11_PRIMITIVE_TOPOLOGY_POINTLIST ||
+        Topology > D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP)
+        return;
+}
+
+HRESULT ID3D11DeviceContext::Map(
+    ID3D11Buffer *pResource,
+    UINT Subresource,
+    D3D11_MAP MapType,
+    UINT MapFlags,
+    D3D11_MAPPED_SUBRESOURCE *pMappedResource)
+{
+    (void)Subresource;
+    (void)MapFlags;
+
+    if (native == NULL ||
+        pResource == NULL ||
+        pMappedResource == NULL)
+        return E_INVALIDARG;
+
+    *pMappedResource = {};
+
+    void *data = NULL;
+    int rc = pcps4_gpu_buffer_map(
+        pResource->native,
+        (uint32_t)MapType,
+        &data);
+
+    if (rc != PCPS4_GPU_OK)
+        return rc == PCPS4_GPU_ERR_UNSUPPORTED
+            ? E_NOTIMPL
+            : E_FAIL;
+
+    pMappedResource->pData = data;
+    pMappedResource->RowPitch = 0;
+    pMappedResource->DepthPitch = 0;
+    return S_OK;
+}
+
+void ID3D11DeviceContext::Unmap(
+    ID3D11Buffer *pResource,
+    UINT Subresource)
+{
+    (void)Subresource;
+
+    if (pResource != NULL)
+        (void)pcps4_gpu_buffer_unmap(pResource->native);
+}
+
 void ID3D11DeviceContext::VSSetShader(
     ID3D11VertexShader *pVertexShader,
     void *const *ppClassInstances,

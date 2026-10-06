@@ -14,6 +14,9 @@ struct pcps4_gpu_context {
     pcps4_gpu_buffer_t *vertex_buffer;
     uint32_t vertex_stride;
     uint32_t vertex_offset;
+    pcps4_gpu_buffer_t *index_buffer;
+    uint32_t index_format;
+    uint32_t index_offset;
     pcps4_gpu_shader_t *vertex_shader;
     pcps4_gpu_shader_t *pixel_shader;
     pcps4_gfx_context_t *graphics;
@@ -41,6 +44,7 @@ struct pcps4_gpu_shader {
     uint32_t type;
     uint8_t *data;
     size_t size;
+    uint32_t mapped;
 };
 
 struct pcps4_gpu_render_target {
@@ -204,6 +208,45 @@ int pcps4_gpu_buffer_update(pcps4_gpu_buffer_t *buffer,
         return PCPS4_GPU_ERR_ARGUMENT;
 
     memcpy(buffer->data + offset, data, size);
+    return PCPS4_GPU_OK;
+}
+
+int pcps4_gpu_buffer_map(pcps4_gpu_buffer_t *buffer,
+                         uint32_t map_mode,
+                         void **data)
+{
+    if (!valid_buffer(buffer) || data == NULL ||
+        buffer->mapped != 0)
+        return PCPS4_GPU_ERR_ARGUMENT;
+
+    /*
+     * Dynamic/CPU-write buffers map directly to their bounded heap storage.
+     * Readback is intentionally not exposed until a GPU readback backend
+     * exists.
+     */
+    if (map_mode == 1u)
+        return PCPS4_GPU_ERR_UNSUPPORTED;
+
+    if (buffer->desc.usage != PCPS4_GPU_USAGE_DYNAMIC &&
+        buffer->desc.cpu_write == 0)
+        return PCPS4_GPU_ERR_UNSUPPORTED;
+
+    buffer->mapped = 1;
+    *data = buffer->data;
+
+    if (map_mode == 4u) {
+        memset(buffer->data, 0, buffer->desc.size);
+    }
+
+    return PCPS4_GPU_OK;
+}
+
+int pcps4_gpu_buffer_unmap(pcps4_gpu_buffer_t *buffer)
+{
+    if (!valid_buffer(buffer) || buffer->mapped == 0)
+        return PCPS4_GPU_ERR_ARGUMENT;
+
+    buffer->mapped = 0;
     return PCPS4_GPU_OK;
 }
 
@@ -541,6 +584,25 @@ int pcps4_gpu_set_vertex_buffer(
     context->vertex_buffer = buffer;
     context->vertex_stride = stride;
     context->vertex_offset = offset;
+    return PCPS4_GPU_OK;
+}
+
+int pcps4_gpu_set_index_buffer(
+    pcps4_gpu_context_t *context,
+    pcps4_gpu_buffer_t *buffer,
+    uint32_t format,
+    uint32_t offset)
+{
+    if (!valid_context(context) ||
+        !valid_buffer(buffer) ||
+        buffer->device != context->device ||
+        (format != 57u && format != 42u) ||
+        offset >= buffer->desc.size)
+        return PCPS4_GPU_ERR_ARGUMENT;
+
+    context->index_buffer = buffer;
+    context->index_format = format;
+    context->index_offset = offset;
     return PCPS4_GPU_OK;
 }
 

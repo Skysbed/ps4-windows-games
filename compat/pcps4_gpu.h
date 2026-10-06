@@ -92,6 +92,10 @@ int pcps4_gpu_buffer_update(pcps4_gpu_buffer_t *buffer,
                             size_t offset,
                             const void *data,
                             size_t size);
+int pcps4_gpu_buffer_map(pcps4_gpu_buffer_t *buffer,
+                         uint32_t map_mode,
+                         void **data);
+int pcps4_gpu_buffer_unmap(pcps4_gpu_buffer_t *buffer);
 
 pcps4_gpu_texture_t *pcps4_gpu_texture_create(
     pcps4_gpu_device_t *device,
@@ -145,6 +149,11 @@ int pcps4_gpu_set_vertex_buffer(
     pcps4_gpu_context_t *context,
     pcps4_gpu_buffer_t *buffer,
     uint32_t stride,
+    uint32_t offset);
+int pcps4_gpu_set_index_buffer(
+    pcps4_gpu_context_t *context,
+    pcps4_gpu_buffer_t *buffer,
+    uint32_t format,
     uint32_t offset);
 int pcps4_gpu_set_vertex_shader(
     pcps4_gpu_context_t *context,

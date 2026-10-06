@@ -155,7 +155,7 @@ $(SYS_OBJ): compat/pcps4_sys.c compat/pcps4_sys.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
 
-$(FAULT_OBJ): compat/pcps4_fault.c compat/pcps4_fault.h
+$(FAULT_OBJ): compat/pcps4_fault.c compat/pcps4_fault.h compat/pcps4_version.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
 
@@ -226,7 +226,7 @@ $(LOADER_OBJ): compat/pcps4_loader.c compat/pcps4_loader.h compat/pcps4_pe.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
 
-$(STATUS_OBJ): compat/pcps4_status.c compat/pcps4_status.h compat/pcps4_gfx.h
+$(STATUS_OBJ): compat/pcps4_status.c compat/pcps4_status.h compat/pcps4_gfx.h compat/pcps4_version.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
 

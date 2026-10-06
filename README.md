@@ -19,6 +19,8 @@ On a jailbroken PS4 (GoldHEN), the current package:
 | App launches (package contents correct) | ✅ |
 | Translated Win32 source runs (timing, atomics, memory, process info) | ✅ |
 | A PE binary is loaded into executable memory and run, returning the expected value | ✅ |
+| Interactive D3D11/XInput demo builds into the installable package | ✅ |
+| Interactive D3D11/XInput demo verified on PS4 hardware | ⏳ pending hardware test |
 
 ## Status screen and log
 
@@ -43,6 +45,7 @@ it reached.
 | `compat/pcps4_loader.[ch]` | Executes a loaded PE in executable memory on the console; refuses if any import is unresolved |
 | `compat/pcps4_shader.[ch]` | DXBC (D3D shader bytecode) reader: container validation, shader model, input/output signatures, resource bindings (RDEF) |
 | `compat/pcps4_d3d11.[h/cpp]` | D3D11-style façade: device, context, buffers, textures, render targets, swap chain, input layouts |
+| `compat/pcps4_xinput.[h/c]` | XInput compatibility bridge mapped onto OpenOrbis DualShock 4 input and rumble |
 | `compat/pcps4_gpu.[ch]` | GPU resource layer behind the D3D11 façade |
 | `compat/pcps4_gfx.[ch]` | VideoOut framebuffer backend (clear, rects, present) |
 | `compat/pcps4_gnm*.[ch]` | GNM submission boundary and optional OpenGNM renderer |
@@ -60,7 +63,9 @@ APIs: `Sleep`, `GetTickCount[64]`, `GetCurrentProcessId`,
 `WaitForSingleObject`, `ReleaseMutex`, `VirtualAlloc`, `VirtualFree`,
 `WSAStartup`, `WSACleanup`, `WSAGetLastError`, `closesocket`, plus MSVC string
 helpers (`_stricmp` etc.), common Win32 types and calling-convention
-annotations.
+annotations. XInput calls `XInputGetState`, `XInputSetState`,
+`XInputGetCapabilities`, and `XInputEnable` are translated to the
+PS4 controller bridge.
 
 The scanner masks comments and string literals before matching, so text inside
 them is never rewritten.
@@ -99,14 +104,30 @@ Output: `build/package/IV0000-PCPS00001_00-PCPS4TRANSLATE01.pkg`.
 GitHub Actions runs both test suites and uploads the package as the
 `PcPs4-PKG` artifact on every push.
 
+## Interactive D3D11/XInput demo
+
+The default build now launches an ordinary PC-style compatibility demo after
+the existing startup tests:
+
+- D3D11 device/swap-chain creation;
+- input layout + dynamic vertex buffer;
+- `IASetPrimitiveTopology` + `Draw`;
+- software triangle rasterization into the CPU back buffer;
+- XInput left-stick/D-pad movement, Options to exit, and A-button rumble;
+- `Present` scales the 640x360 back buffer to the 1920x1080 VideoOut target.
+
+Set `PCPS4_RUN_GAME=0` to return to the old status-screen-only behaviour.
+
 ## Open work
 
-- **Graphics:** the D3D11 `Draw` path returns a controlled "unsupported"
-  error; the optional OpenGNM renderer build (`PCPS4_ENABLE_OPENGNM=1`) has
-  not yet passed in CI.
-- **Shaders:** DXBC is read and validated, but not yet compiled to PS4 GPU
-  code; `tools/pcps4_shader_pipeline.py` drives external compilers for that.
-- **Win32 runtime coverage:** real programs import far more APIs than are
+- **Graphics:** the CPU backend currently covers a deliberately small D3D11
+  subset: POSITION/COLOR float vertex layouts, triangle-list `Draw`, and
+  triangle-list `DrawIndexed`. The optional OpenGNM renderer
+  (`PCPS4_ENABLE_OPENGNM=1`) remains the route for real PS4 GPU execution.
+- **Shaders:** DXBC is read and validated, and the OpenGNM path can consume a
+  pre-converted `.sb` shader cache. Automatic DXBC -> PS4 shader compilation
+  still needs the external compiler toolchain integrated into packaging.
+- **Win32 runtime coverage:** real games import far more APIs than are
   implemented; the loader's unresolved-import count lists exactly what a given
   binary still needs. Imports by ordinal are not resolved yet.
 

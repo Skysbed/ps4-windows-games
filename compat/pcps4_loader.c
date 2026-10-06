@@ -63,7 +63,7 @@ static size_t pcps4_round_up_page(size_t n)
     return r - (r % page);
 }
 
-static int pcps4_apply_image_protections(
+int pcps4_loader_apply_image_protections(
     const pcps4_pe_image *image,
     uint8_t *mem,
     size_t map_size)
@@ -187,7 +187,7 @@ static int pcps4_report_unresolved(
     return 0;
 }
 
-static int pcps4_run_tls_callbacks(
+int pcps4_loader_run_tls_callbacks(
     const pcps4_pe_image *image,
     uint8_t *mem,
     size_t map_size)
@@ -273,7 +273,7 @@ static int pcps4_run_tls_callbacks(
     return -1; /* malformed/cyclic callback table */
 }
 
-static int pcps4_entry_is_executable(
+int pcps4_loader_entry_is_executable(
     const pcps4_pe_image *image)
 {
     uint16_t i;
@@ -357,7 +357,7 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
         return PCPS4_LOADER_ERR_UNRESOLVED;
     }
 
-        if (!pcps4_entry_is_executable(&image)) {
+        if (!pcps4_loader_entry_is_executable(&image)) {
         pcps4_status_log("[pcps4] refusing to run: PE entry point is not in an "
                "executable section");
         sceKernelMunmap(mem, map_size);
@@ -371,7 +371,7 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
      * per PS4 page and unioned when sections share a page.
      */
     pcps4_status_log("[pcps4] loader: applying section protections (image=%p size=0x%zx)", mem, map_size);
-    if (pcps4_apply_image_protections(
+    if (pcps4_loader_apply_image_protections(
             &image, (uint8_t *)mem, map_size) != 0) {
         pcps4_status_log("[pcps4] mprotect(section permissions) failed "
                "(console may not permit executable memory)");
@@ -380,7 +380,7 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
     }
 
     pcps4_status_log("[pcps4] loader: protections ok, running TLS callbacks");
-    if (pcps4_run_tls_callbacks(
+    if (pcps4_loader_run_tls_callbacks(
             &image, (uint8_t *)mem, map_size) != 0) {
         pcps4_status_log("[pcps4] PE TLS callback table is invalid");
         sceKernelMunmap(mem, map_size);

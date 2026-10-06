@@ -59,6 +59,9 @@ TOKEN_RULES = [
     ("CloseHandle", r'\bCloseHandle\s*\(', 'pcps4_CloseHandle('),
     ("CreateThread", r'\bCreateThread\s*\(', 'pcps4_CreateThread('),
     ("CreateMutexA", r'\bCreateMutexA\s*\(', 'pcps4_CreateMutexA('),
+    ("CreateEventA", r'\bCreateEventA\s*\(', 'pcps4_CreateEventA('),
+    ("SetEvent", r'\bSetEvent\s*\(', 'pcps4_SetEvent('),
+    ("ResetEvent", r'\bResetEvent\s*\(', 'pcps4_ResetEvent('),
     ("WaitForSingleObject", r'\bWaitForSingleObject\s*\(', 'pcps4_WaitForSingleObject('),
     ("ReleaseMutex", r'\bReleaseMutex\s*\(', 'pcps4_ReleaseMutex('),
     ("VirtualAlloc", r'\bVirtualAlloc\s*\(', 'pcps4_VirtualAlloc('),
@@ -123,7 +126,7 @@ BLOCKER_RULES = [
     ("Windows DLL loader", r'\b(?:LoadLibrary(?:A|W)?|FreeLibrary|GetProcAddress)\s*\('),
     ("Windows registry API", r'\b(?:RegOpenKey(?:Ex)?|RegCloseKey|RegQueryValue(?:Ex)?|RegSetValue(?:Ex)?)\s*\('),
     ("Win32 file API", r'\b(?:GetFileSize|SetFilePointer|DeleteFile(?:A|W)?|FindFirstFile(?:A|W)?|FindNextFile(?:A|W)?|CreateDirectory(?:A|W)?)\s*\('),
-    ("Win32 synchronization API", r'\b(?:CreateEvent(?:A|W)?|SetEvent|ResetEvent|WaitForMultipleObjects|ReleaseSemaphore|CreateSemaphore(?:A|W)?)\s*\('),
+    ("Win32 synchronization API", r'\b(?:WaitForMultipleObjects|ReleaseSemaphore|CreateSemaphore(?:A|W)?)\s*\('),
     ("Unsupported Win32 wide API", r'\b(?:CreateFileW|CreateMutexW)\s*\('),
     ("Unsupported D3D11 API", r'\b(?:D3D11CreateDevice)\s*\('),
 ]

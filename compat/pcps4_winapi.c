@@ -4,6 +4,7 @@
 #include "pcps4_compat.h"
 #include "pcps4_xinput.h"
 #include "pcps4_d3d11_com.h"
+#include "pcps4_abi.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -358,30 +359,30 @@ static void register_kernel32(
     KREG("SetLastError", win_SetLastError);
     KREG("GetCurrentProcess", win_GetCurrentProcess);
     KREG("GetCurrentThread", win_GetCurrentThread);
-    KREG("GetCurrentProcessId", pcps4_get_current_process_id);
-    KREG("GetCurrentThreadId", pcps4_get_current_thread_id);
-    KREG("GetTickCount", pcps4_monotonic_ms);
-    KREG("GetTickCount64", pcps4_monotonic_ms);
-    KREG("Sleep", pcps4_sleep_ms);
-    KREG("InterlockedIncrement", pcps4_interlocked_increment);
-    KREG("InterlockedDecrement", pcps4_interlocked_decrement);
-    KREG("CreateFileA", pcps4_CreateFileA);
-    KREG("ReadFile", pcps4_ReadFile);
-    KREG("WriteFile", pcps4_WriteFile);
-    KREG("GetFileSize", pcps4_GetFileSize);
-    KREG("SetFilePointer", pcps4_SetFilePointer);
-    KREG("DeleteFileA", pcps4_DeleteFileA);
-    KREG("CreateDirectoryA", pcps4_CreateDirectoryA);
-    KREG("CloseHandle", pcps4_CloseHandle);
-    KREG("CreateThread", pcps4_CreateThread);
-    KREG("CreateMutexA", pcps4_CreateMutexA);
-    KREG("CreateEventA", pcps4_CreateEventA);
-    KREG("SetEvent", pcps4_SetEvent);
-    KREG("ResetEvent", pcps4_ResetEvent);
-    KREG("WaitForSingleObject", pcps4_WaitForSingleObject);
-    KREG("ReleaseMutex", pcps4_ReleaseMutex);
-    KREG("VirtualAlloc", pcps4_VirtualAlloc);
-    KREG("VirtualFree", pcps4_VirtualFree);
+    KREG("GetCurrentProcessId", pcps4_abi_GetCurrentProcessId);
+    KREG("GetCurrentThreadId", pcps4_abi_GetCurrentThreadId);
+    KREG("GetTickCount", pcps4_abi_GetTickCount64);
+    KREG("GetTickCount64", pcps4_abi_GetTickCount64);
+    KREG("Sleep", pcps4_abi_Sleep);
+    KREG("InterlockedIncrement", pcps4_abi_InterlockedIncrement);
+    KREG("InterlockedDecrement", pcps4_abi_InterlockedDecrement);
+    KREG("CreateFileA", pcps4_abi_CreateFileA);
+    KREG("ReadFile", pcps4_abi_ReadFile);
+    KREG("WriteFile", pcps4_abi_WriteFile);
+    KREG("GetFileSize", pcps4_abi_GetFileSize);
+    KREG("SetFilePointer", pcps4_abi_SetFilePointer);
+    KREG("DeleteFileA", pcps4_abi_DeleteFileA);
+    KREG("CreateDirectoryA", pcps4_abi_CreateDirectoryA);
+    KREG("CloseHandle", pcps4_abi_CloseHandle);
+    KREG("CreateThread", pcps4_abi_CreateThread);
+    KREG("CreateMutexA", pcps4_abi_CreateMutexA);
+    KREG("CreateEventA", pcps4_abi_CreateEventA);
+    KREG("SetEvent", pcps4_abi_SetEvent);
+    KREG("ResetEvent", pcps4_abi_ResetEvent);
+    KREG("WaitForSingleObject", pcps4_abi_WaitForSingleObject);
+    KREG("ReleaseMutex", pcps4_abi_ReleaseMutex);
+    KREG("VirtualAlloc", pcps4_abi_VirtualAlloc);
+    KREG("VirtualFree", pcps4_abi_VirtualFree);
     KREG("GetEnvironmentVariableA", win_GetEnvironmentVariableA);
     KREG("GetCommandLineA", win_GetCommandLineA);
     KREG("GetModuleFileNameA", win_GetModuleFileNameA);
@@ -409,10 +410,10 @@ static void register_d3d11(
 {
     (void)pcps4_pe_resolver_register(
         resolver, dll, "D3D11CreateDeviceAndSwapChain",
-        (void *)pcps4_d3d11_com_create_device_and_swap_chain);
+        (void *)pcps4_abi_D3D11CreateDeviceAndSwapChain);
     (void)pcps4_pe_resolver_register(
         resolver, dll, "D3D11CreateDevice",
-        (void *)pcps4_d3d11_com_create_device);
+        (void *)pcps4_abi_D3D11CreateDevice);
 }
 
 static void register_winsock(
@@ -420,24 +421,24 @@ static void register_winsock(
     const char *dll)
 {
 #define WREG(name, fn) (void)pcps4_pe_resolver_register(resolver, dll, name, (void *)(fn))
-    WREG("WSAStartup", pcps4_WSAStartup);
-    WREG("WSACleanup", pcps4_WSACleanup);
-    WREG("WSAGetLastError", pcps4_WSAGetLastError);
-    WREG("socket", pcps4_socket);
-    WREG("connect", pcps4_connect);
-    WREG("send", pcps4_send);
-    WREG("recv", pcps4_recv);
-    WREG("shutdown", pcps4_shutdown);
-    WREG("setsockopt", pcps4_setsockopt);
-    WREG("getsockopt", pcps4_getsockopt);
-    WREG("getaddrinfo", pcps4_getaddrinfo);
-    WREG("freeaddrinfo", pcps4_freeaddrinfo);
-    WREG("htons", pcps4_htons);
-    WREG("ntohs", pcps4_ntohs);
-    WREG("htonl", pcps4_htonl);
-    WREG("ntohl", pcps4_ntohl);
-    WREG("inet_addr", pcps4_inet_addr);
-    WREG("closesocket", pcps4_closesocket);
+    WREG("WSAStartup", pcps4_abi_WSAStartup);
+    WREG("WSACleanup", pcps4_abi_WSACleanup);
+    WREG("WSAGetLastError", pcps4_abi_WSAGetLastError);
+    WREG("socket", pcps4_abi_socket);
+    WREG("connect", pcps4_abi_connect);
+    WREG("send", pcps4_abi_send);
+    WREG("recv", pcps4_abi_recv);
+    WREG("shutdown", pcps4_abi_shutdown);
+    WREG("setsockopt", pcps4_abi_setsockopt);
+    WREG("getsockopt", pcps4_abi_getsockopt);
+    WREG("getaddrinfo", pcps4_abi_getaddrinfo);
+    WREG("freeaddrinfo", pcps4_abi_freeaddrinfo);
+    WREG("htons", pcps4_abi_htons);
+    WREG("ntohs", pcps4_abi_ntohs);
+    WREG("htonl", pcps4_abi_htonl);
+    WREG("ntohl", pcps4_abi_ntohl);
+    WREG("inet_addr", pcps4_abi_inet_addr);
+    WREG("closesocket", pcps4_abi_closesocket);
 #undef WREG
 }
 
@@ -446,10 +447,10 @@ static void register_xinput(
     const char *dll)
 {
 #define XREG(name, fn) (void)pcps4_pe_resolver_register(resolver, dll, name, (void *)(fn))
-    XREG("XInputGetState", pcps4_XInputGetState);
-    XREG("XInputSetState", pcps4_XInputSetState);
-    XREG("XInputGetCapabilities", pcps4_XInputGetCapabilities);
-    XREG("XInputEnable", pcps4_XInputEnable);
+    XREG("XInputGetState", pcps4_abi_XInputGetState);
+    XREG("XInputSetState", pcps4_abi_XInputSetState);
+    XREG("XInputGetCapabilities", pcps4_abi_XInputGetCapabilities);
+    XREG("XInputEnable", pcps4_abi_XInputEnable);
 #undef XREG
 }
 

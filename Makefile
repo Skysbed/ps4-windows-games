@@ -62,6 +62,7 @@ XINPUT_OBJ := $(INTDIR)/pcps4_xinput.o
 WINAPI_OBJ := $(INTDIR)/pcps4_winapi.o
 GAME_OBJ  := $(INTDIR)/pcps4_game.o
 D3D11_COM_OBJ := $(INTDIR)/pcps4_d3d11_com.o
+ABI_OBJ := $(INTDIR)/pcps4_abi.o
 
 ELF := $(INTDIR)/$(PROJECT).elf
 OELF := $(INTDIR)/$(PROJECT).oelf
@@ -190,6 +191,10 @@ $(D3D11_COM_OBJ): compat/pcps4_d3d11_com.cpp compat/pcps4_d3d11_com.h compat/pcp
 	@mkdir -p "$(dir $@)"
 	$(CXX) $(CXXFLAGS) -o "$@" "$<"
 
+$(ABI_OBJ): compat/pcps4_abi.c compat/pcps4_abi.h compat/pcps4_compat.h compat/pcps4_d3d11_com.h compat/pcps4_xinput.h
+	@mkdir -p "$(dir $@)"
+	$(CC) $(CFLAGS) -o "$@" "$<"
+
 $(SHADER_OBJ): compat/pcps4_shader.c compat/pcps4_shader.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
@@ -209,10 +214,10 @@ $(STATUS_OBJ): compat/pcps4_status.c compat/pcps4_status.h compat/pcps4_gfx.h
 $(INTDIR):
 	@mkdir -p "$(INTDIR)"
 
-$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(D3D11_COM_OBJ)
+$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(D3D11_COM_OBJ) $(ABI_OBJ)
 	@test -n "$(OBJS)" || (echo "ERROR: no PC source files found in pc_source/."; exit 1)
 	$(LD) $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) \
-	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(GNM_RENDERER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(D3D11_COM_OBJ) -o "$@" $(LDFLAGS)
+	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(GNM_RENDERER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(D3D11_COM_OBJ) $(ABI_OBJ) -o "$@" $(LDFLAGS)
 
 $(EBOOT): $(ELF)
 	@test -n "$(OO_PS4_TOOLCHAIN)" || (echo "ERROR: OO_PS4_TOOLCHAIN is not set."; exit 1)

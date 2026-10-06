@@ -1022,6 +1022,144 @@ int pcps4_gpu_context_draw(
 #endif
 }
 
+static int pcps4_cpu_fetch_vertex(
+    pcps4_gpu_context_t *context,
+    uint32_t vertex_index,
+    float position[3],
+    float color[4])
+{
+    const pcps4_gpu_vertex_element_t *layout;
+    uint32_t layout_count;
+    int position_index = -1;
+    int color_index = -1;
+
+    if (context == NULL ||
+        context->vertex_buffer == NULL ||
+        !valid_buffer(context->vertex_buffer) ||
+        position == NULL ||
+        color == NULL)
+        return PCPS4_GPU_ERR_STATE;
+
+    if (pcps4_gpu_context_get_input_layout(
+            context, &layout, &layout_count) != PCPS4_GPU_OK)
+        return PCPS4_GPU_ERR_STATE;
+
+    for (uint32_t i = 0; i < layout_count; ++i) {
+        if (layout[i].input_slot != 0)
+            continue;
+        if (layout[i].semantic_kind == 1u && position_index < 0)
+            position_index = (int)i;
+        if (layout[i].semantic_kind == 2u && color_index < 0)
+            color_index = (int)i;
+    }
+
+    if (position_index < 0 || color_index < 0)
+        return PCPS4_GPU_ERR_UNSUPPORTED;
+
+    size_t byte_offset =
+        (size_t)vertex_index * context->vertex_stride +
+        (size_t)context->vertex_offset;
+
+    if (byte_offset > context->vertex_buffer->desc.size ||
+        context->vertex_stride >
+            context->vertex_buffer->desc.size - byte_offset)
+        return PCPS4_GPU_ERR_ARGUMENT;
+
+    const uint8_t *v = context->vertex_buffer->data + byte_offset;
+
+    if (!pcps4_decode_float3(
+            v + layout[position_index].aligned_byte_offset,
+            layout[position_index].format,
+            position) ||
+        !pcps4_decode_float4(
+            v + layout[color_index].aligned_byte_offset,
+            layout[color_index].format,
+            color))
+        return PCPS4_GPU_ERR_UNSUPPORTED;
+
+    return PCPS4_GPU_OK;
+}
+
+static int pcps4_cpu_draw_indexed(
+    pcps4_gpu_context_t *context,
+    uint32_t index_count,
+    uint32_t start_index,
+    int32_t base_vertex)
+{
+    pcps4_gpu_texture_t *texture;
+
+    if (context == NULL ||
+        context->render_target == NULL ||
+        !valid_rtv(context->render_target) ||
+        context->index_buffer == NULL ||
+        !valid_buffer(context->index_buffer))
+        return PCPS4_GPU_ERR_STATE;
+
+    texture = context->render_target->texture;
+    if (!valid_texture(texture) || texture->data == NULL)
+        return PCPS4_GPU_ERR_UNSUPPORTED;
+
+    if (context->index_format != 57u && context->index_format != 42u)
+        return PCPS4_GPU_ERR_UNSUPPORTED;
+
+    if (context->primitive_topology != PCPS4_GPU_TOPOLOGY_TRIANGLELIST)
+        return PCPS4_GPU_ERR_UNSUPPORTED;
+
+    size_t index_size = context->index_format == 57u ? 2u : 4u;
+    if ((size_t)start_index > context->index_buffer->desc.size / index_size ||
+        (size_t)index_count >
+            (context->index_buffer->desc.size / index_size) - start_index)
+        return PCPS4_GPU_ERR_ARGUMENT;
+
+    for (uint32_t base = 0; base + 2 < index_count; base += 3) {
+        uint32_t raw[3];
+        float p[3][3];
+        float c[3][4];
+
+        for (uint32_t i = 0; i < 3; ++i) {
+            size_t byte = ((size_t)start_index + base + i) * index_size +
+                          context->index_offset;
+
+            if (byte > context->index_buffer->desc.size ||
+                index_size >
+                    context->index_buffer->desc.size - byte)
+                return PCPS4_GPU_ERR_ARGUMENT;
+
+            if (index_size == 2u) {
+                uint16_t value;
+                memcpy(&value, context->index_buffer->data + byte, sizeof(value));
+                raw[i] = value;
+            } else {
+                uint32_t value;
+                memcpy(&value, context->index_buffer->data + byte, sizeof(value));
+                raw[i] = value;
+            }
+
+            if (base_vertex < 0) {
+                if (raw[i] > (uint32_t)(-base_vertex))
+                    raw[i] -= (uint32_t)(-base_vertex);
+                else
+                    return PCPS4_GPU_ERR_ARGUMENT;
+            } else {
+                if ((uint32_t)base_vertex > UINT32_MAX - raw[i])
+                    return PCPS4_GPU_ERR_ARGUMENT;
+                raw[i] += (uint32_t)base_vertex;
+            }
+
+            int rc = pcps4_cpu_fetch_vertex(context, raw[i], p[i], c[i]);
+            if (rc != PCPS4_GPU_OK)
+                return rc;
+        }
+
+        int rc = pcps4_raster_triangle(
+            texture, p[0], c[0], p[1], c[1], p[2], c[2]);
+        if (rc != PCPS4_GPU_OK)
+            return rc;
+    }
+
+    return PCPS4_GPU_OK;
+}
+
 int pcps4_gpu_context_draw_indexed(
 
 int pcps4_gpu_context_draw_indexed(
@@ -1030,13 +1168,62 @@ int pcps4_gpu_context_draw_indexed(
     uint32_t start_index,
     int32_t base_vertex)
 {
-    (void)start_index;
-    (void)base_vertex;
+    const void *vs_data = NULL;
+    const void *ps_data = NULL;
+    size_t vs_size = 0;
+    size_t ps_size = 0;
+    uint32_t vs_type = 0;
+    uint32_t ps_type = 0;
+    int rc;
 
     if (!valid_context(context) || index_count == 0)
         return PCPS4_GPU_ERR_ARGUMENT;
 
+#if PCPS4_ENABLE_OPENGNM
+    if (context->gnm_renderer == NULL ||
+        context->vertex_shader == NULL ||
+        context->pixel_shader == NULL)
+        return PCPS4_GPU_ERR_STATE;
+
+    if (pcps4_gpu_shader_get_blob(
+            context->vertex_shader, &vs_data, &vs_size, &vs_type) != PCPS4_GPU_OK ||
+        pcps4_gpu_shader_get_blob(
+            context->pixel_shader, &ps_data, &ps_size, &ps_type) != PCPS4_GPU_OK)
+        return PCPS4_GPU_ERR_STATE;
+
+    if (vs_type != PCPS4_GPU_SHADER_VERTEX ||
+        ps_type != PCPS4_GPU_SHADER_PIXEL ||
+        vs_size < 16 ||
+        ps_size < 16)
+        return PCPS4_GPU_ERR_UNSUPPORTED;
+
+    if (((const uint8_t *)vs_data)[0] != 'S' ||
+        ((const uint8_t *)vs_data)[1] != 'h' ||
+        ((const uint8_t *)vs_data)[2] != 'd' ||
+        ((const uint8_t *)vs_data)[3] != 'r' ||
+        ((const uint8_t *)ps_data)[0] != 'S' ||
+        ((const uint8_t *)ps_data)[1] != 'h' ||
+        ((const uint8_t *)ps_data)[2] != 'd' ||
+        ((const uint8_t *)ps_data)[3] != 'r')
+        return PCPS4_GPU_ERR_UNSUPPORTED;
+
+    rc = pcps4_gnm_renderer_load_shader_blobs(
+        context->gnm_renderer,
+        vs_data, vs_size,
+        ps_data, ps_size);
+
+    if (rc != PCPS4_GNM_OK)
+        return PCPS4_GPU_ERR_BACKEND;
+
+    /*
+     * The optional GNM backend currently exposes DrawAuto only. Keep indexed
+     * drawing explicit rather than silently changing the primitive semantics.
+     */
     return PCPS4_GPU_ERR_UNSUPPORTED;
+#else
+    return pcps4_cpu_draw_indexed(
+        context, index_count, start_index, base_vertex);
+#endif
 }
 
 int pcps4_gpu_set_vertex_buffer_slot(

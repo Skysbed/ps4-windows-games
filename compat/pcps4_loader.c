@@ -63,7 +63,7 @@ static size_t pcps4_round_up_page(size_t n)
     return r - (r % page);
 }
 
-static int pcps4_apply_image_protections(
+int pcps4_loader_apply_image_protections(
     const pcps4_pe_image *image,
     uint8_t *mem,
     size_t map_size)
@@ -202,7 +202,7 @@ static int pcps4_report_unresolved(
     return 0;
 }
 
-static int pcps4_run_tls_callbacks(
+int pcps4_loader_run_tls_callbacks(
     const pcps4_pe_image *image,
     uint8_t *mem,
     size_t map_size)
@@ -287,6 +287,30 @@ static int pcps4_run_tls_callbacks(
     }
 
     return -1; /* malformed/cyclic callback table */
+}
+
+
+int pcps4_loader_run_dll_attach(
+    const pcps4_pe_image *image, uint8_t *mem, size_t map_size)
+{
+    typedef int (PCPS4_MS_ABI *pcps4_dll_entry_fn)(
+        void *module, uint32_t reason, void *reserved);
+    pcps4_dll_entry_fn entry;
+
+    if (image == NULL || mem == NULL || map_size == 0)
+        return -1;
+
+    if (image->entry_point_rva == 0)
+        return 0;
+
+    if ((size_t)image->entry_point_rva >= map_size)
+        return -1;
+
+    entry = (pcps4_dll_entry_fn)(void *)(
+        mem + image->entry_point_rva);
+
+    printf("[pcps4] DLL attach at %p\n", (void *)entry);
+    return entry(mem, 1u, NULL) ? 0 : -1;
 }
 
 static int pcps4_entry_is_executable(
@@ -386,7 +410,7 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
      * is often smaller than the PS4 page size, so permissions are calculated
      * per PS4 page and unioned when sections share a page.
      */
-    if (pcps4_apply_image_protections(
+    if (pcps4_loader_apply_image_protections(
             &image, (uint8_t *)mem, map_size) != 0) {
         printf("[pcps4] mprotect(section permissions) failed "
                "(console may not permit executable memory)\n");
@@ -394,7 +418,7 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
         return PCPS4_LOADER_ERR_PROTECT;
     }
 
-    if (pcps4_run_tls_callbacks(
+    if (pcps4_loader_run_tls_callbacks(
             &image, (uint8_t *)mem, map_size) != 0) {
         printf("[pcps4] PE TLS callback table is invalid\n");
         sceKernelMunmap(mem, map_size);

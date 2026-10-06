@@ -5,6 +5,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 #include "pcps4_gpu.h"
 
 typedef int32_t HRESULT;

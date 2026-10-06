@@ -75,6 +75,13 @@ typedef struct {
     pcps4_gpu_texture_t *texture;
 } pcps4_gpu_render_target_desc_t;
 
+typedef struct {
+    uint32_t input_slot;
+    uint32_t aligned_byte_offset;
+    uint32_t format;
+    uint32_t semantic_index;
+} pcps4_gpu_vertex_element_t;
+
 pcps4_gpu_device_t *pcps4_gpu_device_create(void);
 void pcps4_gpu_device_destroy(pcps4_gpu_device_t *device);
 
@@ -86,6 +93,14 @@ int pcps4_gpu_context_attach_graphics(
 int pcps4_gpu_context_attach_gnm(
     pcps4_gpu_context_t *context,
     pcps4_gnm_renderer_t *renderer);
+int pcps4_gpu_context_set_input_layout(
+    pcps4_gpu_context_t *context,
+    const pcps4_gpu_vertex_element_t *elements,
+    uint32_t count);
+int pcps4_gpu_context_get_input_layout(
+    const pcps4_gpu_context_t *context,
+    const pcps4_gpu_vertex_element_t **elements,
+    uint32_t *count);
 
 pcps4_gpu_buffer_t *pcps4_gpu_buffer_create(
     pcps4_gpu_device_t *device,
@@ -161,6 +176,12 @@ int pcps4_gpu_context_draw_indexed(
 
 int pcps4_gpu_set_vertex_buffer(
     pcps4_gpu_context_t *context,
+    pcps4_gpu_buffer_t *buffer,
+    uint32_t stride,
+    uint32_t offset);
+int pcps4_gpu_set_vertex_buffer_slot(
+    pcps4_gpu_context_t *context,
+    uint32_t slot,
     pcps4_gpu_buffer_t *buffer,
     uint32_t stride,
     uint32_t offset);

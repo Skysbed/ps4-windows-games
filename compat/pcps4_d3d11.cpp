@@ -44,6 +44,33 @@ static DXGI_FORMAT map_gpu_texture_format(
     }
 }
 
+HRESULT ID3D11InputLayout::apply(
+    pcps4_gpu_context_t *context)
+{
+    pcps4_gpu_vertex_element_t native_elements[16];
+
+    if (context == NULL || count > 16)
+        return E_INVALIDARG;
+
+    memset(native_elements, 0, sizeof(native_elements));
+
+    for (UINT i = 0; i < count; ++i) {
+        native_elements[i].input_slot = elements[i].InputSlot;
+        native_elements[i].aligned_byte_offset =
+            elements[i].AlignedByteOffset;
+        native_elements[i].format = elements[i].Format;
+        native_elements[i].semantic_index =
+            elements[i].SemanticIndex;
+    }
+
+    return pcps4_gpu_context_set_input_layout(
+               context,
+               native_elements,
+               count) == PCPS4_GPU_OK
+        ? S_OK
+        : E_FAIL;
+}
+
 static int is_dxbc_blob(
     const void *data,
     size_t size)
@@ -337,6 +364,23 @@ void ID3D11DeviceContext::ClearRenderTargetView(
     (void)pcps4_gpu_context_clear(native, color);
 }
 
+void ID3D11DeviceContext::IASetInputLayout(
+    ID3D11InputLayout *pInputLayout)
+{
+    if (native == NULL)
+        return;
+
+    if (pInputLayout == NULL) {
+        (void)pcps4_gpu_context_set_input_layout(
+            native,
+            NULL,
+            0);
+        return;
+    }
+
+    (void)pInputLayout->apply(native);
+}
+
 void ID3D11DeviceContext::IASetVertexBuffers(
     UINT StartSlot,
     UINT NumBuffers,
@@ -345,19 +389,27 @@ void ID3D11DeviceContext::IASetVertexBuffers(
     const UINT *pOffsets)
 {
     if (native == NULL ||
-        StartSlot != 0 ||
         NumBuffers == 0 ||
         ppVertexBuffers == NULL ||
-        ppVertexBuffers[0] == NULL ||
         pStrides == NULL ||
-        pOffsets == NULL)
+        pOffsets == NULL ||
+        StartSlot >= 16 ||
+        NumBuffers > 16 - StartSlot)
         return;
 
-    (void)pcps4_gpu_set_vertex_buffer(
-        native,
-        ppVertexBuffers[0]->native,
-        pStrides[0],
-        pOffsets[0]);
+    for (UINT i = 0; i < NumBuffers; ++i) {
+        ID3D11Buffer *buffer = ppVertexBuffers[i];
+
+        if (buffer == NULL)
+            continue;
+
+        (void)pcps4_gpu_set_vertex_buffer_slot(
+            native,
+            StartSlot + i,
+            buffer->native,
+            pStrides[i],
+            pOffsets[i]);
+    }
 }
 
 
@@ -662,6 +714,114 @@ HRESULT ID3D11Device::CreateTexture2D(
         return E_OUTOFMEMORY;
     }
 
+    return S_OK;
+}
+
+HRESULT ID3D11Device::CreateInputLayout(
+    const D3D11_INPUT_ELEMENT_DESC *pInputElementDescs,
+    UINT NumElements,
+    const void *pShaderBytecodeWithInputSignature,
+    size_t BytecodeLength,
+    ID3D11InputLayout **ppInputLayout)
+{
+    (void)pShaderBytecodeWithInputSignature;
+
+    if (pInputElementDescs == NULL ||
+        ppInputLayout == NULL ||
+        NumElements == 0 ||
+        NumElements > 16 ||
+        BytecodeLength == 0)
+        return E_INVALIDARG;
+
+    *ppInputLayout = NULL;
+
+    ID3D11InputLayout *layout =
+        new (std::nothrow) ID3D11InputLayout();
+
+    if (layout == NULL)
+        return E_OUTOFMEMORY;
+
+    UINT slot_last_offset[16] = {};
+    UINT slot_last_size[16] = {};
+    uint8_t slot_seen[16] = {};
+
+    for (UINT i = 0; i < NumElements; ++i) {
+        const D3D11_INPUT_ELEMENT_DESC &src =
+            pInputElementDescs[i];
+
+        if (src.SemanticName == NULL ||
+            src.InputSlot >= 16 ||
+            src.InputSlotClass != D3D11_INPUT_PER_VERTEX_DATA ||
+            src.InstanceDataStepRate != 0)
+        {
+            delete layout;
+            return E_INVALIDARG;
+        }
+
+        if (src.SemanticName[0] == '\0' ||
+            strlen(src.SemanticName) >= sizeof(layout->semantic_names[0]))
+        {
+            delete layout;
+            return E_INVALIDARG;
+        }
+
+        UINT element_size = 0;
+        switch (src.Format) {
+            case DXGI_FORMAT_R32G32B32A32_FLOAT:
+                element_size = 16; break;
+            case DXGI_FORMAT_R32G32B32_FLOAT:
+                element_size = 12; break;
+            case DXGI_FORMAT_R32G32_FLOAT:
+                element_size = 8; break;
+            case DXGI_FORMAT_R32_FLOAT:
+                element_size = 4; break;
+            case DXGI_FORMAT_R16G16_FLOAT:
+                element_size = 4; break;
+            case DXGI_FORMAT_R16G16B16A16_FLOAT:
+                element_size = 8; break;
+            case DXGI_FORMAT_R8G8B8A8_UNORM:
+            case DXGI_FORMAT_B8G8R8A8_UNORM:
+                element_size = 4; break;
+            default:
+                delete layout;
+                return E_NOTIMPL;
+        }
+
+        UINT offset = src.AlignedByteOffset;
+        if (offset == D3D11_APPEND_ALIGNED_ELEMENT) {
+            offset = slot_seen[src.InputSlot]
+                ? slot_last_offset[src.InputSlot] +
+                  slot_last_size[src.InputSlot]
+                : 0;
+        }
+
+        if (offset > UINT_MAX - element_size) {
+            delete layout;
+            return E_INVALIDARG;
+        }
+
+        memset(
+            &layout->elements[i],
+            0,
+            sizeof(layout->elements[i]));
+
+        strncpy(
+            layout->semantic_names[i],
+            src.SemanticName,
+            sizeof(layout->semantic_names[i]) - 1);
+
+        layout->elements[i] = src;
+        layout->elements[i].SemanticName =
+            layout->semantic_names[i];
+        layout->elements[i].AlignedByteOffset = offset;
+
+        slot_last_offset[src.InputSlot] = offset;
+        slot_last_size[src.InputSlot] = element_size;
+        slot_seen[src.InputSlot] = 1;
+    }
+
+    layout->count = NumElements;
+    *ppInputLayout = layout;
     return S_OK;
 }
 

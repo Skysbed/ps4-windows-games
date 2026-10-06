@@ -18,6 +18,11 @@ struct pcps4_gpu_context {
     pcps4_gpu_buffer_t *vertex_buffer;
     uint32_t vertex_stride;
     uint32_t vertex_offset;
+    pcps4_gpu_buffer_t *vertex_buffers[16];
+    uint32_t vertex_strides[16];
+    uint32_t vertex_offsets[16];
+    pcps4_gpu_vertex_element_t input_layout[16];
+    uint32_t input_layout_count;
     pcps4_gpu_buffer_t *index_buffer;
     uint32_t index_format;
     uint32_t index_offset;
@@ -534,6 +539,42 @@ void pcps4_gpu_render_target_destroy(
     free(render_target);
 }
 
+int pcps4_gpu_context_set_input_layout(
+    pcps4_gpu_context_t *context,
+    const pcps4_gpu_vertex_element_t *elements,
+    uint32_t count)
+{
+    if (!valid_context(context) ||
+        (count != 0 && elements == NULL) ||
+        count > 16)
+        return PCPS4_GPU_ERR_ARGUMENT;
+
+    if (count != 0)
+        memcpy(context->input_layout, elements,
+               (size_t)count * sizeof(elements[0]));
+
+    if (count < 16)
+        memset(context->input_layout + count,
+               0,
+               (size_t)(16 - count) * sizeof(elements[0]));
+
+    context->input_layout_count = count;
+    return PCPS4_GPU_OK;
+}
+
+int pcps4_gpu_context_get_input_layout(
+    const pcps4_gpu_context_t *context,
+    const pcps4_gpu_vertex_element_t **elements,
+    uint32_t *count)
+{
+    if (!valid_context(context) || elements == NULL || count == NULL)
+        return PCPS4_GPU_ERR_ARGUMENT;
+
+    *elements = context->input_layout;
+    *count = context->input_layout_count;
+    return PCPS4_GPU_OK;
+}
+
 int pcps4_gpu_context_set_render_target(
     pcps4_gpu_context_t *context,
     pcps4_gpu_render_target_t *render_target)
@@ -728,23 +769,42 @@ int pcps4_gpu_context_draw_indexed(
     return PCPS4_GPU_ERR_UNSUPPORTED;
 }
 
-int pcps4_gpu_set_vertex_buffer(
+int pcps4_gpu_set_vertex_buffer_slot(
     pcps4_gpu_context_t *context,
+    uint32_t slot,
     pcps4_gpu_buffer_t *buffer,
     uint32_t stride,
     uint32_t offset)
 {
     if (!valid_context(context) ||
+        slot >= 16 ||
         !valid_buffer(buffer) ||
         buffer->device != context->device ||
         stride == 0 ||
         offset >= buffer->desc.size)
         return PCPS4_GPU_ERR_ARGUMENT;
 
-    context->vertex_buffer = buffer;
-    context->vertex_stride = stride;
-    context->vertex_offset = offset;
+    context->vertex_buffers[slot] = buffer;
+    context->vertex_strides[slot] = stride;
+    context->vertex_offsets[slot] = offset;
+
+    if (slot == 0) {
+        context->vertex_buffer = buffer;
+        context->vertex_stride = stride;
+        context->vertex_offset = offset;
+    }
+
     return PCPS4_GPU_OK;
+}
+
+int pcps4_gpu_set_vertex_buffer(
+    pcps4_gpu_context_t *context,
+    pcps4_gpu_buffer_t *buffer,
+    uint32_t stride,
+    uint32_t offset)
+{
+    return pcps4_gpu_set_vertex_buffer_slot(
+        context, 0, buffer, stride, offset);
 }
 
 int pcps4_gpu_set_index_buffer(

@@ -146,6 +146,110 @@ static int pcps4_apply_image_protections(
     return 0;
 }
 
+static int pcps4_report_unresolved(
+    void *user,
+    const char *dll,
+    int by_name,
+    const char *name,
+    uint16_t ordinal)
+{
+    (void)user;
+
+    if (by_name)
+        printf("[pcps4] unresolved import: %s!%s\n", dll, name);
+    else
+        printf("[pcps4] unresolved import: %s!#%u\n",
+               dll, (unsigned)ordinal);
+
+    return 0;
+}
+
+static int pcps4_run_tls_callbacks(
+    const pcps4_pe_image *image,
+    uint8_t *mem,
+    size_t map_size)
+{
+    uint32_t tls_rva;
+
+    typedef void (*pcps4_tls_callback_fn)(
+        void *module,
+        uint32_t reason,
+        void *reserved);
+
+    if (image == NULL || mem == NULL || map_size == 0)
+        return -1;
+
+    tls_rva = image->directory_rva[PCPS4_PE_DIRECTORY_TLS];
+    if (tls_rva == 0 ||
+        image->directory_size[PCPS4_PE_DIRECTORY_TLS] < 40u)
+        return 0;
+
+    if ((size_t)tls_rva + 40u > map_size)
+        return -1;
+
+    /*
+     * PE32+ IMAGE_TLS_DIRECTORY64:
+     *   0x00 StartAddressOfRawData
+     *   0x08 EndAddressOfRawData
+     *   0x10 AddressOfIndex
+     *   0x18 AddressOfCallBacks
+     *   0x20 SizeOfZeroFill
+     *   0x24 Characteristics
+     *
+     * Relocations have already been applied to AddressOfCallBacks, so it is
+     * an absolute runtime address inside this mapped image.
+     */
+    uint64_t callbacks_va =
+        (uint64_t)mem[tls_rva + 0x18u] |
+        ((uint64_t)mem[tls_rva + 0x19u] << 8) |
+        ((uint64_t)mem[tls_rva + 0x1Au] << 16) |
+        ((uint64_t)mem[tls_rva + 0x1Bu] << 24) |
+        ((uint64_t)mem[tls_rva + 0x1Cu] << 32) |
+        ((uint64_t)mem[tls_rva + 0x1Du] << 40) |
+        ((uint64_t)mem[tls_rva + 0x1Eu] << 48) |
+        ((uint64_t)mem[tls_rva + 0x1Fu] << 56);
+
+    if (callbacks_va == 0)
+        return 0;
+
+    if (callbacks_va < (uint64_t)(uintptr_t)mem ||
+        callbacks_va >= (uint64_t)(uintptr_t)mem + map_size)
+        return -1;
+
+    size_t offset =
+        (size_t)(callbacks_va - (uint64_t)(uintptr_t)mem);
+
+    for (uint32_t i = 0; i < 64u; ++i) {
+        if (offset > map_size - 8u)
+            return -1;
+
+        uint64_t callback_va =
+            (uint64_t)mem[offset + 0] |
+            ((uint64_t)mem[offset + 1] << 8) |
+            ((uint64_t)mem[offset + 2] << 16) |
+            ((uint64_t)mem[offset + 3] << 24) |
+            ((uint64_t)mem[offset + 4] << 32) |
+            ((uint64_t)mem[offset + 5] << 40) |
+            ((uint64_t)mem[offset + 6] << 48) |
+            ((uint64_t)mem[offset + 7] << 56);
+
+        if (callback_va == 0)
+            return 0;
+
+        if (callback_va < (uint64_t)(uintptr_t)mem ||
+            callback_va >= (uint64_t)(uintptr_t)mem + map_size)
+            return -1;
+
+        pcps4_tls_callback_fn callback =
+            (pcps4_tls_callback_fn)(uintptr_t)callback_va;
+
+        callback(mem, 1u, NULL);
+        offset += 8u;
+    }
+
+    return -1; /* malformed/cyclic callback table */
+}
+
 static int pcps4_entry_is_executable(
     const pcps4_pe_image *image)
 {
@@ -220,6 +324,9 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
            (unsigned)resolved, (unsigned)unresolved);
 
     if (unresolved != 0) {
+        (void)pcps4_pe_report_unresolved_imports(
+            &image, resolver, pcps4_report_unresolved, NULL);
+
         /* Never jump into code that will call a missing API. */
         printf("[pcps4] refusing to run: %u unresolved import(s)\n",
                (unsigned)unresolved);
@@ -246,6 +353,13 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
                "(console may not permit executable memory)\n");
         sceKernelMunmap(mem, map_size);
         return PCPS4_LOADER_ERR_PROTECT;
+    }
+
+    if (pcps4_run_tls_callbacks(
+            &image, (uint8_t *)mem, map_size) != 0) {
+        printf("[pcps4] PE TLS callback table is invalid\n");
+        sceKernelMunmap(mem, map_size);
+        return PCPS4_LOADER_ERR_LOAD;
     }
 
     entry = (pcps4_entry_fn)(uintptr_t)

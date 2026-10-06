@@ -3,6 +3,8 @@
 
 #include "pcps4_pe.h"
 
+typedef struct pcps4_module_loader pcps4_module_loader;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -15,6 +17,7 @@ extern "C" {
  * by the loader before control is transferred to the Windows binary.
  */
 void pcps4_winapi_build_resolver(pcps4_pe_resolver *resolver);
+void pcps4_winapi_set_module_loader(pcps4_module_loader *loader);
 
 #ifdef __cplusplus
 }

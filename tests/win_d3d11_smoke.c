@@ -6,11 +6,30 @@
  *
  * Imports: D3D11CreateDeviceAndSwapChain, ExitProcess.
  * On success the TV shows a pulsing cyan screen from a native Windows
- * .exe. Close the app from the PS button menu.
+ * .exe, then returns to the PcPs4 diagnostic result screen.
  */
 
 static DXGI_SWAP_CHAIN_DESC g_swap_desc;
 static float g_clear_color[4];
+
+static void cleanup_graphics(
+    ID3D11Device *device,
+    ID3D11DeviceContext *context,
+    IDXGISwapChain *swap_chain,
+    ID3D11Texture2D *back_buffer,
+    ID3D11RenderTargetView *rtv)
+{
+    if (rtv != 0)
+        rtv->lpVtbl->Release(rtv);
+    if (back_buffer != 0)
+        back_buffer->lpVtbl->Release(back_buffer);
+    if (context != 0)
+        context->lpVtbl->Release(context);
+    if (swap_chain != 0)
+        swap_chain->lpVtbl->Release(swap_chain);
+    if (device != 0)
+        device->lpVtbl->Release(device);
+}
 
 void WINAPI WinMainCRTStartup(void)
 {
@@ -46,8 +65,10 @@ void WINAPI WinMainCRTStartup(void)
         probe_fn = (int (*)(void))GetProcAddress(
             probe_module, "GameProbe");
 
-        if (!probe_fn || probe_fn() != 0xBEEF)
+        if (!probe_fn || probe_fn() != 0xBEEF) {
+            FreeLibrary(probe_module);
             ExitProcess(6);
+        }
 
         FreeLibrary(probe_module);
     }
@@ -76,14 +97,19 @@ void WINAPI WinMainCRTStartup(void)
             factory,
             0,
             &adapter);
-        if (FAILED(hr) || !adapter)
+        if (FAILED(hr) || !adapter) {
+            factory->lpVtbl->Release(factory);
             ExitProcess(8);
+        }
 
         hr = adapter->lpVtbl->GetDesc1(
             adapter,
             &adapter_desc);
-        if (FAILED(hr))
+        if (FAILED(hr)) {
+            adapter->lpVtbl->Release(adapter);
+            factory->lpVtbl->Release(factory);
             ExitProcess(9);
+        }
 
         adapter->lpVtbl->Release(adapter);
         factory->lpVtbl->Release(factory);
@@ -103,8 +129,10 @@ void WINAPI WinMainCRTStartup(void)
         &feature_level,
         &context);
 
-    if (FAILED(hr) || !device || !context || !swap_chain)
+    if (FAILED(hr) || !device || !context || !swap_chain) {
+        cleanup_graphics(device, context, swap_chain, 0, 0);
         ExitProcess(1);
+    }
 
     hr = swap_chain->lpVtbl->GetBuffer(
         swap_chain,
@@ -112,8 +140,10 @@ void WINAPI WinMainCRTStartup(void)
         0,
         (void **)&back_buffer);
 
-    if (FAILED(hr) || !back_buffer)
+    if (FAILED(hr) || !back_buffer) {
+        cleanup_graphics(device, context, swap_chain, back_buffer, 0);
         ExitProcess(2);
+    }
 
     hr = device->lpVtbl->CreateRenderTargetView(
         device,
@@ -121,8 +151,10 @@ void WINAPI WinMainCRTStartup(void)
         0,
         &rtv);
 
-    if (FAILED(hr) || !rtv)
+    if (FAILED(hr) || !rtv) {
+        cleanup_graphics(device, context, swap_chain, back_buffer, rtv);
         ExitProcess(3);
+    }
 
     context->lpVtbl->OMSetRenderTargets(
         context,
@@ -130,9 +162,7 @@ void WINAPI WinMainCRTStartup(void)
         &rtv,
         0);
 
-    /* Pulse dark navy -> bright cyan forever so you can see a native
-     * Windows .exe presenting on the PS4. Close it from the PS button. */
-    /* Run long enough to exercise repeated Present calls, then exit cleanly. */
+    /* Pulse dark navy -> bright cyan for 240 presented frames. */
     for (i = 0; i < 240; ++i) {
         unsigned phase = i % 120;
         unsigned pulse = phase < 60 ? phase : (120 - phase);
@@ -152,11 +182,22 @@ void WINAPI WinMainCRTStartup(void)
             1,
             0);
 
-        if (FAILED(hr))
+        if (FAILED(hr)) {
+            cleanup_graphics(
+                device, context, swap_chain, back_buffer, rtv);
             ExitProcess(4);
+        }
     }
 
-    /* ExitProcess(0) is caught by the PcPs4 PE runner and returns control to
-     * the on-console status screen with a successful diagnostic result. */
+    /*
+     * Release every Windows graphics object before ExitProcess. PcPs4
+     * catches ExitProcess with a longjmp, so relying on normal C++/CRT
+     * teardown here would leave the PS4 VideoOut surface alive and could
+     * prevent the PcPs4 result screen from being reacquired.
+     */
+    cleanup_graphics(
+        device, context, swap_chain, back_buffer, rtv);
+
+    /* Returns control to the PcPs4 diagnostic result screen. */
     ExitProcess(0);
 }

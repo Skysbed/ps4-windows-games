@@ -45,6 +45,9 @@ static int guid_eq(const void *p, const PCPS4Guid *g)
 typedef struct PCPS4DxgiAdapter PCPS4DxgiAdapter;
 typedef struct PCPS4DxgiFactory PCPS4DxgiFactory;
 
+static void init_vtbls(void);
+static PCPS4_MS_ABI HRESULT create_factory(const void *riid, void **out);
+
 struct PCPS4DxgiAdapter {
     const void **vtbl;
     uint32_t refs;

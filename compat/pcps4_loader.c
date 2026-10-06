@@ -17,11 +17,13 @@
 #include "pcps4_status.h"
 #include "pcps4_fault.h"  /* pcps4_fault_stage: crash breadcrumb */
 
+#include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <sys/mman.h>
+
 
 /* OpenOrbis kernel memory APIs (declared with concrete signatures here;
  * libkernel exports the symbols). */
@@ -40,6 +42,18 @@ extern int32_t sceKernelMunmap(void *addr, size_t len);
 typedef int (PCPS4_MS_ABI *pcps4_entry_fn)(void);
 
 #define PCPS4_PAGE_SIZE 0x4000u
+
+static jmp_buf pcps4_pe_exit_jmp;
+static volatile int pcps4_pe_exit_armed;
+static volatile int pcps4_pe_exit_code;
+
+void pcps4_pe_exit_process(uint32_t code)
+{
+    if (pcps4_pe_exit_armed) {
+        pcps4_pe_exit_code = (int)code;
+        longjmp(pcps4_pe_exit_jmp, 1);
+    }
+}
 
 /* Round a size up to the 16 KiB PS4 page granule. */
 static size_t pcps4_round_up_page(size_t n)
@@ -378,8 +392,17 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
 
     pcps4_status_log("[pcps4] entering binary at %p", (void *)entry);
     pcps4_fault_stage("loader: PE entry (before WinMainCRTStartup)");
+    pcps4_pe_exit_armed = 1;
+    pcps4_pe_exit_code = 0;
     {
-        int ret = entry();
+        int ret;
+
+        if (setjmp(pcps4_pe_exit_jmp) == 0)
+            ret = entry();
+        else
+            ret = pcps4_pe_exit_code;
+
+        pcps4_pe_exit_armed = 0;
         pcps4_fault_stage("loader: PE returned");
         if (out_entry_ret)
             *out_entry_ret = (int32_t)ret;

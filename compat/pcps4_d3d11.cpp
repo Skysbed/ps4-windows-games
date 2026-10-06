@@ -1642,5 +1642,6 @@ HRESULT pcps4_d3d11_create_device_and_swap_chain(
     *swap_chain = d3d_swap;
     *context = immediate;
 
+    pcps4_fault_stage("create: returned S_OK");
     return S_OK;
 }

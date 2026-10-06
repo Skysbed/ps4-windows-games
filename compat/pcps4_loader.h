@@ -50,6 +50,12 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
                                      int32_t *out_entry_ret);
 
 /*
+ * Windows ExitProcess: unwind back to pcps4_loader_run instead of killing
+ * the whole PcPs4 process. Safe to call from an MS-ABI PE import.
+ */
+void pcps4_pe_exit_process(uint32_t code);
+
+/*
  * Self-contained hardware smoke test: builds a tiny PE whose entry is
  * `mov eax, 0x1234; ret`, runs it through pcps4_loader_run, and verifies the
  * returned value. Prints what happened. Returns 0 on success, non-zero on

@@ -1,10 +1,11 @@
 #include "pcps4_abi.h"
+#include "pcps4_loader.h"
 
 #include <stdlib.h>
 
 PCPS4_MS_ABI void pcps4_abi_ExitProcess(UINT code)
 {
-    exit((int)code);
+    pcps4_pe_exit_process(code);
 }
 
 PCPS4_MS_ABI HRESULT pcps4_abi_D3D11CreateDeviceAndSwapChain(

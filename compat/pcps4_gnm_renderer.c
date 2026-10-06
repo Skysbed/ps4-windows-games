@@ -37,6 +37,7 @@ struct pcps4_gnm_renderer {
     size_t loaded_ps_size;
 
     uint64_t frame_serial;
+    uint32_t frame_has_gpu_work;
 };
 
 static size_t align_up(size_t value, size_t alignment)
@@ -348,6 +349,7 @@ pcps4_gnm_renderer_t *pcps4_gnm_renderer_create(
 
     *renderer->eop_label = 0;
     renderer->frame_serial = 0;
+    renderer->frame_has_gpu_work = 0;
     return renderer;
 }
 
@@ -485,6 +487,12 @@ int pcps4_gnm_renderer_clear(
     for (size_t i = 0; i < count; ++i)
         pixels[i] = color;
 
+    /*
+     * A clear is a valid frame-producing operation for the D3D11 facade.
+     * Mark the frame ready even though no GNM draw packet was submitted.
+     */
+    renderer->frame_serial = frame_id;
+    renderer->frame_has_gpu_work = 0;
     return PCPS4_GNM_OK;
 }
 
@@ -657,6 +665,7 @@ int pcps4_gnm_renderer_draw_auto(
         return PCPS4_GNM_ERR_DRIVER;
 
     renderer->frame_serial = frame_id;
+    renderer->frame_has_gpu_work = 1;
     return PCPS4_GNM_OK;
 }
 
@@ -676,9 +685,15 @@ int pcps4_gnm_renderer_present(
             GNM_VIDEO_OUT_FLIP_VSYNC) != GNM_ERROR_OK)
         return PCPS4_GNM_ERR_VIDEO;
 
-    if (*renderer->eop_label != frame_id)
+    /*
+     * GNM draw frames get an EOP timestamp. Clear-only D3D11 frames do not,
+     * so only require the timestamp when command-buffer work was submitted.
+     */
+    if (renderer->frame_has_gpu_work != 0 &&
+        *renderer->eop_label != frame_id)
         return PCPS4_GNM_ERR_DRIVER;
 
+    renderer->frame_has_gpu_work = 0;
     return PCPS4_GNM_OK;
 }
 

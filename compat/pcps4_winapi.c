@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 static __thread DWORD g_last_error = 0;
 typedef struct pcps4_module_handle {
@@ -24,6 +25,7 @@ typedef struct pcps4_module_handle {
 
 static pcps4_pe_resolver *g_resolver = NULL;
 static pcps4_module_loader *g_module_loader = NULL;
+static char g_main_module_name[128] = "game.exe";
 
 static void PCPS4_MS_ABI win_SetLastError(DWORD value);
 #define PCPS4_MAX_TLS_SLOTS 64u
@@ -234,6 +236,52 @@ static HMODULE PCPS4_MS_ABI win_LoadLibraryA(LPCSTR name);
 static HMODULE PCPS4_MS_ABI win_LoadLibraryW(LPCWSTR name);
 static HMODULE PCPS4_MS_ABI win_GetModuleHandleA(LPCSTR name);
 static HMODULE PCPS4_MS_ABI win_GetModuleHandleW(LPCWSTR name);
+typedef struct pcps4_win_system_info {
+    WORD wProcessorArchitecture;
+    WORD wReserved;
+    DWORD dwPageSize;
+    LPVOID lpMinimumApplicationAddress;
+    LPVOID lpMaximumApplicationAddress;
+    ULONG_PTR dwActiveProcessorMask;
+    DWORD dwNumberOfProcessors;
+    DWORD dwProcessorType;
+    DWORD dwAllocationGranularity;
+    WORD wProcessorLevel;
+    WORD wProcessorRevision;
+} pcps4_win_system_info;
+
+static void PCPS4_MS_ABI win_GetSystemInfo(LPVOID output)
+{
+    pcps4_win_system_info *info =
+        (pcps4_win_system_info *)output;
+    long processors;
+
+    if (info == NULL)
+        return;
+
+    memset(info, 0, sizeof(*info));
+    processors = sysconf(_SC_NPROCESSORS_ONLN);
+
+    info->wProcessorArchitecture = 9; /* PROCESSOR_ARCHITECTURE_AMD64 */
+    info->dwPageSize = 4096u;
+    info->lpMinimumApplicationAddress = (LPVOID)(uintptr_t)0x10000u;
+    info->lpMaximumApplicationAddress =
+        (LPVOID)(uintptr_t)0x00007ffffffff000ull;
+    info->dwActiveProcessorMask = (ULONG_PTR)~(ULONG_PTR)0;
+    info->dwNumberOfProcessors =
+        processors > 0 ? (DWORD)processors : 1u;
+    if (info->dwNumberOfProcessors > sizeof(ULONG_PTR) * 8u)
+        info->dwNumberOfProcessors = (DWORD)(sizeof(ULONG_PTR) * 8u);
+    info->dwProcessorType = 8664u;
+    info->dwAllocationGranularity = 0x10000u;
+    info->wProcessorLevel = 6;
+}
+
+static void PCPS4_MS_ABI win_GetNativeSystemInfo(LPVOID output)
+{
+    win_GetSystemInfo(output);
+}
+
 static DWORD PCPS4_MS_ABI win_GetEnvironmentVariableA(
     LPCSTR name,
     LPSTR buffer,
@@ -296,6 +344,16 @@ static HMODULE PCPS4_MS_ABI win_LoadLibraryW(LPCWSTR name)
 
 static HMODULE PCPS4_MS_ABI win_GetModuleHandleW(LPCWSTR name)
 {
+    if (name == NULL) {
+        pcps4_module_handle *module =
+            (pcps4_module_handle *)calloc(1, sizeof(*module));
+        if (module == NULL)
+            return NULL;
+        module->magic = PCPS4_MODULE_MAGIC;
+        memcpy(module->name, g_main_module_name,
+               strlen(g_main_module_name) + 1);
+        return (HMODULE)module;
+    }
     return win_LoadLibraryW(name);
 }
 
@@ -332,6 +390,16 @@ static HMODULE PCPS4_MS_ABI win_LoadLibraryA(LPCSTR name)
 
 static HMODULE PCPS4_MS_ABI win_GetModuleHandleA(LPCSTR name)
 {
+    if (name == NULL) {
+        pcps4_module_handle *module =
+            (pcps4_module_handle *)calloc(1, sizeof(*module));
+        if (module == NULL)
+            return NULL;
+        module->magic = PCPS4_MODULE_MAGIC;
+        memcpy(module->name, g_main_module_name,
+               strlen(g_main_module_name) + 1);
+        return (HMODULE)module;
+    }
     return win_LoadLibraryA(name);
 }
 
@@ -615,6 +683,8 @@ static void register_kernel32(
     KREG("GetModuleFileNameA", win_GetModuleFileNameA);
     KREG("QueryPerformanceCounter", win_QueryPerformanceCounter);
     KREG("QueryPerformanceFrequency", win_QueryPerformanceFrequency);
+    KREG("GetSystemInfo", win_GetSystemInfo);
+    KREG("GetNativeSystemInfo", win_GetNativeSystemInfo);
     KREG("GetProcessHeap", win_GetProcessHeap);
     KREG("HeapAlloc", win_HeapAlloc);
     KREG("HeapReAlloc", win_HeapReAlloc);
@@ -738,6 +808,17 @@ static void register_ucrt(
 void pcps4_winapi_set_module_loader(pcps4_module_loader *loader)
 {
     g_module_loader = loader;
+}
+
+void pcps4_winapi_set_main_module(const char *name)
+{
+    char normalized[128];
+
+    if (name == NULL ||
+        module_name_normalize(name, normalized, sizeof(normalized)) != 0)
+        return;
+
+    memcpy(g_main_module_name, normalized, strlen(normalized) + 1);
 }
 
 void pcps4_winapi_build_resolver(pcps4_pe_resolver *resolver)

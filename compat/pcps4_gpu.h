@@ -96,6 +96,7 @@ pcps4_gpu_device_t *pcps4_gpu_device_create(void);
 void pcps4_gpu_device_destroy(pcps4_gpu_device_t *device);
 
 pcps4_gpu_context_t *pcps4_gpu_context_create(pcps4_gpu_device_t *device);
+void pcps4_gpu_context_add_ref(pcps4_gpu_context_t *context);
 void pcps4_gpu_context_destroy(pcps4_gpu_context_t *context);
 int pcps4_gpu_context_attach_graphics(
     pcps4_gpu_context_t *context,

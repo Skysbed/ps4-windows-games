@@ -29,7 +29,13 @@ extern int32_t sceKernelMmap(void *addr, size_t len, int32_t prot,
 extern int32_t sceKernelMprotect(const void *addr, size_t len, int prot);
 extern int32_t sceKernelMunmap(void *addr, size_t len);
 
-typedef int (*pcps4_entry_fn)(void);
+#if defined(__x86_64__) && (defined(__clang__) || defined(__GNUC__))
+#define PCPS4_MS_ABI __attribute__((ms_abi))
+#else
+#define PCPS4_MS_ABI
+#endif
+
+typedef int (PCPS4_MS_ABI *pcps4_entry_fn)(void);
 
 #define PCPS4_PAGE_SIZE 0x4000u
 

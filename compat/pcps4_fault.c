@@ -8,7 +8,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <ucontext.h>
 
 #define PCPS4_CRASH_PATH "/data/pcps4_crash.txt"
 #define PCPS4_TRACE_PATH "/data/pcps4_trace.txt"
@@ -100,35 +99,23 @@ static void emit_report(
     fd_write_str(fd, "\n");
 }
 
-static void pcps4_fault_handler(
-    int signal_number,
-    siginfo_t *info,
-    void *context)
+static void pcps4_fault_handler(int signal_number)
 {
     int fd;
-    uintptr_t fault_address = info != NULL
-        ? (uintptr_t)info->si_addr
-        : 0;
-
-    (void)context;
 
     if (pcps4_fault_seen)
         _exit(128 + signal_number);
     pcps4_fault_seen = 1;
 
-    /* klog (captured over a PC) and a file on the console (captured over FTP). */
-    emit_report(STDERR_FILENO, signal_number, fault_address);
+    /* Toolchain signal handlers use the legacy one-argument ABI. */
+    emit_report(STDERR_FILENO, signal_number, 0);
 
     fd = open(PCPS4_CRASH_PATH, O_WRONLY | O_CREAT | O_TRUNC, 0666);
     if (fd >= 0) {
-        emit_report(fd, signal_number, fault_address);
+        emit_report(fd, signal_number, 0);
         (void)close(fd);
     }
 
-    /*
-     * Do not attempt to resume execution after SIGSEGV/SIGBUS/SIGILL etc.
-     * The damaged state is not trustworthy.
-     */
     _exit(128 + signal_number);
 }
 
@@ -144,9 +131,9 @@ int pcps4_fault_install(void)
     struct sigaction action;
     size_t i;
 
-    action.sa_sigaction = pcps4_fault_handler;
+    action.sa_handler = pcps4_fault_handler;
     sigemptyset(&action.sa_mask);
-    action.sa_flags = SA_SIGINFO;
+    action.sa_flags = 0;
 
     for (i = 0; i < sizeof(signals) / sizeof(signals[0]); ++i) {
         if (sigaction(signals[i], &action, NULL) != 0) {

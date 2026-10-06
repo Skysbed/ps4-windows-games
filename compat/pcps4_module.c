@@ -267,11 +267,83 @@ static int register_export(
         return 1;
 
     if (forwarder != NULL) {
+        char target_dll[128];
+        const char *separator;
+        const char *target_symbol;
+        void *target_address = NULL;
+        uint16_t target_ordinal = 0;
+        int target_by_ordinal = 0;
+        pcps4_module_status module_status;
+
         ++ctx->forwarded;
-        printf("[pcps4] DLL %s: forwarded export %s -> %s\n",
+        separator = strrchr(forwarder, '.');
+        if (separator == NULL || separator == forwarder ||
+            separator[1] == '\0' ||
+            (size_t)(separator - forwarder) >= sizeof(target_dll)) {
+            ctx->error = PCPS4_MODULE_ERR_IMPORTS;
+            return 1;
+        }
+
+        memcpy(target_dll, forwarder,
+               (size_t)(separator - forwarder));
+        target_dll[separator - forwarder] = '\0';
+        target_symbol = separator + 1;
+
+        module_status =
+            pcps4_module_loader_load(ctx->loader, target_dll);
+        if (module_status != PCPS4_MODULE_OK &&
+            module_status != PCPS4_MODULE_NOT_FOUND) {
+            ctx->error = PCPS4_MODULE_ERR_IMPORTS;
+            return 1;
+        }
+
+        if (target_symbol[0] == '#') {
+            unsigned long value = strtoul(target_symbol + 1, NULL, 10);
+            if (value == 0 || value > 0xFFFFu) {
+                ctx->error = PCPS4_MODULE_ERR_IMPORTS;
+                return 1;
+            }
+            target_ordinal = (uint16_t)value;
+            target_by_ordinal = 1;
+            target_address = pcps4_pe_resolver_lookup_ordinal(
+                ctx->loader->resolver, target_dll, target_ordinal);
+        } else {
+            target_address = pcps4_pe_resolver_lookup(
+                ctx->loader->resolver, target_dll, target_symbol);
+        }
+
+        if (target_address == NULL) {
+            printf("[pcps4] DLL %s: unresolved forwarder %s\n",
+                   ctx->module->name, forwarder);
+            ctx->error = PCPS4_MODULE_ERR_IMPORTS;
+            return 1;
+        }
+
+        if (name != NULL &&
+            pcps4_pe_resolver_register(
+                ctx->loader->resolver,
+                ctx->module->name,
+                name,
+                target_address) != PCPS4_PE_OK) {
+            ctx->error = PCPS4_MODULE_ERR_IMPORTS;
+            return 1;
+        }
+
+        if (ordinal <= 0xFFFFu &&
+            pcps4_pe_resolver_register_ordinal(
+                ctx->loader->resolver,
+                ctx->module->name,
+                (uint16_t)ordinal,
+                target_address) != PCPS4_PE_OK) {
+            ctx->error = PCPS4_MODULE_ERR_IMPORTS;
+            return 1;
+        }
+
+        printf("[pcps4] DLL %s: forwarded export %s -> %s resolved%s\n",
                ctx->module->name,
                name != NULL ? name : "(ordinal)",
-               forwarder);
+               forwarder,
+               target_by_ordinal ? " by ordinal" : "");
         return 0;
     }
 

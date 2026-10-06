@@ -33,6 +33,27 @@ static void PCPS4_MS_ABI pcps4_winabi_exit(int code)
     exit(code);
 }
 
+static FILE *pcps4_winabi_fopen(
+    const char *path, const char *mode)
+{
+    char translated[1024];
+    int writing = 0;
+
+    if (mode == NULL)
+        return NULL;
+
+    if (strchr(mode, 'w') != NULL ||
+        strchr(mode, 'a') != NULL ||
+        strchr(mode, '+') != NULL)
+        writing = 1;
+
+    if (pcps4_sys_translate_path(
+            path, writing, translated, sizeof(translated)) != 0)
+        return NULL;
+
+    return fopen(translated, mode);
+}
+
 /*
  * Each assignment below is a compiler-generated MS-x64 thunk. The original
  * implementation remains System-V so translated PcPs4 code can continue
@@ -121,7 +142,7 @@ void pcps4_winabi_fill(pcps4_winabi_exports *exports)
     WABI(strtoull_fn, strtoull);
     WABI(abort_fn, pcps4_winabi_abort);
     WABI(exit_fn, pcps4_winabi_exit);
-    WABI(fopen_fn, fopen);
+    WABI(fopen_fn, pcps4_winabi_fopen);
     WABI(fclose_fn, fclose);
     WABI(fread_fn, fread);
     WABI(fwrite_fn, fwrite);

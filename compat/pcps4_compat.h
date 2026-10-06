@@ -19,6 +19,8 @@
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 #include "pcps4_sys.h"
 
@@ -296,6 +298,22 @@ static inline int pcps4_closesocket(SOCKET socket_fd)
 #define RtlZeroMemory(Destination, Length) memset((Destination), 0, (Length))
 #define CopyMemory(Destination, Source, Length) memcpy((Destination), (Source), (Length))
 #define MoveMemory(Destination, Source, Length) memmove((Destination), (Source), (Length))
+
+static inline SOCKET pcps4_socket(int domain, int type, int protocol) { return socket(domain, type, protocol); }
+static inline int pcps4_connect(SOCKET s, const struct sockaddr *a, socklen_t l) { return connect(s, a, l); }
+static inline int pcps4_send(SOCKET s, const char *b, int l, int f) { return (int)send(s, b, (size_t)l, f); }
+static inline int pcps4_recv(SOCKET s, char *b, int l, int f) { return (int)recv(s, b, (size_t)l, f); }
+static inline int pcps4_shutdown(SOCKET s, int how) { return shutdown(s, how); }
+static inline int pcps4_setsockopt(SOCKET s, int level, int opt, const char *v, int l) { return setsockopt(s, level, opt, v, (socklen_t)l); }
+static inline int pcps4_getsockopt(SOCKET s, int level, int opt, char *v, int *l) { socklen_t n=l?(socklen_t)*l:0; int rc=getsockopt(s,level,opt,v,&n); if(l)*l=(int)n; return rc; }
+static inline int pcps4_getaddrinfo(const char *n,const char *s,const struct addrinfo *h,struct addrinfo **r){return getaddrinfo(n,s,h,r);}
+static inline void pcps4_freeaddrinfo(struct addrinfo *r){freeaddrinfo(r);}
+static inline uint16_t pcps4_htons(uint16_t v){return htons(v);}
+static inline uint16_t pcps4_ntohs(uint16_t v){return ntohs(v);}
+static inline uint32_t pcps4_htonl(uint32_t v){return htonl(v);}
+static inline uint32_t pcps4_ntohl(uint32_t v){return ntohl(v);}
+static inline uint32_t pcps4_inet_addr(const char *v){return inet_addr(v);}
+
 
 #ifdef __cplusplus
 }

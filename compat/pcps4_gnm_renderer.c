@@ -3,10 +3,10 @@
 #if PCPS4_ENABLE_OPENGNM
 
 #include <fcntl.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 
 #include <gnm/drawcommandbuffer.h>
 #include <gnm_helpers.h>
@@ -18,11 +18,11 @@ struct pcps4_gnm_renderer {
 
     GnmVideoOut video;
 
-    GnmDirectMemory command_memory;
-    size_t command_cursor;
-    size_t command_memory_size;
+    GnmDirectMemory memory;
+    size_t memory_cursor;
+    size_t memory_size;
 
-    void *command_buffer_memory;
+    void *command_buffer;
     size_t command_buffer_size;
     volatile uint64_t *eop_label;
 
@@ -30,50 +30,53 @@ struct pcps4_gnm_renderer {
 
     GnmVsShader *vertex_shader;
     GnmPsShader *pixel_shader;
+
+    const void *loaded_vs_blob;
+    size_t loaded_vs_size;
+    const void *loaded_ps_blob;
+    size_t loaded_ps_size;
+
+    uint64_t frame_serial;
 };
 
 static size_t align_up(size_t value, size_t alignment)
 {
-    size_t remainder;
-
     if (alignment == 0)
         return value;
 
-    remainder = value % alignment;
-    if (remainder == 0)
-        return value;
-
-    return value + alignment - remainder;
+    size_t remainder = value % alignment;
+    return remainder == 0
+        ? value
+        : value + alignment - remainder;
 }
 
-static void *gpu_alloc(pcps4_gnm_renderer_t *renderer,
-                       size_t size,
-                       size_t alignment)
+static void *gpu_alloc(
+    pcps4_gnm_renderer_t *renderer,
+    size_t size,
+    size_t alignment)
 {
-    size_t start;
-
     if (renderer == NULL || size == 0 || alignment == 0)
         return NULL;
 
-    start = align_up(renderer->command_cursor, alignment);
+    size_t start = align_up(renderer->memory_cursor, alignment);
 
-    if (start > renderer->command_memory_size ||
-        size > renderer->command_memory_size - start)
+    if (start > renderer->memory_size ||
+        size > renderer->memory_size - start)
         return NULL;
 
-    renderer->command_cursor = start + size;
-
-    return (uint8_t *)renderer->command_memory.mapped + start;
+    renderer->memory_cursor = start + size;
+    return (uint8_t *)renderer->memory.mapped + start;
 }
 
-static int read_file(const char *path,
-                     void **out_data,
-                     size_t *out_size)
+static int read_file(
+    const char *path,
+    void **out_data,
+    size_t *out_size)
 {
     int fd;
     struct stat st;
     uint8_t *data;
-    size_t total = 0;
+    size_t offset = 0;
 
     if (path == NULL || out_data == NULL || out_size == NULL)
         return PCPS4_GNM_ERR_ARGUMENT;
@@ -98,11 +101,11 @@ static int read_file(const char *path,
         return PCPS4_GNM_ERR_MEMORY;
     }
 
-    while (total < (size_t)st.st_size) {
+    while (offset < (size_t)st.st_size) {
         ssize_t n = (ssize_t)sceKernelRead(
             fd,
-            data + total,
-            (size_t)st.st_size - total);
+            data + offset,
+            (size_t)st.st_size - offset);
 
         if (n <= 0) {
             free(data);
@@ -110,63 +113,52 @@ static int read_file(const char *path,
             return PCPS4_GNM_ERR_IO;
         }
 
-        total += (size_t)n;
+        offset += (size_t)n;
     }
 
     (void)sceKernelClose(fd);
-
     *out_data = data;
-    *out_size = total;
+    *out_size = offset;
     return PCPS4_GNM_OK;
 }
 
-static int load_vertex_shader(
+static int load_vertex_blob(
     pcps4_gnm_renderer_t *renderer,
-    const char *path)
+    const void *data,
+    size_t size)
 {
-    void *file_data = NULL;
-    size_t file_size = 0;
     GnmShaderMetadata metadata;
     GnmError error;
     const GnmVsShader *source;
+    GnmVsShader *stage;
     uint32_t stage_size;
     uint32_t code_size;
-    GnmVsShader *stage;
     void *code;
 
-    if (read_file(path, &file_data, &file_size) != PCPS4_GNM_OK)
-        return PCPS4_GNM_ERR_IO;
+    if (renderer == NULL || data == NULL || size == 0)
+        return PCPS4_GNM_ERR_ARGUMENT;
 
     memset(&metadata, 0, sizeof(metadata));
-
     error = sceGnmShaderBinaryGetMetadata(
-        file_data,
-        file_size,
-        &metadata);
+        data, size, &metadata);
 
     if (error != GNM_ERROR_OK ||
         metadata.type != GNM_SHADER_VERTEX ||
         metadata.stage == NULL ||
         metadata.common == NULL ||
-        metadata.shadercode == NULL) {
-        free(file_data);
+        metadata.shadercode == NULL)
         return PCPS4_GNM_ERR_SHADER;
-    }
 
     source = (const GnmVsShader *)metadata.stage;
     stage_size = sceGnmVsShaderCalcSize(source);
     code_size = sceGnmShaderCommonCodeSize(metadata.common);
 
-    if (stage_size == 0 || code_size == 0) {
-        free(file_data);
+    if (stage_size == 0 || code_size == 0)
         return PCPS4_GNM_ERR_SHADER;
-    }
 
     stage = (GnmVsShader *)malloc(stage_size);
-    if (stage == NULL) {
-        free(file_data);
+    if (stage == NULL)
         return PCPS4_GNM_ERR_MEMORY;
-    }
 
     code = gpu_alloc(
         renderer,
@@ -175,70 +167,58 @@ static int load_vertex_shader(
 
     if (code == NULL) {
         free(stage);
-        free(file_data);
         return PCPS4_GNM_ERR_MEMORY;
     }
 
     memcpy(stage, source, stage_size);
     memcpy(code, metadata.shadercode, code_size);
+    gnmVsRegsSetAddress(&stage->registers, code);
 
-    gnmVsRegsSetAddress(
-        &stage->registers,
-        code);
-
+    free(renderer->vertex_shader);
     renderer->vertex_shader = stage;
+    renderer->loaded_vs_blob = data;
+    renderer->loaded_vs_size = size;
 
-    free(file_data);
     return PCPS4_GNM_OK;
 }
 
-static int load_pixel_shader(
+static int load_pixel_blob(
     pcps4_gnm_renderer_t *renderer,
-    const char *path)
+    const void *data,
+    size_t size)
 {
-    void *file_data = NULL;
-    size_t file_size = 0;
     GnmShaderMetadata metadata;
     GnmError error;
     const GnmPsShader *source;
+    GnmPsShader *stage;
     uint32_t stage_size;
     uint32_t code_size;
-    GnmPsShader *stage;
     void *code;
 
-    if (read_file(path, &file_data, &file_size) != PCPS4_GNM_OK)
-        return PCPS4_GNM_ERR_IO;
+    if (renderer == NULL || data == NULL || size == 0)
+        return PCPS4_GNM_ERR_ARGUMENT;
 
     memset(&metadata, 0, sizeof(metadata));
-
     error = sceGnmShaderBinaryGetMetadata(
-        file_data,
-        file_size,
-        &metadata);
+        data, size, &metadata);
 
     if (error != GNM_ERROR_OK ||
         metadata.type != GNM_SHADER_PIXEL ||
         metadata.stage == NULL ||
         metadata.common == NULL ||
-        metadata.shadercode == NULL) {
-        free(file_data);
+        metadata.shadercode == NULL)
         return PCPS4_GNM_ERR_SHADER;
-    }
 
     source = (const GnmPsShader *)metadata.stage;
     stage_size = sceGnmPsShaderCalcSize(source);
     code_size = sceGnmShaderCommonCodeSize(metadata.common);
 
-    if (stage_size == 0 || code_size == 0) {
-        free(file_data);
+    if (stage_size == 0 || code_size == 0)
         return PCPS4_GNM_ERR_SHADER;
-    }
 
     stage = (GnmPsShader *)malloc(stage_size);
-    if (stage == NULL) {
-        free(file_data);
+    if (stage == NULL)
         return PCPS4_GNM_ERR_MEMORY;
-    }
 
     code = gpu_alloc(
         renderer,
@@ -247,44 +227,41 @@ static int load_pixel_shader(
 
     if (code == NULL) {
         free(stage);
-        free(file_data);
         return PCPS4_GNM_ERR_MEMORY;
     }
 
     memcpy(stage, source, stage_size);
     memcpy(code, metadata.shadercode, code_size);
-
-    gnmPsRegsSetAddress(
-        &stage->registers,
-        code);
-
+    gnmPsRegsSetAddress(&stage->registers, code);
     stage->registers.spibaryccntl = 0;
 
+    free(renderer->pixel_shader);
     renderer->pixel_shader = stage;
+    renderer->loaded_ps_blob = data;
+    renderer->loaded_ps_size = size;
 
-    free(file_data);
     return PCPS4_GNM_OK;
 }
 
 static int create_display(
     pcps4_gnm_renderer_t *renderer)
 {
-    GnmVideoOutCreateInfo video_info;
+    GnmVideoOutCreateInfo info;
     GnmError error;
 
     memset(&renderer->video, 0, sizeof(renderer->video));
     renderer->video.handle = -1;
 
     sceGnmVideoOutInitDefaultCreateInfo(
-        &video_info,
+        &info,
         renderer->width,
         renderer->height);
 
-    video_info.numbuffers = 2;
+    info.numbuffers = 2;
 
     error = sceGnmVideoOutOpen(
         &renderer->video,
-        &video_info);
+        &info);
 
     if (error != GNM_ERROR_OK)
         return PCPS4_GNM_ERR_VIDEO;
@@ -292,19 +269,14 @@ static int create_display(
     for (uint32_t i = 0; i < renderer->video.numbuffers; ++i) {
         error = sceGnmRtCreateColorTarget(
             &renderer->render_targets[i],
-            sceGnmVideoOutGetBuffer(
-                &renderer->video,
-                i),
+            sceGnmVideoOutGetBuffer(&renderer->video, i),
             GNM_FMT_R8G8B8A8_SRGB,
             renderer->width,
             renderer->height,
-            1,
-            1,
-            1,
+            1, 1, 1,
             GNM_TM_DISPLAY_LINEAR_ALIGNED,
             gnmGpuMode(),
-            NULL,
-            NULL);
+            NULL, NULL);
 
         if (error != GNM_ERROR_OK) {
             sceGnmVideoOutClose(&renderer->video);
@@ -320,8 +292,8 @@ pcps4_gnm_renderer_t *pcps4_gnm_renderer_create(
     uint32_t width,
     uint32_t height)
 {
-    pcps4_gnm_renderer_t *renderer;
     const size_t memory_size = 16u * 1024u * 1024u;
+    pcps4_gnm_renderer_t *renderer;
 
     if (width < 320 || width > 3840 ||
         height < 240 || height > 2160)
@@ -336,7 +308,7 @@ pcps4_gnm_renderer_t *pcps4_gnm_renderer_create(
     renderer->height = height;
 
     if (sceGnmDirectMemoryAllocate(
-            &renderer->command_memory,
+            &renderer->memory,
             memory_size,
             GNM_VIDEO_OUT_MEMORY_ALIGNMENT,
             GNM_DIRECT_MEMORY_TYPE_WC_GARLIC,
@@ -345,37 +317,37 @@ pcps4_gnm_renderer_t *pcps4_gnm_renderer_create(
         return NULL;
     }
 
-    renderer->command_memory_size = memory_size;
+    renderer->memory_size = memory_size;
 
     if (create_display(renderer) != PCPS4_GNM_OK) {
-        sceGnmDirectMemoryRelease(&renderer->command_memory);
+        sceGnmDirectMemoryRelease(&renderer->memory);
         free(renderer);
         return NULL;
     }
 
     renderer->command_buffer_size = 64u * 1024u;
-
-    renderer->command_buffer_memory = gpu_alloc(
+    renderer->command_buffer = gpu_alloc(
         renderer,
         renderer->command_buffer_size,
         GNM_ALIGNMENT_BUFFER_BYTES);
 
-    renderer->eop_label = (volatile uint64_t *)gpu_alloc(
-        renderer,
-        sizeof(uint64_t),
-        sizeof(uint64_t));
+    renderer->eop_label =
+        (volatile uint64_t *)gpu_alloc(
+            renderer,
+            sizeof(uint64_t),
+            sizeof(uint64_t));
 
-    if (renderer->command_buffer_memory == NULL ||
+    if (renderer->command_buffer == NULL ||
         renderer->eop_label == NULL) {
         sceGnmVideoOutClose(&renderer->video);
         renderer->video.handle = -1;
-        sceGnmDirectMemoryRelease(&renderer->command_memory);
+        sceGnmDirectMemoryRelease(&renderer->memory);
         free(renderer);
         return NULL;
     }
 
     *renderer->eop_label = 0;
-
+    renderer->frame_serial = 0;
     return renderer;
 }
 
@@ -393,8 +365,49 @@ void pcps4_gnm_renderer_destroy(
     free(renderer->vertex_shader);
     free(renderer->pixel_shader);
 
-    sceGnmDirectMemoryRelease(&renderer->command_memory);
+    sceGnmDirectMemoryRelease(&renderer->memory);
     free(renderer);
+}
+
+int pcps4_gnm_renderer_load_shader_blobs(
+    pcps4_gnm_renderer_t *renderer,
+    const void *vertex_data,
+    size_t vertex_size,
+    const void *pixel_data,
+    size_t pixel_size)
+{
+    int rc;
+
+    if (renderer == NULL ||
+        vertex_data == NULL ||
+        vertex_size == 0 ||
+        pixel_data == NULL ||
+        pixel_size == 0)
+        return PCPS4_GNM_ERR_ARGUMENT;
+
+    if (renderer->loaded_vs_blob != vertex_data ||
+        renderer->loaded_vs_size != vertex_size) {
+        rc = load_vertex_blob(
+            renderer,
+            vertex_data,
+            vertex_size);
+
+        if (rc != PCPS4_GNM_OK)
+            return rc;
+    }
+
+    if (renderer->loaded_ps_blob != pixel_data ||
+        renderer->loaded_ps_size != pixel_size) {
+        rc = load_pixel_blob(
+            renderer,
+            pixel_data,
+            pixel_size);
+
+        if (rc != PCPS4_GNM_OK)
+            return rc;
+    }
+
+    return PCPS4_GNM_OK;
 }
 
 int pcps4_gnm_renderer_load_shaders(
@@ -402,29 +415,85 @@ int pcps4_gnm_renderer_load_shaders(
     const char *vertex_path,
     const char *pixel_path)
 {
-    int result;
+    void *vertex = NULL;
+    void *pixel = NULL;
+    size_t vertex_size = 0;
+    size_t pixel_size = 0;
+    int rc;
 
     if (renderer == NULL ||
         vertex_path == NULL ||
         pixel_path == NULL)
         return PCPS4_GNM_ERR_ARGUMENT;
 
-    result = load_vertex_shader(renderer, vertex_path);
-    if (result != PCPS4_GNM_OK)
-        return result;
+    rc = read_file(vertex_path, &vertex, &vertex_size);
+    if (rc != PCPS4_GNM_OK)
+        return rc;
 
-    result = load_pixel_shader(renderer, pixel_path);
-    if (result != PCPS4_GNM_OK)
-        return result;
+    rc = read_file(pixel_path, &pixel, &pixel_size);
+    if (rc != PCPS4_GNM_OK) {
+        free(vertex);
+        return rc;
+    }
+
+    rc = pcps4_gnm_renderer_load_shader_blobs(
+        renderer,
+        vertex, vertex_size,
+        pixel, pixel_size);
+
+    free(vertex);
+    free(pixel);
+    return rc;
+}
+
+int pcps4_gnm_renderer_clear(
+    pcps4_gnm_renderer_t *renderer,
+    uint64_t frame_id,
+    uint8_t r,
+    uint8_t g,
+    uint8_t b,
+    uint8_t a)
+{
+    (void)a;
+
+    if (renderer == NULL ||
+        renderer->video.numbuffers < 2)
+        return PCPS4_GNM_ERR_ARGUMENT;
+
+    uint32_t index =
+        (uint32_t)(frame_id % renderer->video.numbuffers);
+
+    uint8_t *buffer =
+        (uint8_t *)sceGnmVideoOutGetBuffer(
+            &renderer->video,
+            index);
+
+    if (buffer == NULL)
+        return PCPS4_GNM_ERR_VIDEO;
+
+    uint32_t color =
+        0x80000000u |
+        ((uint32_t)r << 16) |
+        ((uint32_t)g << 8) |
+        (uint32_t)b;
+
+    uint32_t *pixels = (uint32_t *)buffer;
+    size_t count =
+        (size_t)renderer->width *
+        (size_t)renderer->height;
+
+    for (size_t i = 0; i < count; ++i)
+        pixels[i] = color;
 
     return PCPS4_GNM_OK;
 }
 
-static int build_triangle_commands(
+static int build_draw_commands(
     pcps4_gnm_renderer_t *renderer,
     uint32_t buffer_index,
     uint64_t frame_id,
-    GnmCommandBuffer *out_command)
+    uint32_t vertex_count,
+    GnmCommandBuffer *out)
 {
     GnmCommandBuffer command;
 
@@ -441,34 +510,32 @@ static int build_triangle_commands(
     };
 
     if (renderer == NULL ||
-        out_command == NULL ||
-        buffer_index >= renderer->video.numbuffers ||
+        out == NULL ||
         renderer->vertex_shader == NULL ||
-        renderer->pixel_shader == NULL)
+        renderer->pixel_shader == NULL ||
+        buffer_index >= renderer->video.numbuffers ||
+        vertex_count == 0)
         return PCPS4_GNM_ERR_COMMAND;
 
     memset(
-        renderer->command_buffer_memory,
+        renderer->command_buffer,
         0,
         renderer->command_buffer_size);
 
     command = sceGnmCmdInit(
-        renderer->command_buffer_memory,
+        renderer->command_buffer,
         renderer->command_buffer_size,
         NULL,
         NULL);
 
     sceGnmDrawCmdInitDefaultHardwareState(&command);
-
     sceGnmDrawCmdSetPrimitiveSetup(
         &command,
         &primitive_setup);
-
     sceGnmDrawCmdSetRenderTarget(
         &command,
         0,
         &renderer->render_targets[buffer_index]);
-
     sceGnmDrawCmdSetRenderTargetMask(
         &command,
         0x1);
@@ -497,8 +564,7 @@ static int build_triangle_commands(
 
     sceGnmDrawCmdSetScreenScissor(
         &command,
-        0,
-        0,
+        0, 0,
         renderer->width,
         renderer->height);
 
@@ -506,7 +572,6 @@ static int build_triangle_commands(
         &command,
         &renderer->vertex_shader->registers,
         0);
-
     sceGnmDrawCmdSetPsShader(
         &command,
         &renderer->pixel_shader->registers);
@@ -526,7 +591,7 @@ static int build_triangle_commands(
 
     sceGnmDrawCmdDrawIndexAuto(
         &command,
-        3);
+        vertex_count);
 
     *renderer->eop_label = 0;
 
@@ -538,51 +603,52 @@ static int build_triangle_commands(
         frame_id);
 
     size_t used =
-        (size_t)(
-            (uintptr_t)command.cmdptr -
-            (uintptr_t)command.beginptr);
+        (size_t)((uintptr_t)command.cmdptr -
+                 (uintptr_t)command.beginptr);
 
     if (used == 0 ||
         used > renderer->command_buffer_size)
         return PCPS4_GNM_ERR_COMMAND;
 
-    *out_command = command;
+    *out = command;
     return PCPS4_GNM_OK;
 }
 
-int pcps4_gnm_renderer_draw_triangle(
+int pcps4_gnm_renderer_draw_auto(
     pcps4_gnm_renderer_t *renderer,
-    uint64_t frame_id)
+    uint64_t frame_id,
+    uint32_t vertex_count)
 {
     GnmCommandBuffer command;
     uint32_t buffer_index;
-    void *dcb_addr;
-    uint32_t dcb_size;
+    void *address;
+    uint32_t size;
 
     if (renderer == NULL ||
-        renderer->video.numbuffers < 2)
+        vertex_count == 0)
         return PCPS4_GNM_ERR_ARGUMENT;
 
     buffer_index =
         (uint32_t)(frame_id % renderer->video.numbuffers);
 
-    if (build_triangle_commands(
+    if (build_draw_commands(
             renderer,
             buffer_index,
             frame_id,
+            vertex_count,
             &command) != PCPS4_GNM_OK)
         return PCPS4_GNM_ERR_COMMAND;
 
-    dcb_addr = command.beginptr;
-    dcb_size =
+    address = command.beginptr;
+    size =
         (uint32_t)(
             (uintptr_t)command.cmdptr -
             (uintptr_t)command.beginptr);
 
     if (sceGnmSubmitCommandBuffers(
             1,
-            &dcb_addr,
-            &dcb_size,
+            &address,
+            &size,
             NULL,
             NULL) < 0)
         return PCPS4_GNM_ERR_DRIVER;
@@ -590,9 +656,22 @@ int pcps4_gnm_renderer_draw_triangle(
     if (sceGnmSubmitDone() < 0)
         return PCPS4_GNM_ERR_DRIVER;
 
+    renderer->frame_serial = frame_id;
+    return PCPS4_GNM_OK;
+}
+
+int pcps4_gnm_renderer_present(
+    pcps4_gnm_renderer_t *renderer,
+    uint64_t frame_id)
+{
+    if (renderer == NULL ||
+        renderer->frame_serial != frame_id)
+        return PCPS4_GNM_ERR_ARGUMENT;
+
     if (sceGnmVideoOutSubmitFlipAndWait(
             &renderer->video,
-            buffer_index,
+            (uint32_t)(
+                frame_id % renderer->video.numbuffers),
             (int64_t)frame_id,
             GNM_VIDEO_OUT_FLIP_VSYNC) != GNM_ERROR_OK)
         return PCPS4_GNM_ERR_VIDEO;
@@ -603,6 +682,20 @@ int pcps4_gnm_renderer_draw_triangle(
     return PCPS4_GNM_OK;
 }
 
+int pcps4_gnm_renderer_draw_triangle(
+    pcps4_gnm_renderer_t *renderer,
+    uint64_t frame_id)
+{
+    int rc = pcps4_gnm_renderer_draw_auto(
+        renderer, frame_id, 3);
+
+    if (rc != PCPS4_GNM_OK)
+        return rc;
+
+    return pcps4_gnm_renderer_present(
+        renderer, frame_id);
+}
+
 int pcps4_gnm_renderer_render_frames(
     pcps4_gnm_renderer_t *renderer,
     uint32_t frame_count)
@@ -611,13 +704,12 @@ int pcps4_gnm_renderer_render_frames(
         return PCPS4_GNM_ERR_ARGUMENT;
 
     for (uint32_t frame = 1; frame <= frame_count; ++frame) {
-        int result =
+        int rc =
             pcps4_gnm_renderer_draw_triangle(
-                renderer,
-                frame);
+                renderer, frame);
 
-        if (result != PCPS4_GNM_OK)
-            return result;
+        if (rc != PCPS4_GNM_OK)
+            return rc;
     }
 
     return PCPS4_GNM_OK;
@@ -652,6 +744,58 @@ int pcps4_gnm_renderer_load_shaders(
     (void)renderer;
     (void)vertex_path;
     (void)pixel_path;
+    return PCPS4_GNM_ERR_UNAVAILABLE;
+}
+
+int pcps4_gnm_renderer_load_shader_blobs(
+    pcps4_gnm_renderer_t *renderer,
+    const void *vertex_data,
+    size_t vertex_size,
+    const void *pixel_data,
+    size_t pixel_size)
+{
+    (void)renderer;
+    (void)vertex_data;
+    (void)vertex_size;
+    (void)pixel_data;
+    (void)pixel_size;
+    return PCPS4_GNM_ERR_UNAVAILABLE;
+}
+
+int pcps4_gnm_renderer_clear(
+    pcps4_gnm_renderer_t *renderer,
+    uint64_t frame_id,
+    uint8_t r,
+    uint8_t g,
+    uint8_t b,
+    uint8_t a)
+{
+    (void)renderer;
+    (void)frame_id;
+    (void)r;
+    (void)g;
+    (void)b;
+    (void)a;
+    return PCPS4_GNM_ERR_UNAVAILABLE;
+}
+
+int pcps4_gnm_renderer_draw_auto(
+    pcps4_gnm_renderer_t *renderer,
+    uint64_t frame_id,
+    uint32_t vertex_count)
+{
+    (void)renderer;
+    (void)frame_id;
+    (void)vertex_count;
+    return PCPS4_GNM_ERR_UNAVAILABLE;
+}
+
+int pcps4_gnm_renderer_present(
+    pcps4_gnm_renderer_t *renderer,
+    uint64_t frame_id)
+{
+    (void)renderer;
+    (void)frame_id;
     return PCPS4_GNM_ERR_UNAVAILABLE;
 }
 

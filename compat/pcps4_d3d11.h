@@ -222,12 +222,22 @@ private:
 class IDXGISwapChain {
 public:
     pcps4_gpu_device_t *device;
+    pcps4_gpu_context_t *context;
     pcps4_gfx_context_t *graphics;
+    pcps4_gnm_renderer_t *gnm_renderer;
     uint32_t refs;
     uint64_t frame_id;
 
-    IDXGISwapChain(pcps4_gpu_device_t *device_value, pcps4_gfx_context_t *graphics_value)
-        : device(device_value), graphics(graphics_value), refs(1), frame_id(1) {}
+    IDXGISwapChain(pcps4_gpu_device_t *device_value,
+                   pcps4_gpu_context_t *context_value,
+                   pcps4_gfx_context_t *graphics_value,
+                   pcps4_gnm_renderer_t *gnm_renderer_value)
+        : device(device_value),
+          context(context_value),
+          graphics(graphics_value),
+          gnm_renderer(gnm_renderer_value),
+          refs(1),
+          frame_id(1) {}
 
     HRESULT Present(UINT SyncInterval, UINT Flags);
     HRESULT GetBuffer(UINT Buffer, ID3D11Texture2D **Resource);

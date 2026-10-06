@@ -3,6 +3,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if PCPS4_ENABLE_OPENGNM
+#include "pcps4_gnm_renderer.h"
+#endif
+
 struct pcps4_gpu_device {
     uint32_t magic;
 };
@@ -20,6 +24,8 @@ struct pcps4_gpu_context {
     pcps4_gpu_shader_t *vertex_shader;
     pcps4_gpu_shader_t *pixel_shader;
     pcps4_gfx_context_t *graphics;
+    pcps4_gnm_renderer_t *gnm_renderer;
+    uint64_t gnm_frame_id;
 };
 
 struct pcps4_gpu_buffer {
@@ -37,6 +43,7 @@ struct pcps4_gpu_texture {
     uint8_t *data;
     size_t row_pitch;
     pcps4_gfx_context_t *external_graphics;
+    pcps4_gnm_renderer_t *external_gnm;
 };
 
 struct pcps4_gpu_shader {
@@ -141,6 +148,7 @@ void pcps4_gpu_context_destroy(pcps4_gpu_context_t *context)
     if (!valid_context(context)) return;
     context->magic = 0;
     context->graphics = NULL;
+    context->gnm_renderer = NULL;
     free(context);
 }
 
@@ -152,6 +160,18 @@ int pcps4_gpu_context_attach_graphics(
         return PCPS4_GPU_ERR_ARGUMENT;
 
     context->graphics = graphics;
+    return PCPS4_GPU_OK;
+}
+
+int pcps4_gpu_context_attach_gnm(
+    pcps4_gpu_context_t *context,
+    pcps4_gnm_renderer_t *renderer)
+{
+    if (!valid_context(context) || renderer == NULL)
+        return PCPS4_GPU_ERR_ARGUMENT;
+
+    context->gnm_renderer = renderer;
+    context->gnm_frame_id = 1;
     return PCPS4_GPU_OK;
 }
 
@@ -328,7 +348,45 @@ pcps4_gpu_texture_t *pcps4_gpu_texture_create_backbuffer(
     texture->row_pitch =
         (size_t)graphics->width * 4u;
     texture->external_graphics = graphics;
+    texture->external_gnm = NULL;
     return texture;
+}
+
+pcps4_gpu_texture_t *pcps4_gpu_texture_create_gnm_backbuffer(
+    pcps4_gpu_device_t *device,
+    pcps4_gnm_renderer_t *renderer,
+    uint32_t width,
+    uint32_t height)
+{
+#if PCPS4_ENABLE_OPENGNM
+    pcps4_gpu_texture_t *texture;
+
+    if (!valid_device(device) || renderer == NULL ||
+        width == 0 || height == 0)
+        return NULL;
+
+    texture =
+        (pcps4_gpu_texture_t *)calloc(1, sizeof(*texture));
+    if (texture == NULL)
+        return NULL;
+
+    texture->magic = TEX_MAGIC;
+    texture->device = device;
+    texture->desc.width = width;
+    texture->desc.height = height;
+    texture->desc.mip_levels = 1;
+    texture->desc.format = PCPS4_GPU_FORMAT_RGBA8_UNORM;
+    texture->desc.bind_flags = PCPS4_GPU_BIND_RENDER_TARGET;
+    texture->row_pitch = (size_t)width * 4u;
+    texture->external_gnm = renderer;
+    return texture;
+#else
+    (void)device;
+    (void)renderer;
+    (void)width;
+    (void)height;
+    return NULL;
+#endif
 }
 
 void pcps4_gpu_texture_destroy(pcps4_gpu_texture_t *texture)
@@ -336,11 +394,13 @@ void pcps4_gpu_texture_destroy(pcps4_gpu_texture_t *texture)
     if (!valid_texture(texture)) return;
 
     texture->magic = 0;
-    if (texture->external_graphics == NULL)
+    if (texture->external_graphics == NULL &&
+        texture->external_gnm == NULL)
         free(texture->data);
 
     texture->data = NULL;
     texture->external_graphics = NULL;
+    texture->external_gnm = NULL;
     free(texture);
 }
 
@@ -418,6 +478,22 @@ pcps4_gpu_shader_t *pcps4_gpu_shader_create(
     return shader;
 }
 
+int pcps4_gpu_shader_get_blob(
+    const pcps4_gpu_shader_t *shader,
+    const void **data,
+    size_t *size,
+    uint32_t *type)
+{
+    if (!valid_shader(shader) || data == NULL || size == NULL)
+        return PCPS4_GPU_ERR_ARGUMENT;
+
+    *data = shader->data;
+    *size = shader->size;
+    if (type != NULL)
+        *type = shader->type;
+    return PCPS4_GPU_OK;
+}
+
 void pcps4_gpu_shader_destroy(pcps4_gpu_shader_t *shader)
 {
     if (!valid_shader(shader)) return;
@@ -482,6 +558,19 @@ int pcps4_gpu_context_clear(
         return PCPS4_GPU_ERR_STATE;
 
     if (context->render_target == NULL) {
+#if PCPS4_ENABLE_OPENGNM
+        if (context->gnm_renderer != NULL) {
+            return pcps4_gnm_renderer_clear(
+                       context->gnm_renderer,
+                       context->gnm_frame_id,
+                       color.r,
+                       color.g,
+                       color.b,
+                       color.a) == PCPS4_GNM_OK
+                ? PCPS4_GPU_OK
+                : PCPS4_GPU_ERR_BACKEND;
+        }
+#endif
         if (context->graphics == NULL)
             return PCPS4_GPU_ERR_STATE;
 
@@ -527,13 +616,29 @@ int pcps4_gpu_context_present(
     pcps4_gpu_context_t *context,
     uint64_t frame_id)
 {
-    if (!valid_context(context) || context->graphics == NULL)
+    if (!valid_context(context))
         return PCPS4_GPU_ERR_STATE;
 
-    return pcps4_gfx_present(context->graphics, frame_id) ==
-           PCPS4_GFX_OK
-               ? PCPS4_GPU_OK
-               : PCPS4_GPU_ERR_BACKEND;
+#if PCPS4_ENABLE_OPENGNM
+    if (context->gnm_renderer != NULL) {
+        if (pcps4_gnm_renderer_present(
+                context->gnm_renderer,
+                frame_id) != PCPS4_GNM_OK)
+            return PCPS4_GPU_ERR_BACKEND;
+
+        context->gnm_frame_id = frame_id + 1;
+        return PCPS4_GPU_OK;
+    }
+#endif
+
+    if (context->graphics == NULL)
+        return PCPS4_GPU_ERR_STATE;
+
+    return pcps4_gfx_present(
+               context->graphics,
+               frame_id) == PCPS4_GFX_OK
+        ? PCPS4_GPU_OK
+        : PCPS4_GPU_ERR_BACKEND;
 }
 
 int pcps4_gpu_context_draw(
@@ -541,17 +646,71 @@ int pcps4_gpu_context_draw(
     uint32_t vertex_count,
     uint32_t start_vertex)
 {
+    const void *vs_data = NULL;
+    const void *ps_data = NULL;
+    size_t vs_size = 0;
+    size_t ps_size = 0;
+    uint32_t vs_type = 0;
+    uint32_t ps_type = 0;
+    int rc;
+
     (void)start_vertex;
 
     if (!valid_context(context) || vertex_count == 0)
         return PCPS4_GPU_ERR_ARGUMENT;
 
+#if PCPS4_ENABLE_OPENGNM
+    if (context->gnm_renderer == NULL ||
+        context->vertex_shader == NULL ||
+        context->pixel_shader == NULL)
+        return PCPS4_GPU_ERR_STATE;
+
+    if (pcps4_gpu_shader_get_blob(
+            context->vertex_shader, &vs_data, &vs_size, &vs_type) != PCPS4_GPU_OK ||
+        pcps4_gpu_shader_get_blob(
+            context->pixel_shader, &ps_data, &ps_size, &ps_type) != PCPS4_GPU_OK)
+        return PCPS4_GPU_ERR_STATE;
+
+    if (vs_type != PCPS4_GPU_SHADER_VERTEX ||
+        ps_type != PCPS4_GPU_SHADER_PIXEL ||
+        vs_size < 16 ||
+        ps_size < 16)
+        return PCPS4_GPU_ERR_UNSUPPORTED;
+
     /*
-     * DXBC/DXIL shader lowering and real PS4 command generation are the
-     * next backend stage. Never fabricate commands when that translation
-     * does not exist.
+     * The real execution path currently accepts converted PS4 .sb shader
+     * binaries. A DXBC blob must first pass through the offline
+     * DXBC -> SPIR-V -> PS4 shader pipeline.
      */
+    if (((const uint8_t *)vs_data)[0] != 'S' ||
+        ((const uint8_t *)vs_data)[1] != 'h' ||
+        ((const uint8_t *)vs_data)[2] != 'd' ||
+        ((const uint8_t *)vs_data)[3] != 'r' ||
+        ((const uint8_t *)ps_data)[0] != 'S' ||
+        ((const uint8_t *)ps_data)[1] != 'h' ||
+        ((const uint8_t *)ps_data)[2] != 'd' ||
+        ((const uint8_t *)ps_data)[3] != 'r')
+        return PCPS4_GPU_ERR_UNSUPPORTED;
+
+    rc = pcps4_gnm_renderer_load_shader_blobs(
+        context->gnm_renderer,
+        vs_data, vs_size,
+        ps_data, ps_size);
+
+    if (rc != PCPS4_GNM_OK)
+        return PCPS4_GPU_ERR_BACKEND;
+
+    rc = pcps4_gnm_renderer_draw_auto(
+        context->gnm_renderer,
+        context->gnm_frame_id,
+        vertex_count);
+
+    return rc == PCPS4_GNM_OK
+        ? PCPS4_GPU_OK
+        : PCPS4_GPU_ERR_BACKEND;
+#else
     return PCPS4_GPU_ERR_UNSUPPORTED;
+#endif
 }
 
 int pcps4_gpu_context_draw_indexed(

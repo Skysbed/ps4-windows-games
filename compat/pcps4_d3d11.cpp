@@ -1,5 +1,6 @@
 #include "pcps4_d3d11.h"
 #include "pcps4_shader.h"
+#include "pcps4_gnm_renderer.h"
 
 #include <new>
 #include <string.h>
@@ -65,7 +66,9 @@ ID3D11RenderTargetView::~ID3D11RenderTargetView()
 IDXGISwapChain::~IDXGISwapChain()
 {
     device = NULL;
+    context = NULL;
     graphics = NULL;
+    gnm_renderer = NULL;
 }
 
 HRESULT IDXGISwapChain::Present(UINT SyncInterval, UINT Flags)
@@ -73,14 +76,19 @@ HRESULT IDXGISwapChain::Present(UINT SyncInterval, UINT Flags)
     (void)SyncInterval;
     (void)Flags;
 
-    if (graphics == NULL)
+    if (context == NULL)
         return E_FAIL;
 
-    int rc = pcps4_gfx_present(
-        graphics,
-        frame_id++);
+    uint64_t current_frame =
+        gnm_renderer != NULL
+            ? context->gnm_frame_id
+            : frame_id++;
 
-    return rc == PCPS4_GFX_OK ? S_OK : E_FAIL;
+    return pcps4_gpu_context_present(
+               context,
+               current_frame) == PCPS4_GPU_OK
+        ? S_OK
+        : E_FAIL;
 }
 
 HRESULT IDXGISwapChain::GetBuffer(
@@ -89,17 +97,28 @@ HRESULT IDXGISwapChain::GetBuffer(
 {
     if (Buffer != 0 ||
         Resource == NULL ||
-        graphics == NULL ||
-        device == NULL) {
+        context == NULL ||
+        device == NULL)
         return E_INVALIDARG;
-    }
 
     *Resource = NULL;
 
-    pcps4_gpu_texture_t *texture =
-        pcps4_gpu_texture_create_backbuffer(
+    pcps4_gpu_texture_t *texture = NULL;
+
+#if PCPS4_ENABLE_OPENGNM
+    if (gnm_renderer != NULL) {
+        texture = pcps4_gpu_texture_create_gnm_backbuffer(
+            device,
+            gnm_renderer,
+            1280,
+            720);
+    } else
+#endif
+    {
+        texture = pcps4_gpu_texture_create_backbuffer(
             device,
             graphics);
+    }
 
     if (texture == NULL)
         return E_OUTOFMEMORY;
@@ -329,15 +348,23 @@ void ID3D11DeviceContext::UpdateSubresource(
     (void)pDstBox;
     (void)SrcDepthPitch;
 
-    if (pDstResource == NULL || pSrcData == NULL)
+    if (pDstResource == NULL ||
+        pDstResource->native == NULL ||
+        pSrcData == NULL)
+        return;
+
+    D3D11_TEXTURE2D_DESC desc = {};
+    pDstResource->GetDesc(&desc);
+
+    if (desc.Width == 0 || desc.Height == 0)
         return;
 
     (void)pcps4_gpu_texture_update_rgba8(
         pDstResource->native,
         pSrcData,
         SrcRowPitch,
-        ({ pcps4_gpu_texture_desc_t d = {}; pcps4_gpu_texture_get_desc(pDstResource->native, &d); d.width; }),
-        ({ pcps4_gpu_texture_desc_t d = {}; pcps4_gpu_texture_get_desc(pDstResource->native, &d); d.height; }));
+        desc.Width,
+        desc.Height);
 }
 
 void ID3D11DeviceContext::Flush()
@@ -365,11 +392,18 @@ ID3D11Device::~ID3D11Device()
         context = NULL;
     }
 
+#if PCPS4_ENABLE_OPENGNM
+    if (gnm_renderer != NULL) {
+        pcps4_gnm_renderer_destroy(gnm_renderer);
+        gnm_renderer = NULL;
+    }
+#else
     if (graphics != NULL) {
         pcps4_gfx_shutdown(graphics);
         delete graphics;
         graphics = NULL;
     }
+#endif
 
     if (native != NULL) {
         pcps4_gpu_device_destroy(native);
@@ -524,12 +558,21 @@ HRESULT ID3D11Device::CreateVertexShader(
 
     *ppVertexShader = NULL;
 
-    pcps4_dxbc_info_t dxbc = {};
-    if (pcps4_dxbc_inspect(
-            pShaderBytecode,
-            BytecodeLength,
-            &dxbc) != PCPS4_DXBC_OK)
-        return E_FAIL;
+    const uint8_t *bytes = (const uint8_t *)pShaderBytecode;
+    const int is_gnm =
+        BytecodeLength >= 16 &&
+        bytes[0] == 'S' && bytes[1] == 'h' &&
+        bytes[2] == 'd' && bytes[3] == 'r' &&
+        bytes[8] == 1;
+
+    if (!is_gnm) {
+        pcps4_dxbc_info_t dxbc = {};
+        if (pcps4_dxbc_inspect(
+                pShaderBytecode,
+                BytecodeLength,
+                &dxbc) != PCPS4_DXBC_OK)
+            return E_FAIL;
+    }
 
     pcps4_gpu_shader_desc_t desc = {
         pShaderBytecode,
@@ -569,12 +612,21 @@ HRESULT ID3D11Device::CreatePixelShader(
 
     *ppPixelShader = NULL;
 
-    pcps4_dxbc_info_t dxbc = {};
-    if (pcps4_dxbc_inspect(
-            pShaderBytecode,
-            BytecodeLength,
-            &dxbc) != PCPS4_DXBC_OK)
-        return E_FAIL;
+    const uint8_t *bytes = (const uint8_t *)pShaderBytecode;
+    const int is_gnm =
+        BytecodeLength >= 16 &&
+        bytes[0] == 'S' && bytes[1] == 'h' &&
+        bytes[2] == 'd' && bytes[3] == 'r' &&
+        bytes[8] == 2;
+
+    if (!is_gnm) {
+        pcps4_dxbc_info_t dxbc = {};
+        if (pcps4_dxbc_inspect(
+                pShaderBytecode,
+                BytecodeLength,
+                &dxbc) != PCPS4_DXBC_OK)
+            return E_FAIL;
+    }
 
     pcps4_gpu_shader_desc_t desc = {
         pShaderBytecode,
@@ -653,8 +705,92 @@ HRESULT pcps4_d3d11_create_device_and_swap_chain(
         return E_OUTOFMEMORY;
     }
 
-    pcps4_gfx_context_t *graphics =
+    pcps4_gfx_context_t *graphics = NULL;
+    pcps4_gnm_renderer_t *gnm_renderer = NULL;
+
+#if PCPS4_ENABLE_OPENGNM
+    gnm_renderer =
+        pcps4_gnm_renderer_create(width, height);
+
+    if (gnm_renderer == NULL) {
+        pcps4_gpu_context_destroy(gpu_context);
+        pcps4_gpu_device_destroy(gpu);
+        return E_FAIL;
+    }
+
+    if (pcps4_gpu_context_attach_gnm(
+            gpu_context,
+            gnm_renderer) != PCPS4_GPU_OK) {
+        pcps4_gnm_renderer_destroy(gnm_renderer);
+        pcps4_gpu_context_destroy(gpu_context);
+        pcps4_gpu_device_destroy(gpu);
+        return E_FAIL;
+    }
+#else
+    graphics =
         new (std::nothrow) pcps4_gfx_context_t();
+
+    if (graphics == NULL) {
+        pcps4_gpu_context_destroy(gpu_context);
+        pcps4_gpu_device_destroy(gpu);
+        return E_OUTOFMEMORY;
+    }
+
+    int gfx_rc = pcps4_gfx_init(
+        graphics,
+        width,
+        height,
+        buffers);
+
+    if (gfx_rc != PCPS4_GFX_OK) {
+        delete graphics;
+        pcps4_gpu_context_destroy(gpu_context);
+        pcps4_gpu_device_destroy(gpu);
+        return E_FAIL;
+    }
+
+    if (pcps4_gpu_context_attach_graphics(
+            gpu_context,
+            graphics) != PCPS4_GPU_OK) {
+        pcps4_gfx_shutdown(graphics);
+        delete graphics;
+        pcps4_gpu_context_destroy(gpu_context);
+        pcps4_gpu_device_destroy(gpu);
+        return E_FAIL;
+    }
+#endif
+
+    ID3D11Device *d3d_device =
+        new (std::nothrow) ID3D11Device(
+            gpu,
+            gpu_context,
+            graphics);
+
+    if (d3d_device == NULL) {
+#if PCPS4_ENABLE_OPENGNM
+        pcps4_gnm_renderer_destroy(gnm_renderer);
+#else
+        pcps4_gfx_shutdown(graphics);
+        delete graphics;
+#endif
+        pcps4_gpu_context_destroy(gpu_context);
+        pcps4_gpu_device_destroy(gpu);
+        return E_OUTOFMEMORY;
+    }
+
+    d3d_device->gnm_renderer = gnm_renderer;
+
+    IDXGISwapChain *d3d_swap =
+        new (std::nothrow) IDXGISwapChain(
+            gpu,
+            gpu_context,
+            graphics,
+            gnm_renderer);
+
+    if (d3d_swap == NULL) {
+        d3d_device->Release();
+        return E_OUTOFMEMORY;
+    }
 
     if (graphics == NULL) {
         pcps4_gpu_context_destroy(gpu_context);

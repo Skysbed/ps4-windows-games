@@ -16,6 +16,7 @@ typedef struct pcps4_gpu_buffer pcps4_gpu_buffer_t;
 typedef struct pcps4_gpu_texture pcps4_gpu_texture_t;
 typedef struct pcps4_gpu_shader pcps4_gpu_shader_t;
 typedef struct pcps4_gpu_render_target pcps4_gpu_render_target_t;
+typedef struct pcps4_gnm_renderer pcps4_gnm_renderer_t;
 
 typedef enum {
     PCPS4_GPU_FORMAT_RGBA8_UNORM = 1,
@@ -82,6 +83,9 @@ void pcps4_gpu_context_destroy(pcps4_gpu_context_t *context);
 int pcps4_gpu_context_attach_graphics(
     pcps4_gpu_context_t *context,
     pcps4_gfx_context_t *graphics);
+int pcps4_gpu_context_attach_gnm(
+    pcps4_gpu_context_t *context,
+    pcps4_gnm_renderer_t *renderer);
 
 pcps4_gpu_buffer_t *pcps4_gpu_buffer_create(
     pcps4_gpu_device_t *device,
@@ -105,6 +109,11 @@ pcps4_gpu_texture_t *pcps4_gpu_texture_create(
 pcps4_gpu_texture_t *pcps4_gpu_texture_create_backbuffer(
     pcps4_gpu_device_t *device,
     pcps4_gfx_context_t *graphics);
+pcps4_gpu_texture_t *pcps4_gpu_texture_create_gnm_backbuffer(
+    pcps4_gpu_device_t *device,
+    pcps4_gnm_renderer_t *renderer,
+    uint32_t width,
+    uint32_t height);
 void pcps4_gpu_texture_destroy(pcps4_gpu_texture_t *texture);
 int pcps4_gpu_texture_update_rgba8(pcps4_gpu_texture_t *texture,
                                    const void *data,
@@ -119,6 +128,11 @@ pcps4_gpu_shader_t *pcps4_gpu_shader_create(
     pcps4_gpu_device_t *device,
     const pcps4_gpu_shader_desc_t *desc);
 void pcps4_gpu_shader_destroy(pcps4_gpu_shader_t *shader);
+int pcps4_gpu_shader_get_blob(
+    const pcps4_gpu_shader_t *shader,
+    const void **data,
+    size_t *size,
+    uint32_t *type);
 
 pcps4_gpu_render_target_t *pcps4_gpu_render_target_create(
     pcps4_gpu_device_t *device,

@@ -9,6 +9,7 @@
 
 void pcps4_runtime_demo(char *buffer, size_t buffer_size);
 int pcps4_gnm_smoke_run(void);
+int pcps4_d3d11_smoke_test(void);
 
 static volatile LONG demo_value = 0;
 
@@ -29,7 +30,12 @@ int main(void)
 
 #if PCPS4_ENABLE_OPENGNM
     printf("Starting real GNM graphics smoke...\n");
-    return pcps4_gnm_smoke_run();
+    int gnm_rc = pcps4_gnm_smoke_run();
+    if (gnm_rc != 0)
+        return gnm_rc;
+
+    printf("Starting D3D11 -> GNM smoke...\n");
+    return pcps4_d3d11_smoke_test();
 #else
     return 0;
 #endif

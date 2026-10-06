@@ -8,6 +8,7 @@ CONTENT_ID    := IV0000-PCPS00001_00-PCPS4TRANSLATE01
 
 TOOLCHAIN     := $(OO_PS4_TOOLCHAIN)
 PCPS4_ENABLE_OPENGNM ?= 0
+PCPS4_RUN_GAME ?= 1
 PCPS4_GRAPHICS_ROOT ?= external/ps4-graphics
 PCPS4_OPENGNM_DIR := $(PCPS4_GRAPHICS_ROOT)/opengnm
 INTDIR        := build
@@ -35,6 +36,7 @@ COMMONFLAGS := --target=x86_64-pc-freebsd12-elf -fPIC -funwind-tables \
                -Icompat $(if $(filter 1,$(PCPS4_ENABLE_OPENGNM)),-I$(PCPS4_OPENGNM_DIR)/include,)
 CFLAGS   := $(COMMONFLAGS) -std=c11 \
             -DPCPS4_ENABLE_OPENGNM=$(PCPS4_ENABLE_OPENGNM) \
+            -DPCPS4_RUN_GAME=$(PCPS4_RUN_GAME) \
             $(if $(PCPS4_ENABLE_GNM),-DPCPS4_ENABLE_GNM=1,) -c
 CXXFLAGS := $(COMMONFLAGS) \
             -isystem $(TOOLCHAIN)/include/c++/v1 -c
@@ -112,7 +114,7 @@ $(GENERATED)/%.c: pc_source/%.c $(TRANSLATOR) compat/pcps4_compat.h compat/pcps4
 	@mkdir -p "$(dir $@)"
 	$(PYTHON) "$(TRANSLATOR)" "$<" --out "$@" --report "$(REPORT)" --strict
 
-$(GENERATED)/%.cpp: pc_source/%.cpp $(TRANSLATOR) compat/pcps4_compat.h compat/pcps4_d3d11.h compat/pcps4_sys.h
+$(GENERATED)/%.cpp: pc_source/%.cpp $(TRANSLATOR) compat/pcps4_compat.h compat/pcps4_d3d11.h compat/pcps4_xinput.h compat/pcps4_sys.h
 	@mkdir -p "$(dir $@)"
 	$(PYTHON) "$(TRANSLATOR)" "$<" --out "$@" --report "$(REPORT)" --strict
 
@@ -269,6 +271,7 @@ info:
 	@echo "GNM bridge: compat/pcps4_gnm.[ch]"
 	@echo "Real GNM renderer: compat/pcps4_gnm_renderer.[ch]"
 	@echo "OpenGNM enabled: $(PCPS4_ENABLE_OPENGNM)"
+	@echo "Interactive game demo: $(PCPS4_RUN_GAME)"
 	@echo "Fault boundary: compat/pcps4_fault.[ch]"
 	@echo "Content ID: $(CONTENT_ID)"
 	@echo "Title ID: $(TITLE_ID)"

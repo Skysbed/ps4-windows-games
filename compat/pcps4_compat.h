@@ -29,6 +29,8 @@ extern "C" {
 #endif
 
 typedef void *HANDLE;
+typedef HANDLE HMODULE;
+typedef void *FARPROC;
 typedef uint32_t DWORD;
 typedef uint32_t UINT;
 typedef int32_t HRESULT;

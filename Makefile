@@ -1,10 +1,10 @@
 # PcPs4: PC source -> compatibility layers -> OpenOrbis -> PKG
 
 PROJECT       := PcPs4
-TITLE         := PcPs4
+TITLE         ?= PcPs4
 VERSION       := 1.00
-TITLE_ID      := PCPS00001
-CONTENT_ID    := IV0000-PCPS00001_00-PCPS4TRANSLATE01
+TITLE_ID      ?= PCPS00001
+CONTENT_ID    ?= IV0000-PCPS00001_00-PCPS4TRANSLATE01
 
 TOOLCHAIN     := $(OO_PS4_TOOLCHAIN)
 PCPS4_ENABLE_OPENGNM ?= 0
@@ -13,10 +13,10 @@ PCPS4_BUNDLED_GAME ?= 0
 PCPS4_GAME_DIR ?=
 PCPS4_GRAPHICS_ROOT ?= external/ps4-graphics
 PCPS4_OPENGNM_DIR := $(PCPS4_GRAPHICS_ROOT)/opengnm
-INTDIR        := build
+INTDIR        ?= build
 GENERATED     := $(INTDIR)/generated
 GNM_RENDERER_OBJ := $(INTDIR)/pcps4_gnm_renderer.o
-PACKAGE_ROOT  := $(INTDIR)/package
+PACKAGE_ROOT  ?= $(INTDIR)/package
 REPORT        := $(INTDIR)/translation.json
 
 PYTHON        := python3
@@ -65,6 +65,7 @@ D3D11_COM_OBJ := $(INTDIR)/pcps4_d3d11_com.o
 
 ELF := $(INTDIR)/$(PROJECT).elf
 OELF := $(INTDIR)/$(PROJECT).oelf
+EBOOT := $(INTDIR)/eboot.bin
 
 SFO := $(PACKAGE_ROOT)/sce_sys/param.sfo
 PACKAGE_EBOOT := $(PACKAGE_ROOT)/eboot.bin
@@ -213,11 +214,15 @@ $(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ
 	$(LD) $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) \
 	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(GNM_RENDERER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(D3D11_COM_OBJ) -o "$@" $(LDFLAGS)
 
-eboot.bin: $(ELF)
+$(EBOOT): $(ELF)
 	@test -n "$(OO_PS4_TOOLCHAIN)" || (echo "ERROR: OO_PS4_TOOLCHAIN is not set."; exit 1)
 	@test -x "$(CREATE_FSELF)" || (echo "ERROR: $(CREATE_FSELF) not found."; exit 1)
-	"$(CREATE_FSELF)" -in="$(ELF)" -out="$(OELF)" --eboot "eboot.bin" \
+	"$(CREATE_FSELF)" -in="$(ELF)" -out="$(OELF)" --eboot "$@" \
 	    --paid 0x3800000000000011
+
+# Preserve the root eboot.bin artifact while isolating each build's EBOOT.
+eboot.bin: $(EBOOT)
+	cp "$<" "$@"
 
 $(SFO):
 	@mkdir -p "$(PACKAGE_ROOT)/sce_sys"
@@ -234,7 +239,7 @@ $(SFO):
 	"$(PKGTOOL)" sfo_setentry "$@" TITLE_ID --type Utf8 --maxsize 12 --value "$(TITLE_ID)"
 	"$(PKGTOOL)" sfo_setentry "$@" VERSION --type Utf8 --maxsize 8 --value "$(VERSION)"
 
-$(PACKAGE_EBOOT): eboot.bin
+$(PACKAGE_EBOOT): $(EBOOT)
 	@mkdir -p "$(PACKAGE_ROOT)"
 	cp "$<" "$@"
 
@@ -264,7 +269,7 @@ $(PKG): $(GP4)
 	cd "$(PACKAGE_ROOT)" && "$(PKGTOOL)" pkg_build "$(notdir $<)" .
 	@test -s "$@" || (echo "ERROR: PkgTool did not create $@"; exit 1)
 
-pkg: $(PKG)
+pkg: $(PKG) eboot.bin
 	@echo "PS4 package created: $(PKG)"
 	@echo "Content ID: $(CONTENT_ID)"
 	@echo "Title ID: $(TITLE_ID)"

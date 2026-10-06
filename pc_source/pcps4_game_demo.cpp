@@ -9,9 +9,6 @@ extern "C" int pcps4_d3d11_game_run(void)
 {
     const uint32_t width = 640;
     const uint32_t height = 360;
-    const uint32_t pitch = width * 4u;
-    const size_t bytes = (size_t)pitch * height;
-
     DXGI_SWAP_CHAIN_DESC swap_desc = {};
     swap_desc.BufferDesc.Width = width;
     swap_desc.BufferDesc.Height = height;
@@ -112,16 +109,6 @@ extern "C" int pcps4_d3d11_game_run(void)
     const UINT offset = 0;
     context->IASetVertexBuffers(0, 1, vertex_buffers, &stride, &offset);
 
-    if (pixels == NULL) {
-        vertex_buffer->Release();
-        input_layout->Release();
-        rtv->Release();
-        back_buffer->Release();
-        swap_chain->Release();
-        device->Release();
-        return -6;
-    }
-
     int32_t player_x = (int32_t)width / 2;
     int32_t player_y = (int32_t)height / 2;
     uint32_t frame = 0;
@@ -176,9 +163,6 @@ extern "C" int pcps4_d3d11_game_run(void)
         if (player_x > (int32_t)width - 24) player_x = (int32_t)width - 24;
         if (player_y > (int32_t)height - 24) player_y = (int32_t)height - 24;
 
-        draw_background(pixels, width, height, frame);
-        memset(pixels, 0, bytes);
-
         struct Vertex {
             float position[3];
             float color[4];
@@ -205,7 +189,8 @@ extern "C" int pcps4_d3d11_game_run(void)
         memcpy(mapped.pData, vertices, sizeof(vertices));
         context->Unmap(vertex_buffer, 0);
 
-        context->ClearRenderTargetView(rtv, (const float[4]){0.03f, 0.06f, 0.10f, 1.0f});
+        const float clear_color[4] = {0.03f, 0.06f, 0.10f, 1.0f};
+        context->ClearRenderTargetView(rtv, clear_color);
         context->Draw(3, 0);
 
         hr = swap_chain->Present(1, 0);
@@ -219,7 +204,6 @@ extern "C" int pcps4_d3d11_game_run(void)
     XINPUT_VIBRATION vibration = {0, 0, 0, 0};
     (void)XInputSetState(0, &vibration);
 
-    free(pixels);
     vertex_buffer->Release();
     input_layout->Release();
     rtv->Release();

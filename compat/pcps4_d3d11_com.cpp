@@ -1404,6 +1404,63 @@ static PCPS4_MS_ABI HRESULT com_create_wrappers(
     return S_OK;
 }
 
+HRESULT pcps4_d3d11_com_create_swap_chain(
+    void *device_proxy,
+    const void *swap_chain_desc_ptr,
+    void **out_swap_chain)
+{
+    PCPS4ComDevice *device = (PCPS4ComDevice *)device_proxy;
+    const DXGI_SWAP_CHAIN_DESC *desc =
+        (const DXGI_SWAP_CHAIN_DESC *)swap_chain_desc_ptr;
+    PCPS4ComSwapChain *wrapper;
+    IDXGISwapChain *native_swap;
+    uint32_t width = 1280;
+    uint32_t height = 720;
+    
+    if (device == NULL || device->impl == NULL ||
+        desc == NULL || out_swap_chain == NULL)
+        return E_INVALIDARG;
+
+    *out_swap_chain = NULL;
+
+    if (desc->BufferDesc.Width != 0)
+        width = desc->BufferDesc.Width;
+    if (desc->BufferDesc.Height != 0)
+        height = desc->BufferDesc.Height;
+
+    pcps4_fault_stage("com: factory CreateSwapChain");
+    native_swap = new (std::nothrow) IDXGISwapChain(
+        device->impl->native,
+        device->impl->context,
+        device->impl->graphics,
+        device->impl->gnm_renderer);
+    if (native_swap == NULL)
+        return E_OUTOFMEMORY;
+
+    native_swap->width = width;
+    native_swap->height = height;
+
+    wrapper = (PCPS4ComSwapChain *)calloc(1, sizeof(*wrapper));
+    if (wrapper == NULL) {
+        native_swap->Release();
+        return E_OUTOFMEMORY;
+    }
+
+    init_vtables();
+    wrapper->lpVtbl = g_swap_vtbl;
+    wrapper->refs = 1;
+    wrapper->impl = native_swap;
+    wrapper->device = device;
+    wrapper->context = device->context;
+
+    ++device->refs;
+    if (wrapper->context != NULL)
+        ++wrapper->context->refs;
+
+    *out_swap_chain = wrapper;
+    return S_OK;
+}
+
 HRESULT pcps4_d3d11_com_create_device_and_swap_chain(
     void *pAdapter,
     D3D_DRIVER_TYPE DriverType,

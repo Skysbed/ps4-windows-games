@@ -6,8 +6,8 @@
 #include "pcps4_d3d11_com.h"
 #include "pcps4_loader.h"
 #include "pcps4_module.h"
-#include "pcps4_msabi.h"
-#include "pcps4_winabi.h"
+#include "pcps4_msabi->h"
+#include "pcps4_winabi->h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,7 +32,7 @@ static void PCPS4_MS_ABI win_SetLastError(DWORD value);
 #define PCPS4_MAX_TLS_SLOTS 64u
 #define TLS_OUT_OF_INDEXES 0xFFFFFFFFu
 static uint64_t g_tls_bitmap;
-static __thread void *g_tls_values[PCPS4_MAX_TLS_SLOTS]
+static __thread void *g_tls_values[PCPS4_MAX_TLS_SLOTS];
 
 typedef struct pcps4_win_critical_section {
     void *DebugInfo;
@@ -687,35 +687,35 @@ static void register_kernel32(
     KREG("SetLastError", win_SetLastError);
     KREG("GetCurrentProcess", win_GetCurrentProcess);
     KREG("GetCurrentThread", win_GetCurrentThread);
-    KREG("GetCurrentProcessId", abi.get_current_process_id);
-    KREG("GetCurrentThreadId", abi.get_current_thread_id);
-    KREG("GetTickCount", abi.get_tick_count);
-    KREG("GetTickCount64", abi.get_tick_count64);
-    KREG("Sleep", abi.sleep_ms);
-    KREG("InterlockedIncrement", abi.interlocked_increment);
-    KREG("InterlockedDecrement", abi.interlocked_decrement);
-    KREG("CreateFileA", abi.create_file_a);
-    KREG("CreateFileW", abi.create_file_w);
-    KREG("ReadFile", abi.read_file);
-    KREG("WriteFile", abi.write_file);
-    KREG("GetFileSize", abi.get_file_size);
+    KREG("GetCurrentProcessId", abi->get_current_process_id);
+    KREG("GetCurrentThreadId", abi->get_current_thread_id);
+    KREG("GetTickCount", abi->get_tick_count);
+    KREG("GetTickCount64", abi->get_tick_count64);
+    KREG("Sleep", abi->sleep_ms);
+    KREG("InterlockedIncrement", abi->interlocked_increment);
+    KREG("InterlockedDecrement", abi->interlocked_decrement);
+    KREG("CreateFileA", abi->create_file_a);
+    KREG("CreateFileW", abi->create_file_w);
+    KREG("ReadFile", abi->read_file);
+    KREG("WriteFile", abi->write_file);
+    KREG("GetFileSize", abi->get_file_size);
     KREG("GetFileAttributesA", win_GetFileAttributesA);
     KREG("GetFileAttributesW", win_GetFileAttributesW);
-    KREG("SetFilePointer", abi.set_file_pointer);
-    KREG("DeleteFileA", abi.delete_file_a);
-    KREG("DeleteFileW", abi.delete_file_w);
-    KREG("CreateDirectoryA", abi.create_directory_a);
-    KREG("CreateDirectoryW", abi.create_directory_w);
-    KREG("CloseHandle", abi.close_handle);
-    KREG("CreateThread", abi.create_thread);
-    KREG("CreateMutexA", abi.create_mutex_a);
-    KREG("CreateEventA", abi.create_event_a);
-    KREG("SetEvent", abi.set_event);
-    KREG("ResetEvent", abi.reset_event);
-    KREG("WaitForSingleObject", abi.wait_for_single_object);
-    KREG("ReleaseMutex", abi.release_mutex);
-    KREG("VirtualAlloc", abi.virtual_alloc);
-    KREG("VirtualFree", abi.virtual_free);
+    KREG("SetFilePointer", abi->set_file_pointer);
+    KREG("DeleteFileA", abi->delete_file_a);
+    KREG("DeleteFileW", abi->delete_file_w);
+    KREG("CreateDirectoryA", abi->create_directory_a);
+    KREG("CreateDirectoryW", abi->create_directory_w);
+    KREG("CloseHandle", abi->close_handle);
+    KREG("CreateThread", abi->create_thread);
+    KREG("CreateMutexA", abi->create_mutex_a);
+    KREG("CreateEventA", abi->create_event_a);
+    KREG("SetEvent", abi->set_event);
+    KREG("ResetEvent", abi->reset_event);
+    KREG("WaitForSingleObject", abi->wait_for_single_object);
+    KREG("ReleaseMutex", abi->release_mutex);
+    KREG("VirtualAlloc", abi->virtual_alloc);
+    KREG("VirtualFree", abi->virtual_free);
     KREG("GetEnvironmentVariableA", win_GetEnvironmentVariableA);
     KREG("GetCommandLineA", win_GetCommandLineA);
     KREG("GetModuleFileNameA", win_GetModuleFileNameA);
@@ -772,24 +772,24 @@ static void register_winsock(
     const pcps4_winabi_exports *abi)
 {
 #define WREG(name, fn) (void)pcps4_pe_resolver_register(resolver, dll, name, (void *)(fn))
-    WREG("WSAStartup", abi.wsa_startup);
-    WREG("WSACleanup", abi.wsa_cleanup);
-    WREG("WSAGetLastError", abi.wsa_get_last_error);
-    WREG("socket", abi.socket_fn);
-    WREG("connect", abi.connect_fn);
-    WREG("send", abi.send_fn);
-    WREG("recv", abi.recv_fn);
-    WREG("shutdown", abi.shutdown_fn);
-    WREG("setsockopt", abi.setsockopt_fn);
-    WREG("getsockopt", abi.getsockopt_fn);
-    WREG("getaddrinfo", abi.getaddrinfo_fn);
-    WREG("freeaddrinfo", abi.freeaddrinfo_fn);
-    WREG("htons", abi.htons_fn);
-    WREG("ntohs", abi.ntohs_fn);
-    WREG("htonl", abi.htonl_fn);
-    WREG("ntohl", abi.ntohl_fn);
-    WREG("inet_addr", abi.inet_addr_fn);
-    WREG("closesocket", abi.closesocket_fn);
+    WREG("WSAStartup", abi->wsa_startup);
+    WREG("WSACleanup", abi->wsa_cleanup);
+    WREG("WSAGetLastError", abi->wsa_get_last_error);
+    WREG("socket", abi->socket_fn);
+    WREG("connect", abi->connect_fn);
+    WREG("send", abi->send_fn);
+    WREG("recv", abi->recv_fn);
+    WREG("shutdown", abi->shutdown_fn);
+    WREG("setsockopt", abi->setsockopt_fn);
+    WREG("getsockopt", abi->getsockopt_fn);
+    WREG("getaddrinfo", abi->getaddrinfo_fn);
+    WREG("freeaddrinfo", abi->freeaddrinfo_fn);
+    WREG("htons", abi->htons_fn);
+    WREG("ntohs", abi->ntohs_fn);
+    WREG("htonl", abi->htonl_fn);
+    WREG("ntohl", abi->ntohl_fn);
+    WREG("inet_addr", abi->inet_addr_fn);
+    WREG("closesocket", abi->closesocket_fn);
 #undef WREG
 }
 
@@ -799,10 +799,10 @@ static void register_xinput(
     const pcps4_winabi_exports *abi)
 {
 #define XREG(name, fn) (void)pcps4_pe_resolver_register(resolver, dll, name, (void *)(fn))
-    XREG("XInputGetState", abi.xinput_get_state);
-    XREG("XInputSetState", abi.xinput_set_state);
-    XREG("XInputGetCapabilities", abi.xinput_get_capabilities);
-    XREG("XInputEnable", abi.xinput_enable);
+    XREG("XInputGetState", abi->xinput_get_state);
+    XREG("XInputSetState", abi->xinput_set_state);
+    XREG("XInputGetCapabilities", abi->xinput_get_capabilities);
+    XREG("XInputEnable", abi->xinput_enable);
 #undef XREG
 }
 
@@ -812,35 +812,35 @@ static void register_ucrt(
     const pcps4_winabi_exports *abi)
 {
 #define UREG(name, fn) (void)pcps4_pe_resolver_register(resolver, dll, name, (void *)(fn))
-    UREG("malloc", abi.malloc_fn);
-    UREG("calloc", abi.calloc_fn);
-    UREG("realloc", abi.realloc_fn);
-    UREG("free", abi.free_fn);
-    UREG("memcpy", abi.memcpy_fn);
-    UREG("memmove", abi.memmove_fn);
-    UREG("memset", abi.memset_fn);
-    UREG("memcmp", abi.memcmp_fn);
-    UREG("strlen", abi.strlen_fn);
-    UREG("strcmp", abi.strcmp_fn);
-    UREG("strncmp", abi.strncmp_fn);
-    UREG("strstr", abi.strstr_fn);
-    UREG("strchr", abi.strchr_fn);
-    UREG("strrchr", abi.strrchr_fn);
-    UREG("atoi", abi.atoi_fn);
-    UREG("atol", abi.atol_fn);
-    UREG("strtol", abi.strtol_fn);
-    UREG("strtoul", abi.strtoul_fn);
-    UREG("strtoll", abi.strtoll_fn);
-    UREG("strtoull", abi.strtoull_fn);
-    UREG("abort", abi.abort_fn);
-    UREG("exit", abi.exit_fn);
-    UREG("fopen", abi.fopen_fn);
-    UREG("_wfopen", abi.wfopen_fn);
-    UREG("fclose", abi.fclose_fn);
-    UREG("fread", abi.fread_fn);
-    UREG("fwrite", abi.fwrite_fn);
-    UREG("fseek", abi.fseek_fn);
-    UREG("ftell", abi.ftell_fn);
+    UREG("malloc", abi->malloc_fn);
+    UREG("calloc", abi->calloc_fn);
+    UREG("realloc", abi->realloc_fn);
+    UREG("free", abi->free_fn);
+    UREG("memcpy", abi->memcpy_fn);
+    UREG("memmove", abi->memmove_fn);
+    UREG("memset", abi->memset_fn);
+    UREG("memcmp", abi->memcmp_fn);
+    UREG("strlen", abi->strlen_fn);
+    UREG("strcmp", abi->strcmp_fn);
+    UREG("strncmp", abi->strncmp_fn);
+    UREG("strstr", abi->strstr_fn);
+    UREG("strchr", abi->strchr_fn);
+    UREG("strrchr", abi->strrchr_fn);
+    UREG("atoi", abi->atoi_fn);
+    UREG("atol", abi->atol_fn);
+    UREG("strtol", abi->strtol_fn);
+    UREG("strtoul", abi->strtoul_fn);
+    UREG("strtoll", abi->strtoll_fn);
+    UREG("strtoull", abi->strtoull_fn);
+    UREG("abort", abi->abort_fn);
+    UREG("exit", abi->exit_fn);
+    UREG("fopen", abi->fopen_fn);
+    UREG("_wfopen", abi->wfopen_fn);
+    UREG("fclose", abi->fclose_fn);
+    UREG("fread", abi->fread_fn);
+    UREG("fwrite", abi->fwrite_fn);
+    UREG("fseek", abi->fseek_fn);
+    UREG("ftell", abi->ftell_fn);
 #undef UREG
 }
 

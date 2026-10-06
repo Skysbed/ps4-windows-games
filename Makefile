@@ -34,6 +34,7 @@ COMMONFLAGS := --target=x86_64-pc-freebsd12-elf -fPIC -funwind-tables \
                -isystem $(TOOLCHAIN)/include \
                -Icompat $(if $(filter 1,$(PCPS4_ENABLE_OPENGNM)),-I$(PCPS4_OPENGNM_DIR)/include,)
 CFLAGS   := $(COMMONFLAGS) -std=c11 \
+            -DPCPS4_ENABLE_OPENGNM=$(PCPS4_ENABLE_OPENGNM) \
             $(if $(PCPS4_ENABLE_GNM),-DPCPS4_ENABLE_GNM=1,) -c
 CXXFLAGS := $(COMMONFLAGS) \
             -isystem $(TOOLCHAIN)/include/c++/v1 -c
@@ -73,6 +74,7 @@ LDFLAGS := -m elf_x86_64 -pie \
            -L$(TOOLCHAIN)/lib \
            -lc -lkernel -lc++ -lSceVideoOut \
            $(if $(PCPS4_ENABLE_GNM),-lSceGnmDriver,) \
+           $(if $(filter 1,$(PCPS4_ENABLE_OPENGNM)),-L$(PCPS4_OPENGNM_DIR) -lopengnm,) \
            $(TOOLCHAIN)/lib/crt1.o
 
 .PHONY: all pkg eboot translate test clean info

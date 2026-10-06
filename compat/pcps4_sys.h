@@ -51,6 +51,7 @@ int pcps4_sys_file_mkdir(const char *path);
 int pcps4_sys_handle_close(pcps4_os_handle_t *handle);
 int pcps4_sys_handle_wait(pcps4_os_handle_t *handle, uint32_t milliseconds);
 int pcps4_sys_mutex_release(pcps4_os_handle_t *handle);
+int pcps4_sys_mutex_trylock(pcps4_os_handle_t *handle);
 pcps4_os_handle_t *pcps4_sys_mutex_create(const char *name);
 pcps4_os_handle_t *pcps4_sys_event_create(int manual_reset, int initial_state, const char *name);
 int pcps4_sys_event_set(pcps4_os_handle_t *handle);

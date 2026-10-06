@@ -19,6 +19,8 @@ DWORD started = GetTickCount64();
 Sleep(1);
 BOOL ok = TRUE;
 InterlockedIncrement(&counter);
+HANDLE file = CreateFileA("x", GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
+CloseHandle(file);
 """
         translated, report, status = translate(source, strict=True)
 
@@ -28,6 +30,45 @@ InterlockedIncrement(&counter);
         self.assertIn('pcps4_sleep_ms(1);', translated)
         self.assertIn('int ok = 1;', translated)
         self.assertIn('pcps4_interlocked_increment(&counter);', translated)
+        self.assertIn('pcps4_CreateFileA("x"', translated)
+        self.assertIn('pcps4_CloseHandle(file);', translated)
+        self.assertEqual(report["blockers"], [])
+
+    def test_socket_header_and_common_calls(self):
+        source = """
+#include <winsock2.h>
+#include <ws2tcpip.h>
+WSADATA data;
+WSAStartup(0x0202, &data);
+WSACleanup();
+closesocket(sock);
+"""
+        translated, report, status = translate(source, strict=True)
+
+        self.assertEqual(status, 0)
+        self.assertIn('#include "pcps4_compat.h"', translated)
+        self.assertIn('pcps4_WSAStartup', translated)
+        self.assertIn('pcps4_WSACleanup', translated)
+        self.assertIn('pcps4_closesocket', translated)
+        self.assertEqual(report["blockers"], [])
+
+    def test_virtual_memory_and_thread_surface(self):
+        source = """
+#include <windows.h>
+DWORD WINAPI worker(LPVOID arg) { return 0; }
+HANDLE t = CreateThread(NULL, 0, worker, NULL, 0, NULL);
+WaitForSingleObject(t, INFINITE);
+CloseHandle(t);
+void *p = VirtualAlloc(NULL, 4096, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+VirtualFree(p, 4096, MEM_RELEASE);
+"""
+        translated, report, status = translate(source, strict=True)
+
+        self.assertEqual(status, 0)
+        self.assertIn('pcps4_CreateThread', translated)
+        self.assertIn('pcps4_WaitForSingleObject', translated)
+        self.assertIn('pcps4_VirtualAlloc', translated)
+        self.assertIn('pcps4_VirtualFree', translated)
         self.assertEqual(report["blockers"], [])
 
     def test_comments_and_strings_are_not_rewritten(self):

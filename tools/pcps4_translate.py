@@ -2,9 +2,14 @@
 """
 PcPs4 source translation layer.
 
-The translator works at source level. It rewrites a defined subset of
-common Win32/MSVC C/C++ constructs into PcPs4 compatibility calls and
-reports APIs that need a real subsystem port.
+The translator has two responsibilities:
+
+* rewrite supported Windows/MSVC source constructs into the PcPs4
+  compatibility façade;
+* report subsystem calls that still require a real port.
+
+It deliberately does not pretend that arbitrary Windows PE binaries can
+be converted by renaming symbols.
 """
 from __future__ import annotations
 
@@ -34,6 +39,8 @@ class Blocker:
 HEADER_RULES = [
     ("windows.h", r'#\s*include\s*[<"]windows\.h[>"]', '#include "pcps4_compat.h"'),
     ("synchapi.h", r'#\s*include\s*[<"]synchapi\.h[>"]', '#include "pcps4_compat.h"'),
+    ("winsock2.h", r'#\s*include\s*[<"]winsock2\.h[>"]', '#include "pcps4_compat.h"'),
+    ("ws2tcpip.h", r'#\s*include\s*[<"]ws2tcpip\.h[>"]', '#include "pcps4_compat.h"'),
 ]
 
 
@@ -41,24 +48,44 @@ TOKEN_RULES = [
     ("GetTickCount64", r'\bGetTickCount64\s*\(\s*\)', 'pcps4_monotonic_ms()'),
     ("GetTickCount", r'\bGetTickCount\s*\(\s*\)', '(uint32_t)pcps4_monotonic_ms()'),
     ("GetCurrentProcessId", r'\bGetCurrentProcessId\s*\(\s*\)', 'pcps4_get_current_process_id()'),
+    ("GetCurrentThreadId", r'\bGetCurrentThreadId\s*\(\s*\)', 'pcps4_get_current_thread_id()'),
     ("Sleep", r'\bSleep\s*\(', 'pcps4_sleep_ms('),
+
     ("InterlockedIncrement", r'\bInterlockedIncrement\b', 'pcps4_interlocked_increment'),
     ("InterlockedDecrement", r'\bInterlockedDecrement\b', 'pcps4_interlocked_decrement'),
+
+    ("CreateFileA", r'\bCreateFileA\s*\(', 'pcps4_CreateFileA('),
+    ("ReadFile", r'\bReadFile\s*\(', 'pcps4_ReadFile('),
+    ("WriteFile", r'\bWriteFile\s*\(', 'pcps4_WriteFile('),
+    ("CloseHandle", r'\bCloseHandle\s*\(', 'pcps4_CloseHandle('),
+
+    ("CreateThread", r'\bCreateThread\s*\(', 'pcps4_CreateThread('),
+    ("CreateMutexA", r'\bCreateMutexA\s*\(', 'pcps4_CreateMutexA('),
+    ("WaitForSingleObject", r'\bWaitForSingleObject\s*\(', 'pcps4_WaitForSingleObject('),
+    ("ReleaseMutex", r'\bReleaseMutex\s*\(', 'pcps4_ReleaseMutex('),
+
+    ("VirtualAlloc", r'\bVirtualAlloc\s*\(', 'pcps4_VirtualAlloc('),
+    ("VirtualFree", r'\bVirtualFree\s*\(', 'pcps4_VirtualFree('),
+
+    ("WSAStartup", r'\bWSAStartup\s*\(', 'pcps4_WSAStartup('),
+    ("WSACleanup", r'\bWSACleanup\s*\(', 'pcps4_WSACleanup('),
+    ("WSAGetLastError", r'\bWSAGetLastError\s*\(', 'pcps4_WSAGetLastError('),
+    ("closesocket", r'\bclosesocket\s*\(', 'pcps4_closesocket('),
 
     ("_stricmp", r'\b_stricmp\b', 'strcasecmp'),
     ("_strnicmp", r'\b_strnicmp\b', 'strncasecmp'),
     ("stricmp", r'\bstricmp\b', 'strcasecmp'),
     ("strnicmp", r'\bstrnicmp\b', 'strncasecmp'),
 
+    ("ULONGLONG", r'\bULONGLONG\b', 'uint64_t'),
+    ("LONGLONG", r'\bLONGLONG\b', 'int64_t'),
+    ("UINT64", r'\bUINT64\b', 'uint64_t'),
     ("DWORD", r'\bDWORD\b', 'uint32_t'),
     ("WORD", r'\bWORD\b', 'uint16_t'),
     ("BYTE", r'\bBYTE\b', 'uint8_t'),
-    ("UINT64", r'\bUINT64\b', 'uint64_t'),
     ("UINT", r'\bUINT\b', 'uint32_t'),
     ("ULONG", r'\bULONG\b', 'uint32_t'),
     ("LONG", r'\bLONG\b', 'int32_t'),
-    ("ULONGLONG", r'\bULONGLONG\b', 'uint64_t'),
-    ("LONGLONG", r'\bLONGLONG\b', 'int64_t'),
     ("HRESULT", r'\bHRESULT\b', 'int32_t'),
     ("BOOL", r'\bBOOL\b', 'int'),
     ("INT", r'\bINT\b', 'int32_t'),
@@ -84,14 +111,13 @@ TOKEN_RULES = [
 
 BLOCKER_RULES = [
     ("DirectX header", r'#\s*include\s*[<"](?:d3d[0-9d_]*|dxgi|dxguid|d3dx)[^>"]*[>"]'),
-    ("Winsock header", r'#\s*include\s*[<"](?:winsock2|ws2tcpip)\.h[>"]'),
-    ("Win32 GUI API", r'\b(?:CreateWindow(?:Ex)?|RegisterClass(?:Ex)?|DefWindowProc|DispatchMessage|GetMessage|PeekMessage)\s*\('),
     ("DirectX API", r'\b(?:D3D11|D3D12|Direct3D|IDXGI|ID3D)\w*'),
-    ("Windows socket API", r'\b(?:WSAStartup|WSACleanup|closesocket)\s*\('),
+    ("Windows socket API", r'\b(?:WSAIoctl|WSAEventSelect|WSARecv|WSASend|WSAWaitForMultipleEvents|ioctlsocket)\s*\('),
     ("Windows DLL loader", r'\b(?:LoadLibrary(?:A|W)?|FreeLibrary|GetProcAddress)\s*\('),
     ("Windows registry API", r'\b(?:RegOpenKey(?:Ex)?|RegCloseKey|RegQueryValue(?:Ex)?|RegSetValue(?:Ex)?)\s*\('),
-    ("Win32 file API", r'\b(?:CreateFile(?:A|W)?|ReadFile|WriteFile|CloseHandle|GetFileSize)\s*\('),
-    ("Win32 synchronization API", r'\b(?:CreateEvent(?:A|W)?|WaitForSingleObject|ReleaseMutex|CreateMutex(?:A|W)?)\s*\('),
+    ("Win32 file API", r'\b(?:GetFileSize|SetFilePointer|DeleteFile(?:A|W)?|FindFirstFile(?:A|W)?|FindNextFile(?:A|W)?|CreateDirectory(?:A|W)?)\s*\('),
+    ("Win32 synchronization API", r'\b(?:CreateEvent(?:A|W)?|SetEvent|ResetEvent|WaitForMultipleObjects|ReleaseSemaphore|CreateSemaphore(?:A|W)?)\s*\('),
+    ("Unsupported Win32 wide API", r'\b(?:CreateFileW|CreateMutexW)\s*\('),
 ]
 
 
@@ -142,8 +168,14 @@ def mask_non_code(source: str) -> str:
 
 
 def apply_rules(source: str):
-    rules = [Replacement(name, pattern, replacement) for name, pattern, replacement in HEADER_RULES]
-    rules.extend(Replacement(name, pattern, replacement) for name, pattern, replacement in TOKEN_RULES)
+    rules = [
+        Replacement(name, pattern, replacement)
+        for name, pattern, replacement in HEADER_RULES
+    ]
+    rules.extend(
+        Replacement(name, pattern, replacement)
+        for name, pattern, replacement in TOKEN_RULES
+    )
 
     masked = mask_non_code(source)
     chunks: list[str] = []
@@ -201,40 +233,44 @@ def translate(source: str, strict: bool = False):
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description='Translate supported Windows/MSVC C/C++ constructs into PcPs4 compatibility calls.'
+        description="Translate supported Windows/MSVC C/C++ constructs into PcPs4 compatibility calls."
     )
-    parser.add_argument('source', type=Path)
-    parser.add_argument('--out', type=Path, required=True)
-    parser.add_argument('--report', type=Path)
-    parser.add_argument('--strict', action='store_true')
+    parser.add_argument("source", type=Path)
+    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--report", type=Path)
+    parser.add_argument("--strict", action="store_true")
     args = parser.parse_args()
 
     try:
-        source = args.source.read_text(encoding='utf-8')
+        source = args.source.read_text(encoding="utf-8")
     except OSError as exc:
-        print(f'pcps4-translate: cannot read {args.source}: {exc}', file=sys.stderr)
+        print(f"pcps4-translate: cannot read {args.source}: {exc}", file=sys.stderr)
         return 2
 
     translated, report, status = translate(source, strict=args.strict)
 
     try:
         args.out.parent.mkdir(parents=True, exist_ok=True)
-        args.out.write_text(translated, encoding='utf-8')
+        args.out.write_text(translated, encoding="utf-8")
         if args.report:
             args.report.parent.mkdir(parents=True, exist_ok=True)
-            args.report.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+            args.report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     except OSError as exc:
-        print(f'pcps4-translate: cannot write output: {exc}', file=sys.stderr)
+        print(f"pcps4-translate: cannot write output: {exc}", file=sys.stderr)
         return 2
 
-    print(f'PcPs4 translated: {args.source} -> {args.out}')
+    print(f"PcPs4 translated: {args.source} -> {args.out}")
     for item in report["replacements"]:
-        print(f'  {item["name"]}: {item["count"]}')
+        print(f"  {item['name']}: {item['count']}")
     for item in report["blockers"]:
-        print(f'  UNSUPPORTED line {item["line"]}: {item["name"]}: {item["text"]}', file=sys.stderr)
+        print(
+            f"  UNSUPPORTED line {item['line']}: "
+            f"{item['name']}: {item['text']}",
+            file=sys.stderr,
+        )
 
     return status
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     raise SystemExit(main())

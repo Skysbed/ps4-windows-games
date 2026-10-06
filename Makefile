@@ -1,4 +1,4 @@
-# PcPs4: PC source -> translation layer -> OpenOrbis -> eboot.bin -> PKG
+# PcPs4: PC source -> Win32 translator -> OS adapter -> OpenOrbis -> PKG
 
 PROJECT       := PcPs4
 TITLE         := PcPs4
@@ -29,12 +29,13 @@ COMMONFLAGS   := --target=x86_64-pc-freebsd12-elf -fPIC -funwind-tables \
                  -isysroot $(TOOLCHAIN) \
                  -isystem $(TOOLCHAIN)/include \
                  -Icompat
-CFLAGS        := $(COMMONFLAGS) -c
+CFLAGS        := $(COMMONFLAGS) -std=c11 -c
 CXXFLAGS      := $(COMMONFLAGS) -isystem $(TOOLCHAIN)/include/c++/v1 -c
 
 OBJS_C        := $(patsubst $(GENERATED)/%.c,$(INTDIR)/%.o,$(TRANSLATED_C))
 OBJS_CPP      := $(patsubst $(GENERATED)/%.cpp,$(INTDIR)/%.cpp.o,$(TRANSLATED_CPP))
 OBJS          := $(OBJS_C) $(OBJS_CPP)
+SYS_OBJ       := $(INTDIR)/pcps4_sys.o
 
 ELF           := $(INTDIR)/$(PROJECT).elf
 OELF          := $(INTDIR)/$(PROJECT).oelf
@@ -60,11 +61,11 @@ all: pkg
 
 translate: $(TRANSLATED)
 
-$(GENERATED)/%.c: pc_source/%.c $(TRANSLATOR) compat/pcps4_compat.h
+$(GENERATED)/%.c: pc_source/%.c $(TRANSLATOR) compat/pcps4_compat.h compat/pcps4_sys.h
 	@mkdir -p "$(dir $@)"
 	$(PYTHON) "$(TRANSLATOR)" "$<" --out "$@" --report "$(REPORT)" --strict
 
-$(GENERATED)/%.cpp: pc_source/%.cpp $(TRANSLATOR) compat/pcps4_compat.h
+$(GENERATED)/%.cpp: pc_source/%.cpp $(TRANSLATOR) compat/pcps4_compat.h compat/pcps4_sys.h
 	@mkdir -p "$(dir $@)"
 	$(PYTHON) "$(TRANSLATOR)" "$<" --out "$@" --report "$(REPORT)" --strict
 
@@ -76,12 +77,16 @@ $(INTDIR)/%.cpp.o: $(GENERATED)/%.cpp | $(INTDIR)
 	@mkdir -p "$(dir $@)"
 	$(CXX) $(CXXFLAGS) -o "$@" "$<"
 
+$(SYS_OBJ): compat/pcps4_sys.c compat/pcps4_sys.h
+	@mkdir -p "$(dir $@)"
+	$(CC) $(CFLAGS) -o "$@" "$<"
+
 $(INTDIR):
 	@mkdir -p "$(INTDIR)"
 
-$(ELF): $(OBJS)
+$(ELF): $(OBJS) $(SYS_OBJ)
 	@test -n "$(OBJS)" || (echo "ERROR: no PC source files found in pc_source/."; exit 1)
-	$(LD) $(OBJS) -o "$@" $(LDFLAGS)
+	$(LD) $(OBJS) $(SYS_OBJ) -o "$@" $(LDFLAGS)
 
 eboot.bin: $(ELF)
 	@test -n "$(OO_PS4_TOOLCHAIN)" || (echo "ERROR: OO_PS4_TOOLCHAIN is not set."; exit 1)
@@ -129,6 +134,7 @@ info:
 	@echo "OpenOrbis toolchain: $(TOOLCHAIN)"
 	@echo "Target: x86_64-pc-freebsd12-elf"
 	@echo "Translator: $(TRANSLATOR)"
+	@echo "OS adapter: compat/pcps4_sys.[ch]"
 	@echo "create-fself: $(CREATE_FSELF)"
 	@echo "create-gp4: $(CREATE_GP4)"
 	@echo "PkgTool.Core: $(PKGTOOL)"

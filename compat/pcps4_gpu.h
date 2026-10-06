@@ -135,6 +135,14 @@ int pcps4_gpu_context_set_blend_state(
 int pcps4_gpu_context_set_cull_mode(
     pcps4_gpu_context_t *context,
     uint32_t cull_mode);
+int pcps4_gpu_context_set_viewport(
+    pcps4_gpu_context_t *context,
+    float x,
+    float y,
+    float width,
+    float height,
+    float min_depth,
+    float max_depth);
 int pcps4_gpu_context_set_constant_buffer(
     pcps4_gpu_context_t *context,
     uint32_t stage,

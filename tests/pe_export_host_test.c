@@ -12,7 +12,7 @@ static void put16(uint8_t *b, size_t o, uint16_t v)
 static void put32(uint8_t *b, size_t o, uint32_t v)
 { b[o]=(uint8_t)v; b[o+1]=(uint8_t)(v>>8); b[o+2]=(uint8_t)(v>>16); b[o+3]=(uint8_t)(v>>24); }
 
-enum { IMG_SIZE=0x700, PE_OFF=0x80, OPT_OFF=0xF8, OPT_SIZE=0xF0, SEC_OFF=0x1E8, SEC_RAW=0x200, SEC_VA=0x1000 };
+enum { IMG_SIZE=0x700, PE_OFF=0x80, OPT_OFF=0x98, OPT_SIZE=0xF0, SEC_OFF=0x188, SEC_RAW=0x200, SEC_VA=0x1000 };
 static size_t roff(uint32_t rva) { return SEC_RAW + (size_t)(rva-SEC_VA); }
 
 static void build_pe(uint8_t *b)

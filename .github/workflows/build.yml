@@ -166,7 +166,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: PcPs4-v3-FINAL-Windows-Game-Diagnostic-PKG
-          path: build/win-smoke/package/*.pkg
+          path: build/win-smoke/PcPs4-v3-Windows-Game-Diagnostic.pkg
           if-no-files-found: error
 
       - name: Upload bundled GP4 diagnostics

@@ -159,6 +159,9 @@ pcps4_gpu_buffer_t *pcps4_gpu_buffer_create(
     const pcps4_gpu_buffer_desc_t *desc,
     const void *initial_data);
 void pcps4_gpu_buffer_destroy(pcps4_gpu_buffer_t *buffer);
+int pcps4_gpu_buffer_get_size(
+    const pcps4_gpu_buffer_t *buffer,
+    size_t *size);
 int pcps4_gpu_buffer_update(pcps4_gpu_buffer_t *buffer,
                             size_t offset,
                             const void *data,

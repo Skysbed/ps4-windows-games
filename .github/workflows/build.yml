@@ -1,4 +1,4 @@
-name: PcPs4 v4 OpenOrbis build
+name: PcPs4 v5 OpenOrbis build
 
 on:
   push:
@@ -80,7 +80,7 @@ jobs:
       - name: Upload native Windows D3D11 smoke binary
         uses: actions/upload-artifact@v4
         with:
-          name: PcPs4-v4-Windows-D3D11-Smoke-EXE
+          name: PcPs4-v5-Windows-D3D11-Smoke-EXE
           path: build/win_d3d11_smoke.exe
           if-no-files-found: error
 
@@ -152,20 +152,20 @@ jobs:
           grep -Eq 'game/game\\.exe|game/game.exe' "$GP4"
 
           # Versioned filename keeps downloads unmistakable.
-          cp "$(find build/win-smoke/package -maxdepth 1 -name '*.pkg' -type f -print -quit)" "build/win-smoke/PcPs4-v4-Windows-Game-Diagnostic.pkg"
+          cp "$(find build/win-smoke/package -maxdepth 1 -name '*.pkg' -type f -print -quit)" "build/win-smoke/PcPs4-v5-Windows-Game-Diagnostic.pkg"
 
       - name: Upload PS4 package containing native Windows D3D11 smoke binary
         uses: actions/upload-artifact@v4
         with:
-          name: PcPs4-v4-Windows-D3D11-Smoke-PKG
-          path: build/win-smoke/PcPs4-v4-Windows-Game-Diagnostic.pkg
+          name: PcPs4-v5-Windows-D3D11-Smoke-PKG
+          path: build/win-smoke/PcPs4-v5-Windows-Game-Diagnostic.pkg
           if-no-files-found: error
 
       - name: Upload FINAL one-package PS4 Windows smoke
         uses: actions/upload-artifact@v4
         with:
-          name: PcPs4-v4-FINAL-Windows-Game-Diagnostic-PKG
-          path: build/win-smoke/PcPs4-v4-Windows-Game-Diagnostic.pkg
+          name: PcPs4-v5-FINAL-Windows-Game-Diagnostic-PKG
+          path: build/win-smoke/PcPs4-v5-Windows-Game-Diagnostic.pkg
           if-no-files-found: error
 
       - name: Upload bundled GP4 diagnostics

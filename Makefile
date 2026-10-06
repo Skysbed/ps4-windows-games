@@ -84,6 +84,7 @@ LDFLAGS := -m elf_x86_64 -pie \
 HOST_CC    ?= clang
 HOST_CFLAGS := -std=c11 -Wall -Wextra -Werror -O2
 PE_HOST_TEST := $(INTDIR)/pe_host_test
+PE_MAP_HOST_TEST := $(INTDIR)/pe_map_host_test
 
 all: pkg
 
@@ -195,11 +196,15 @@ pkg: $(PKG)
 test:
 	$(PYTHON) -m unittest discover -s tests -v
 
-test-host: $(PE_HOST_TEST)
+test-host: $(PE_HOST_TEST) $(PE_MAP_HOST_TEST)
 	"$(PE_HOST_TEST)"
+	"$(PE_MAP_HOST_TEST)"
 
 $(PE_HOST_TEST): compat/pcps4_pe.c compat/pcps4_pe.h tests/pe_host_test.c | $(INTDIR)
 	$(HOST_CC) $(HOST_CFLAGS) -o "$@" compat/pcps4_pe.c tests/pe_host_test.c
+
+$(PE_MAP_HOST_TEST): compat/pcps4_pe.c compat/pcps4_pe.h tests/pe_map_host_test.c | $(INTDIR)
+	$(HOST_CC) $(HOST_CFLAGS) -o "$@" compat/pcps4_pe.c tests/pe_map_host_test.c
 
 info:
 	@test -n "$(OO_PS4_TOOLCHAIN)" || (echo "ERROR: OO_PS4_TOOLCHAIN is not set."; exit 1)

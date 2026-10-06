@@ -129,6 +129,8 @@ pcps4_pe_status pcps4_pe_parse(const uint8_t *data, size_t size,
         return PCPS4_PE_ERR_TRUNCATED;
     if (!pe_read_u32(data, size, opt_off + 56, &image->size_of_image))
         return PCPS4_PE_ERR_TRUNCATED;
+    if (!pe_read_u32(data, size, opt_off + 60, &image->size_of_headers))
+        return PCPS4_PE_ERR_TRUNCATED;
     if (!pe_read_u32(data, size, opt_off + 108, &num_dirs))
         return PCPS4_PE_ERR_TRUNCATED;
 
@@ -307,6 +309,149 @@ pcps4_pe_status pcps4_pe_iterate_imports(const pcps4_pe_image *image,
     return PCPS4_PE_OK;
 }
 
+/* Base relocation types we understand. */
+#define PCPS4_PE_REL_ABSOLUTE 0
+#define PCPS4_PE_REL_DIR64    10
+
+static pcps4_pe_status pe_apply_relocations(const pcps4_pe_image *image,
+                                            uint8_t *dest, size_t dest_size,
+                                            uint64_t load_base)
+{
+    uint32_t reloc_rva = image->directory_rva[PCPS4_PE_DIRECTORY_BASERELOC];
+    uint32_t reloc_size = image->directory_size[PCPS4_PE_DIRECTORY_BASERELOC];
+    uint64_t delta;
+    uint32_t reloc_off, cursor, end;
+
+    if (reloc_rva == 0 || reloc_size == 0)
+        return PCPS4_PE_OK; /* nothing to rebase */
+
+    delta = load_base - image->image_base;
+    if (delta == 0)
+        return PCPS4_PE_OK; /* loaded at preferred base: no fixups needed */
+
+    if (pcps4_pe_rva_to_offset(image, reloc_rva, &reloc_off) != PCPS4_PE_OK)
+        return PCPS4_PE_ERR_BAD_OFFSET;
+
+    cursor = reloc_off;
+    if (reloc_off + reloc_size < reloc_off)
+        return PCPS4_PE_ERR_OVERFLOW;
+    end = reloc_off + reloc_size;
+
+    /* Walk .reloc blocks: [PageRVA u32][BlockSize u32][entries u16...] */
+    while (cursor + 8 <= end) {
+        uint32_t page_rva = 0, block_size = 0;
+        uint32_t entries, i, entry_base;
+
+        if (!pe_read_u32(image->data, image->size, cursor + 0, &page_rva) ||
+            !pe_read_u32(image->data, image->size, cursor + 4, &block_size))
+            return PCPS4_PE_ERR_TRUNCATED;
+
+        if (block_size < 8)
+            break; /* malformed or terminator */
+        if (cursor + block_size < cursor || cursor + block_size > end)
+            return PCPS4_PE_ERR_TRUNCATED;
+
+        entries = (block_size - 8) / 2;
+        entry_base = cursor + 8;
+
+        for (i = 0; i < entries; ++i) {
+            uint16_t e = 0;
+            uint32_t type, offset, target;
+            if (!pe_read_u16(image->data, image->size,
+                             entry_base + (uint32_t)i * 2, &e))
+                return PCPS4_PE_ERR_TRUNCATED;
+
+            type = (uint32_t)(e >> 12);
+            offset = (uint32_t)(e & 0x0FFFu);
+
+            if (type == PCPS4_PE_REL_ABSOLUTE)
+                continue; /* padding entry */
+            if (type != PCPS4_PE_REL_DIR64)
+                return PCPS4_PE_ERR_UNSUPPORTED_RELOC;
+
+            if (page_rva + offset < page_rva)
+                return PCPS4_PE_ERR_OVERFLOW;
+            target = page_rva + offset;
+            if ((size_t)target + 8 > dest_size || (size_t)target + 8 < target)
+                return PCPS4_PE_ERR_NO_SPACE;
+
+            {
+                /* Read, add delta, write back the 64-bit pointer in dest. */
+                uint64_t v =
+                    (uint64_t)dest[target]
+                    | ((uint64_t)dest[target + 1] << 8)
+                    | ((uint64_t)dest[target + 2] << 16)
+                    | ((uint64_t)dest[target + 3] << 24)
+                    | ((uint64_t)dest[target + 4] << 32)
+                    | ((uint64_t)dest[target + 5] << 40)
+                    | ((uint64_t)dest[target + 6] << 48)
+                    | ((uint64_t)dest[target + 7] << 56);
+                v += delta;
+                dest[target + 0] = (uint8_t)(v & 0xFF);
+                dest[target + 1] = (uint8_t)((v >> 8) & 0xFF);
+                dest[target + 2] = (uint8_t)((v >> 16) & 0xFF);
+                dest[target + 3] = (uint8_t)((v >> 24) & 0xFF);
+                dest[target + 4] = (uint8_t)((v >> 32) & 0xFF);
+                dest[target + 5] = (uint8_t)((v >> 40) & 0xFF);
+                dest[target + 6] = (uint8_t)((v >> 48) & 0xFF);
+                dest[target + 7] = (uint8_t)((v >> 56) & 0xFF);
+            }
+        }
+
+        cursor += block_size;
+    }
+
+    return PCPS4_PE_OK;
+}
+
+pcps4_pe_status pcps4_pe_map_image(const pcps4_pe_image *image,
+                                   uint8_t *dest, size_t dest_size,
+                                   uint64_t load_base)
+{
+    uint16_t i;
+    uint32_t headers;
+
+    if (image == NULL || dest == NULL)
+        return PCPS4_PE_ERR_NULL;
+    if (image->size_of_image == 0 || dest_size < image->size_of_image)
+        return PCPS4_PE_ERR_NO_SPACE;
+
+    memset(dest, 0, dest_size);
+
+    /* Copy the headers region. */
+    headers = image->size_of_headers;
+    if (headers > image->size)
+        headers = (uint32_t)image->size;
+    if (headers > dest_size)
+        return PCPS4_PE_ERR_NO_SPACE;
+    memcpy(dest, image->data, headers);
+
+    /* Copy each section's raw bytes to its virtual address. */
+    for (i = 0; i < image->section_count; ++i) {
+        pcps4_pe_section s;
+        uint32_t copy;
+        if (pcps4_pe_get_section(image, i, &s) != PCPS4_PE_OK)
+            return PCPS4_PE_ERR_TRUNCATED;
+        if (s.raw_size == 0)
+            continue;
+
+        copy = s.raw_size;
+        /* Clamp to what the file actually contains. */
+        if ((size_t)s.raw_offset + copy > image->size) {
+            if (s.raw_offset >= image->size)
+                continue;
+            copy = (uint32_t)(image->size - s.raw_offset);
+        }
+        /* Clamp to the destination image window. */
+        if ((size_t)s.virtual_address + copy > dest_size)
+            return PCPS4_PE_ERR_NO_SPACE;
+
+        memcpy(dest + s.virtual_address, image->data + s.raw_offset, copy);
+    }
+
+    return pe_apply_relocations(image, dest, dest_size, load_base);
+}
+
 const char *pcps4_pe_status_str(pcps4_pe_status status)
 {
     switch (status) {
@@ -320,6 +465,8 @@ const char *pcps4_pe_status_str(pcps4_pe_status status)
         case PCPS4_PE_ERR_BAD_OFFSET:   return "offset outside image";
         case PCPS4_PE_ERR_OVERFLOW:     return "range arithmetic overflow";
         case PCPS4_PE_ERR_TRUNCATED:    return "structure truncated";
+        case PCPS4_PE_ERR_UNSUPPORTED_RELOC: return "unsupported relocation type";
+        case PCPS4_PE_ERR_NO_SPACE:     return "destination buffer too small";
         default:                        return "unknown error";
     }
 }

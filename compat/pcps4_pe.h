@@ -34,13 +34,16 @@ typedef enum pcps4_pe_status {
     PCPS4_PE_ERR_BAD_MACHINE = -6,  /* machine is not x86-64 */
     PCPS4_PE_ERR_BAD_OFFSET = -7,   /* an offset/RVA fell outside the image */
     PCPS4_PE_ERR_OVERFLOW = -8,     /* an arithmetic range check overflowed */
-    PCPS4_PE_ERR_TRUNCATED = -9     /* a structure ran past the buffer end */
+    PCPS4_PE_ERR_TRUNCATED = -9,    /* a structure ran past the buffer end */
+    PCPS4_PE_ERR_UNSUPPORTED_RELOC = -10, /* a relocation type we don't apply */
+    PCPS4_PE_ERR_NO_SPACE = -11     /* destination buffer too small to map */
 } pcps4_pe_status;
 
 #define PCPS4_PE_MACHINE_AMD64 0x8664u
 #define PCPS4_PE_MAGIC_PE32PLUS 0x20bu
 #define PCPS4_PE_NUM_DATA_DIRECTORIES 16
 #define PCPS4_PE_DIRECTORY_IMPORT 1
+#define PCPS4_PE_DIRECTORY_BASERELOC 5
 
 /* Characteristics bits we care about. */
 #define PCPS4_PE_SCN_MEM_EXECUTE 0x20000000u
@@ -65,6 +68,7 @@ typedef struct pcps4_pe_image {
     uint64_t image_base;
     uint32_t entry_point_rva;
     uint32_t size_of_image;
+    uint32_t size_of_headers;
 
     uint32_t directory_rva[PCPS4_PE_NUM_DATA_DIRECTORIES];
     uint32_t directory_size[PCPS4_PE_NUM_DATA_DIRECTORIES];
@@ -110,6 +114,22 @@ typedef int (*pcps4_pe_import_fn)(void *user,
  */
 pcps4_pe_status pcps4_pe_iterate_imports(const pcps4_pe_image *image,
                                          pcps4_pe_import_fn cb, void *user);
+
+/*
+ * Map a parsed image into a caller-provided memory block laid out by RVA:
+ * copies the headers and every section to its virtual address, zero-fills the
+ * gaps, then applies base relocations so the image is correct at `load_base`
+ * (which may differ from its preferred image_base). `dest` must be at least
+ * `image->size_of_image` bytes. On success `dest` holds the ready-to-run image
+ * and the entry point is at dest + image->entry_point_rva.
+ *
+ * This does not change memory protections or make anything executable; that is
+ * the OS-layer step that follows. It is the "place it in memory correctly"
+ * stage of loading a binary.
+ */
+pcps4_pe_status pcps4_pe_map_image(const pcps4_pe_image *image,
+                                   uint8_t *dest, size_t dest_size,
+                                   uint64_t load_base);
 
 /* Human-readable text for a status code (never NULL). */
 const char *pcps4_pe_status_str(pcps4_pe_status status);

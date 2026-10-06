@@ -24,6 +24,210 @@ typedef struct pcps4_module_handle {
 static pcps4_pe_resolver *g_resolver = NULL;
 
 static void PCPS4_MS_ABI win_SetLastError(DWORD value);
+static uint64_t g_tls_bitmap;
+static __thread void *g_tls_values[PCPS4_MAX_TLS_SLOTS];
+#define PCPS4_MAX_TLS_SLOTS 64u
+#define TLS_OUT_OF_INDEXES 0xFFFFFFFFu
+
+typedef struct pcps4_win_critical_section {
+    void *DebugInfo;
+    int32_t LockCount;
+    int32_t RecursionCount;
+    HANDLE OwningThread;
+    HANDLE LockSemaphore;
+    uintptr_t SpinCount;
+} pcps4_win_critical_section;
+
+static BOOL PCPS4_MS_ABI win_InitializeCriticalSectionEx(
+    void *critical_section, DWORD spin_count, DWORD flags)
+{
+    pcps4_win_critical_section *cs =
+        (pcps4_win_critical_section *)critical_section;
+    pcps4_os_handle_t *mutex;
+
+    (void)spin_count;
+    (void)flags;
+
+    if (cs == NULL)
+        return FALSE;
+
+    mutex = pcps4_sys_mutex_create("pcps4-critical-section");
+    if (mutex == NULL)
+        return FALSE;
+
+    memset(cs, 0, sizeof(*cs));
+    cs->LockSemaphore = (HANDLE)mutex;
+    return TRUE;
+}
+
+static void PCPS4_MS_ABI win_InitializeCriticalSection(void *critical_section)
+{
+    (void)win_InitializeCriticalSectionEx(critical_section, 0, 0);
+}
+
+static BOOL PCPS4_MS_ABI win_InitializeCriticalSectionAndSpinCount(
+    void *critical_section, DWORD spin_count)
+{
+    return win_InitializeCriticalSectionEx(critical_section, spin_count, 0);
+}
+
+static void PCPS4_MS_ABI win_DeleteCriticalSection(void *critical_section)
+{
+    pcps4_win_critical_section *cs =
+        (pcps4_win_critical_section *)critical_section;
+
+    if (cs == NULL)
+        return;
+
+    if (cs->LockSemaphore != NULL) {
+        (void)pcps4_sys_handle_close(
+            (pcps4_os_handle_t *)cs->LockSemaphore);
+        cs->LockSemaphore = NULL;
+    }
+    cs->OwningThread = NULL;
+    cs->RecursionCount = 0;
+}
+
+static void PCPS4_MS_ABI win_EnterCriticalSection(void *critical_section)
+{
+    pcps4_win_critical_section *cs =
+        (pcps4_win_critical_section *)critical_section;
+    uint32_t thread_id;
+
+    if (cs == NULL)
+        return;
+
+    if (cs->LockSemaphore == NULL &&
+        !win_InitializeCriticalSectionEx(cs, 0, 0))
+        return;
+
+    thread_id = pcps4_sys_thread_id();
+    if (cs->OwningThread == (HANDLE)(uintptr_t)thread_id) {
+        ++cs->RecursionCount;
+        cs->LockCount = cs->RecursionCount - 1;
+        return;
+    }
+
+    (void)pcps4_sys_handle_wait(
+        (pcps4_os_handle_t *)cs->LockSemaphore, INFINITE);
+    cs->OwningThread = (HANDLE)(uintptr_t)thread_id;
+    cs->RecursionCount = 1;
+    cs->LockCount = 0;
+}
+
+static BOOL PCPS4_MS_ABI win_TryEnterCriticalSection(void *critical_section)
+{
+    pcps4_win_critical_section *cs =
+        (pcps4_win_critical_section *)critical_section;
+    uint32_t thread_id;
+    int wait_rc;
+
+    if (cs == NULL)
+        return FALSE;
+
+    if (cs->LockSemaphore == NULL &&
+        !win_InitializeCriticalSectionEx(cs, 0, 0))
+        return FALSE;
+
+    thread_id = pcps4_sys_thread_id();
+    if (cs->OwningThread == (HANDLE)(uintptr_t)thread_id) {
+        ++cs->RecursionCount;
+        cs->LockCount = cs->RecursionCount - 1;
+        return TRUE;
+    }
+
+    wait_rc = pcps4_sys_mutex_trylock(
+        (pcps4_os_handle_t *)cs->LockSemaphore);
+    if (wait_rc != 0)
+        return FALSE;
+
+    cs->OwningThread = (HANDLE)(uintptr_t)thread_id;
+    cs->RecursionCount = 1;
+    cs->LockCount = 0;
+    return TRUE;
+}
+
+static void PCPS4_MS_ABI win_LeaveCriticalSection(void *critical_section)
+{
+    pcps4_win_critical_section *cs =
+        (pcps4_win_critical_section *)critical_section;
+    uint32_t thread_id;
+
+    if (cs == NULL || cs->LockSemaphore == NULL)
+        return;
+
+    thread_id = pcps4_sys_thread_id();
+    if (cs->OwningThread != (HANDLE)(uintptr_t)thread_id ||
+        cs->RecursionCount <= 0)
+        return;
+
+    --cs->RecursionCount;
+    cs->LockCount = cs->RecursionCount - 1;
+    if (cs->RecursionCount == 0) {
+        cs->OwningThread = NULL;
+        (void)pcps4_sys_mutex_release(
+            (pcps4_os_handle_t *)cs->LockSemaphore);
+    }
+}
+
+static DWORD PCPS4_MS_ABI win_TlsAlloc(void)
+{
+    for (uint32_t slot = 0; slot < PCPS4_MAX_TLS_SLOTS; ++slot) {
+        uint64_t bit = 1ull << slot;
+        uint64_t old = __atomic_load_n(&g_tls_bitmap, __ATOMIC_ACQUIRE);
+        while ((old & bit) == 0) {
+            if (__atomic_compare_exchange_n(
+                    &g_tls_bitmap, &old, old | bit, 0,
+                    __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+                return slot;
+            }
+        }
+    }
+
+    return TLS_OUT_OF_INDEXES;
+}
+
+static BOOL PCPS4_MS_ABI win_TlsFree(DWORD slot)
+{
+    uint64_t bit;
+
+    if (slot >= PCPS4_MAX_TLS_SLOTS)
+        return FALSE;
+
+    bit = 1ull << slot;
+    if ((__atomic_load_n(&g_tls_bitmap, __ATOMIC_ACQUIRE) & bit) == 0)
+        return FALSE;
+
+    g_tls_values[slot] = NULL;
+    __atomic_fetch_and(&g_tls_bitmap, ~bit, __ATOMIC_ACQ_REL);
+    return TRUE;
+}
+
+static LPVOID PCPS4_MS_ABI win_TlsGetValue(DWORD slot)
+{
+    if (slot >= PCPS4_MAX_TLS_SLOTS ||
+        (__atomic_load_n(&g_tls_bitmap, __ATOMIC_ACQUIRE) &
+         (1ull << slot)) == 0) {
+        win_SetLastError(87);
+        return NULL;
+    }
+
+    return g_tls_values[slot];
+}
+
+static BOOL PCPS4_MS_ABI win_TlsSetValue(DWORD slot, LPVOID value)
+{
+    if (slot >= PCPS4_MAX_TLS_SLOTS ||
+        (__atomic_load_n(&g_tls_bitmap, __ATOMIC_ACQUIRE) &
+         (1ull << slot)) == 0) {
+        win_SetLastError(87);
+        return FALSE;
+    }
+
+    g_tls_values[slot] = value;
+    return TRUE;
+}
+
 static HMODULE PCPS4_MS_ABI win_LoadLibraryA(LPCSTR name);
 static HMODULE PCPS4_MS_ABI win_LoadLibraryW(LPCWSTR name);
 static HMODULE PCPS4_MS_ABI win_GetModuleHandleA(LPCSTR name);
@@ -404,6 +608,17 @@ static void register_kernel32(
     KREG("HeapReAlloc", win_HeapReAlloc);
     KREG("HeapFree", win_HeapFree);
     KREG("RtlMoveMemory", win_RtlMoveMemory);
+    KREG("InitializeCriticalSection", win_InitializeCriticalSection);
+    KREG("InitializeCriticalSectionAndSpinCount", win_InitializeCriticalSectionAndSpinCount);
+    KREG("InitializeCriticalSectionEx", win_InitializeCriticalSectionEx);
+    KREG("DeleteCriticalSection", win_DeleteCriticalSection);
+    KREG("EnterCriticalSection", win_EnterCriticalSection);
+    KREG("TryEnterCriticalSection", win_TryEnterCriticalSection);
+    KREG("LeaveCriticalSection", win_LeaveCriticalSection);
+    KREG("TlsAlloc", win_TlsAlloc);
+    KREG("TlsFree", win_TlsFree);
+    KREG("TlsGetValue", win_TlsGetValue);
+    KREG("TlsSetValue", win_TlsSetValue);
     KREG("ExitProcess", win_ExitProcess);
     KREG("LoadLibraryA", win_LoadLibraryA);
     KREG("LoadLibraryW", win_LoadLibraryW);

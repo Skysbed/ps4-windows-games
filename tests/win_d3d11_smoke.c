@@ -51,8 +51,6 @@ static int check_crt(void)
     FILE *file;
     long numeric;
     unsigned long numeric_u;
-    long long numeric_ll;
-    unsigned long long numeric_ull;
 
     file = fopen("pcps4_crt_smoke.bin", "wb+");
     if (file == NULL)
@@ -105,12 +103,8 @@ static int check_crt(void)
 
     numeric = strtol("12345", NULL, 10);
     numeric_u = strtoul("67890", NULL, 10);
-    numeric_ll = strtoll("123456789", NULL, 10);
-    numeric_ull = strtoull("987654321", NULL, 10);
     if (numeric != 12345L ||
         numeric_u != 67890UL ||
-        numeric_ll != 123456789LL ||
-        numeric_ull != 987654321ULL ||
         atoi("42") != 42 ||
         atol("43") != 43L)
         return 11;

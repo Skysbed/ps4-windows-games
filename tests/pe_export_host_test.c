@@ -49,7 +49,7 @@ static void put64(uint8_t *b, size_t o, uint64_t v)
 #define ORDS_RVA      0x1048u
 #define DLLNAME_RVA   0x104Au
 #define FUNCNAME_RVA  0x1054u
-#define FUNC_RVA      0x1068u
+#define FUNC_RVA      0x1180u
 #define EXPORT_RVA    0x1000u
 
 static size_t raw(uint32_t rva)

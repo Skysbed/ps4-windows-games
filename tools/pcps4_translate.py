@@ -38,6 +38,7 @@ HEADER_RULES = [
     ("d3d11.h", r'#\s*include\s*[<"]d3d11\.h[>"]', '#include "pcps4_d3d11.h"'),
     ("dxgi.h", r'#\s*include\s*[<"]dxgi\.h[>"]', '#include "pcps4_d3d11.h"'),
     ("d3dcommon.h", r'#\s*include\s*[<"]d3dcommon\.h[>"]', '#include "pcps4_d3d11.h"'),
+    ("xinput.h", r'#\s*include\s*[<"]xinput\.h[>"]', '#include "pcps4_xinput.h"'),
 ]
 
 TOKEN_RULES = [
@@ -48,6 +49,10 @@ TOKEN_RULES = [
     ("Sleep", r'\bSleep\s*\(', 'pcps4_sleep_ms('),
     ("InterlockedIncrement", r'\bInterlockedIncrement\b', 'pcps4_interlocked_increment'),
     ("InterlockedDecrement", r'\bInterlockedDecrement\b', 'pcps4_interlocked_decrement'),
+    ("XInputGetState", r'\bXInputGetState\s*\(', 'pcps4_XInputGetState('),
+    ("XInputSetState", r'\bXInputSetState\s*\(', 'pcps4_XInputSetState('),
+    ("XInputGetCapabilities", r'\bXInputGetCapabilities\s*\(', 'pcps4_XInputGetCapabilities('),
+    ("XInputEnable", r'\bXInputEnable\s*\(', 'pcps4_XInputEnable('),
     ("CreateFileA", r'\bCreateFileA\s*\(', 'pcps4_CreateFileA('),
     ("ReadFile", r'\bReadFile\s*\(', 'pcps4_ReadFile('),
     ("WriteFile", r'\bWriteFile\s*\(', 'pcps4_WriteFile('),
@@ -75,6 +80,7 @@ TOKEN_RULES = [
     ("UINT", r'\bUINT\b', 'uint32_t'),
     ("ULONG", r'\bULONG\b', 'uint32_t'),
     ("LONG", r'\bLONG\b', 'int32_t'),
+    ("SHORT", r'\bSHORT\b', 'int16_t'),
     ("HRESULT", r'\bHRESULT\b', 'int32_t'),
     ("BOOL", r'\bBOOL\b', 'int'),
     ("INT", r'\bINT\b', 'int32_t'),

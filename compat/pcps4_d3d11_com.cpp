@@ -1,5 +1,6 @@
 #include "pcps4_d3d11_com.h"
 #include "pcps4_abi.h"
+#include "pcps4_fault.h"  /* pcps4_fault_stage: crash breadcrumb */
 
 #include <new>
 #include <stdlib.h>
@@ -1321,6 +1322,8 @@ HRESULT pcps4_d3d11_com_create_device_and_swap_chain(
     ID3D11DeviceContext *context = NULL;
     IDXGISwapChain *swap = NULL;
     HRESULT hr;
+
+    pcps4_fault_stage("com: create_device_and_swap_chain (ABI crossing ok)");
 
     (void)pAdapter;
     (void)DriverType;

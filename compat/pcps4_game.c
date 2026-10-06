@@ -1,4 +1,5 @@
 #include "pcps4_game.h"
+#include "pcps4_status.h"
 
 #include "pcps4_loader.h"
 #include "pcps4_winapi.h"
@@ -72,13 +73,13 @@ int pcps4_game_run_file(const char *path, int32_t *out_entry_ret)
         return -1;
 
     if (read_file(path, &exe, &exe_size) != 0) {
-        printf("[pcps4] game load: could not read %s\n", path);
+        pcps4_status_log("[pcps4] game load: could not read %s", path);
         return -2;
     }
 
     pcps4_winapi_build_resolver(&resolver);
 
-    printf("[pcps4] game load: %s (%u bytes)\n",
+    pcps4_status_log("[pcps4] game load: %s (%u bytes)",
            path, (unsigned)exe_size);
 
     rc = pcps4_loader_run(
@@ -90,7 +91,7 @@ int pcps4_game_run_file(const char *path, int32_t *out_entry_ret)
     free(exe);
 
     if (rc != PCPS4_LOADER_OK) {
-        printf("[pcps4] game load failed: %s\n",
+        pcps4_status_log("[pcps4] game load failed: %s",
                pcps4_loader_status_str(rc));
         return (int)rc;
     }

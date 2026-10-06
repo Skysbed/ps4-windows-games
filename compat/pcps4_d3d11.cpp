@@ -2,6 +2,7 @@
 #include "pcps4_d3d11.h"
 #include "pcps4_shader.h"
 #include "pcps4_gnm_renderer.h"
+#include "pcps4_fault.h"  /* pcps4_fault_stage: crash breadcrumb */
 
 #include <limits.h>
 #include <new>
@@ -304,6 +305,7 @@ HRESULT IDXGISwapChain::Present(UINT SyncInterval, UINT Flags)
         return E_FAIL;
 
     uint64_t current_frame = frame_id++;
+    pcps4_fault_stage("d3d11: IDXGISwapChain::Present");
 
     /* Stretch a CPU back buffer onto the display framebuffer first. */
     if (back_texture != NULL && graphics != NULL) {
@@ -313,10 +315,13 @@ HRESULT IDXGISwapChain::Present(UINT SyncInterval, UINT Flags)
         if (pcps4_gpu_texture_cpu_data(back_texture->native, &pixels,
                                        &pitch, &w, &h) != PCPS4_GPU_OK)
             return E_FAIL;
+        pcps4_fault_stage("d3d11: Present blit");
         if (pcps4_gfx_blit_rgba8_scaled(graphics, pixels, w, h,
                                         (uint32_t)pitch) != PCPS4_GFX_OK)
             return E_FAIL;
     }
+
+    pcps4_fault_stage("d3d11: Present flip");
 
     return pcps4_gpu_context_present(
                context,
@@ -329,6 +334,8 @@ HRESULT IDXGISwapChain::GetBuffer(
     UINT Buffer,
     ID3D11Texture2D **Resource)
 {
+    pcps4_fault_stage("d3d11: IDXGISwapChain::GetBuffer");
+
     if (Buffer != 0 ||
         Resource == NULL ||
         context == NULL ||
@@ -402,6 +409,8 @@ void ID3D11DeviceContext::OMSetRenderTargets(
 {
     (void)pDepthStencilView;
 
+    pcps4_fault_stage("d3d11: OMSetRenderTargets");
+
     if (native == NULL)
         return;
 
@@ -429,6 +438,8 @@ void ID3D11DeviceContext::ClearRenderTargetView(
     ID3D11RenderTargetView *pRenderTargetView,
     const float ColorRGBA[4])
 {
+    pcps4_fault_stage("d3d11: ClearRenderTargetView");
+
     if (native == NULL || ColorRGBA == NULL)
         return;
 
@@ -1123,6 +1134,8 @@ HRESULT ID3D11Device::CreateRenderTargetView(
 {
     (void)pDesc;
 
+    pcps4_fault_stage("d3d11: CreateRenderTargetView");
+
     if (pResource == NULL ||
         pResource->native == NULL ||
         ppRTView == NULL)
@@ -1468,6 +1481,8 @@ HRESULT pcps4_d3d11_create_device_and_swap_chain(
     ID3D11DeviceContext **context,
     IDXGISwapChain **swap_chain)
 {
+    pcps4_fault_stage("d3d11: CreateDeviceAndSwapChain");
+
     if (swap_chain_desc == NULL ||
         device == NULL ||
         context == NULL ||
@@ -1491,12 +1506,14 @@ HRESULT pcps4_d3d11_create_device_and_swap_chain(
     if (buffers > 3)
         buffers = 3;
 
+    pcps4_fault_stage("create: gpu_device_create");
     pcps4_gpu_device_t *gpu =
         pcps4_gpu_device_create();
 
     if (gpu == NULL)
         return E_OUTOFMEMORY;
 
+    pcps4_fault_stage("create: gpu_context_create");
     pcps4_gpu_context_t *gpu_context =
         pcps4_gpu_context_create(gpu);
 
@@ -1527,6 +1544,7 @@ HRESULT pcps4_d3d11_create_device_and_swap_chain(
         return E_FAIL;
     }
 #else
+    pcps4_fault_stage("create: new gfx_context");
     graphics =
         new (std::nothrow) pcps4_gfx_context_t();
 
@@ -1538,6 +1556,7 @@ HRESULT pcps4_d3d11_create_device_and_swap_chain(
 
     /* The display always runs at 1920x1080; a different requested buffer
      * size is handled by the swap chain's scaled CPU back buffer. */
+    pcps4_fault_stage("create: pcps4_gfx_init");
     int gfx_rc = pcps4_gfx_init(
         graphics,
         1920,
@@ -1551,6 +1570,7 @@ HRESULT pcps4_d3d11_create_device_and_swap_chain(
         return E_FAIL;
     }
 
+    pcps4_fault_stage("create: attach_graphics");
     if (pcps4_gpu_context_attach_graphics(
             gpu_context,
             graphics) != PCPS4_GPU_OK) {
@@ -1562,6 +1582,7 @@ HRESULT pcps4_d3d11_create_device_and_swap_chain(
     }
 #endif
 
+    pcps4_fault_stage("create: new ID3D11Device");
     ID3D11Device *d3d_device =
         new (std::nothrow) ID3D11Device(
             gpu,
@@ -1584,6 +1605,7 @@ HRESULT pcps4_d3d11_create_device_and_swap_chain(
     d3d_device->gnm_renderer = gnm_renderer;
 #endif
 
+    pcps4_fault_stage("create: new IDXGISwapChain");
     IDXGISwapChain *d3d_swap =
         new (std::nothrow) IDXGISwapChain(
             gpu,
@@ -1605,6 +1627,7 @@ HRESULT pcps4_d3d11_create_device_and_swap_chain(
     /* D3D11CreateDeviceAndSwapChain returns the immediate context. The
      * device keeps its own native-context reference, while the wrapper gets
      * a second reference so both lifetimes are independent. */
+    pcps4_fault_stage("create: new immediate context");
     pcps4_gpu_context_add_ref(gpu_context);
     ID3D11DeviceContext *immediate =
         new (std::nothrow) ID3D11DeviceContext(gpu_context);

@@ -2,19 +2,15 @@
 #include <d3d11.h>
 
 /*
- * Freestanding x64 Windows smoke binary.
+ * Freestanding x64 Windows smoke binary, run as /app0/game/game.exe on PS4.
  *
- * No CRT entry point is used. The only imported OS API is ExitProcess; all
- * Direct3D work is reached through the D3D11CreateDeviceAndSwapChain import
- * and COM vtables. This is deliberately small so the PE import surface is
- * easy for PcPs4 to diagnose on PS4.
+ * Imports: D3D11CreateDeviceAndSwapChain, ExitProcess.
+ * On success the TV shows a pulsing cyan screen from a native Windows
+ * .exe. Close the app from the PS button menu.
  */
 
 static DXGI_SWAP_CHAIN_DESC g_swap_desc;
-
-static const float g_clear_color[4] = {
-    0.03f, 0.08f, 0.16f, 1.0f
-};
+static float g_clear_color[4];
 
 void WINAPI WinMainCRTStartup(void)
 {
@@ -25,6 +21,7 @@ void WINAPI WinMainCRTStartup(void)
     ID3D11RenderTargetView *rtv = 0;
     D3D_FEATURE_LEVEL feature_level = D3D_FEATURE_LEVEL_11_0;
     HRESULT hr;
+    unsigned i;
 
     g_swap_desc.BufferDesc.Width = 640;
     g_swap_desc.BufferDesc.Height = 360;
@@ -75,21 +72,28 @@ void WINAPI WinMainCRTStartup(void)
         &rtv,
         0);
 
-    context->lpVtbl->ClearRenderTargetView(
-        context,
-        rtv,
-        g_clear_color);
+    /* Pulse dark navy -> bright cyan forever so you can see a native
+     * Windows .exe presenting on the PS4. Close it from the PS button. */
+    for (i = 0; ; ++i) {
+        unsigned phase = i % 120;
+        unsigned pulse = phase < 60 ? phase : (120 - phase);
 
-    hr = swap_chain->lpVtbl->Present(
-        swap_chain,
-        1,
-        0);
+        g_clear_color[0] = 0.02f;
+        g_clear_color[1] = 0.12f + (float)pulse * (0.75f / 60.0f);
+        g_clear_color[2] = 0.28f + (float)pulse * (0.70f / 60.0f);
+        g_clear_color[3] = 1.0f;
 
-    rtv->lpVtbl->Release(rtv);
-    back_buffer->lpVtbl->Release(back_buffer);
-    context->lpVtbl->Release(context);
-    swap_chain->lpVtbl->Release(swap_chain);
-    device->lpVtbl->Release(device);
+        context->lpVtbl->ClearRenderTargetView(
+            context,
+            rtv,
+            g_clear_color);
 
-    ExitProcess(SUCCEEDED(hr) ? 0 : 4);
+        hr = swap_chain->lpVtbl->Present(
+            swap_chain,
+            1,
+            0);
+
+        if (FAILED(hr))
+            ExitProcess(4);
+    }
 }

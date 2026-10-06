@@ -5,6 +5,7 @@
 #include "pcps4_xinput.h"
 #include "pcps4_d3d11_com.h"
 #include "pcps4_abi.h"
+#include "pcps4_loader.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -221,7 +222,7 @@ static PCPS4_MS_ABI HANDLE win_GetCurrentThread(void)
 
 static PCPS4_MS_ABI void win_ExitProcess(UINT code)
 {
-    exit((int)code);
+    pcps4_pe_exit_process(code);
 }
 
 static PCPS4_MS_ABI DWORD win_GetEnvironmentVariableA(

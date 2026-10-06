@@ -509,6 +509,8 @@ static PCPS4_MS_ABI HRESULT swap_get_buffer(
 
     (void)riid;
 
+    pcps4_fault_stage("com: IDXGISwapChain::GetBuffer");
+
     if (self == NULL || self->impl == NULL || surface == NULL)
         return E_INVALIDARG;
 
@@ -1161,6 +1163,26 @@ static PCPS4_MS_ABI void init_vtables(void)
     vtbl_fill_hresult(g_desc_vtbl, PCPS4_COM_RESOURCE_DESC_SLOTS);
     vtbl_fill_hresult(g_resource_full_vtbl, PCPS4_COM_RESOURCE_DESC_FULL_SLOTS);
 
+    /* IDXGISwapChain: IUnknown + IDXGIObject + GetDevice + swap methods. */
+    g_swap_vtbl[0]=(const void *)com_swap_query;
+    g_swap_vtbl[1]=(const void *)com_swap_addref;
+    g_swap_vtbl[2]=(const void *)com_swap_release;
+    g_swap_vtbl[3]=(const void *)swap_private_data;
+    g_swap_vtbl[4]=(const void *)swap_private_data_i;
+    g_swap_vtbl[5]=(const void *)swap_get_private_data;
+    g_swap_vtbl[6]=(const void *)swap_get_parent;
+    g_swap_vtbl[7]=(const void *)swap_get_device;
+    g_swap_vtbl[8]=(const void *)swap_present;
+    g_swap_vtbl[9]=(const void *)swap_get_buffer;
+    g_swap_vtbl[10]=(const void *)swap_set_fullscreen;
+    g_swap_vtbl[11]=(const void *)swap_get_fullscreen;
+    g_swap_vtbl[12]=(const void *)swap_get_desc;
+    g_swap_vtbl[13]=(const void *)swap_resize_buffers;
+    g_swap_vtbl[14]=(const void *)swap_resize_target;
+    g_swap_vtbl[15]=(const void *)swap_get_output;
+    g_swap_vtbl[16]=(const void *)swap_get_stats;
+    g_swap_vtbl[17]=(const void *)swap_get_last_present;
+
     /* ID3D11Device: QI/AddRef/Release + selected creation methods. */
     g_device_vtbl[0]=(const void *)com_device_query;
     g_device_vtbl[1]=(const void *)com_device_addref;
@@ -1210,12 +1232,13 @@ static PCPS4_MS_ABI void init_vtables(void)
     g_context_vtbl[33]=(const void *)ctx_OMSetRenderTargets;
     g_context_vtbl[35]=(const void *)ctx_OMSetBlendState;
     g_context_vtbl[36]=(const void *)ctx_OMSetDepthStencilState;
-    g_context_vtbl[42]=(const void *)ctx_RSSetState;
-    g_context_vtbl[43]=(const void *)ctx_RSSetViewports;
-    g_context_vtbl[47]=(const void *)ctx_UpdateSubresource;
-    g_context_vtbl[49]=(const void *)ctx_ClearRenderTargetView;
-    g_context_vtbl[52]=(const void *)ctx_ClearDepthStencilView;
-    g_context_vtbl[110]=(const void *)ctx_Flush;
+    g_context_vtbl[43]=(const void *)ctx_RSSetState;
+    g_context_vtbl[44]=(const void *)ctx_RSSetViewports;
+    g_context_vtbl[48]=(const void *)ctx_UpdateSubresource;
+    g_context_vtbl[50]=(const void *)ctx_ClearRenderTargetView;
+    g_context_vtbl[53]=(const void *)ctx_ClearDepthStencilView;
+    g_context_vtbl[110]=(const void *)ctx_clear_state;
+    g_context_vtbl[111]=(const void *)ctx_Flush;
 
     /* Resource vtables. */
     for (size_t i=0;i<PCPS4_COM_RESOURCE_DEVICECHILD_SLOTS;++i)
@@ -1260,6 +1283,7 @@ static PCPS4_MS_ABI HRESULT com_create_wrappers(
     if (impl_device == NULL || impl_context == NULL)
         return E_FAIL;
 
+    pcps4_fault_stage("com: create wrappers");
     init_vtables();
 
     device = (PCPS4ComDevice *)calloc(1, sizeof(*device));
@@ -1301,6 +1325,7 @@ static PCPS4_MS_ABI HRESULT com_create_wrappers(
     if (ppImmediateContext) *ppImmediateContext = context;
     if (ppSwapChain) *ppSwapChain = swap;
 
+    pcps4_fault_stage("com: wrappers ready");
     return S_OK;
 }
 

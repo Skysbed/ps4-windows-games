@@ -125,6 +125,28 @@ void pcps4_status_report(const char *name, int ok)
     pcps4_status_redraw(0);
 }
 
+void pcps4_status_suspend_display(void)
+{
+    if (!g_gfx_ok)
+        return;
+
+    pcps4_gfx_shutdown(&g_gfx);
+    g_gfx_ok = 0;
+}
+
+void pcps4_status_resume_display(void)
+{
+    if (g_gfx_ok)
+        return;
+
+    if (pcps4_gfx_init(&g_gfx, 1920, 1080, 2) == PCPS4_GFX_OK) {
+        g_gfx_ok = 1;
+        pcps4_status_redraw(0);
+    } else {
+        pcps4_status_log("[pcps4] status: screen unavailable after game path");
+    }
+}
+
 void pcps4_status_finish_forever(void)
 {
     int i, passed = 0;

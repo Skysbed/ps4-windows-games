@@ -131,7 +131,7 @@ Outputs:
     build/PcPs4.elf
     build/PcPs4.oelf
     eboot.bin
-    build/package/IV0000-PCPS00001_00-PCPS4TRANSLATOR01.pkg
+    build/package/IV0000-PCPS00001_00-PCPS4TRANSLATE01.pkg
 
 GitHub Actions uploads the .pkg as the `PcPs4-PKG` artifact on a successful build.
 

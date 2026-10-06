@@ -4,6 +4,41 @@
 #include <stdlib.h>
 #include <string.h>
 
+typedef struct PCPS4Guid {
+    uint32_t data1;
+    uint16_t data2;
+    uint16_t data3;
+    uint8_t data4[8];
+} PCPS4Guid;
+
+static const PCPS4Guid IID_IUnknown_PCPS4 = {
+    0x00000000u, 0x0000u, 0x0000u,
+    {0xC0,0x00,0x00,0x00,0x00,0x00,0x00,0x46}
+};
+
+static const PCPS4Guid IID_ID3D11Device_PCPS4 = {
+    0xdb6f6ddbu, 0xac77u, 0x4e88u,
+    {0x82,0x53,0x81,0x9d,0xf9,0xbb,0xf1,0x40}
+};
+
+static const PCPS4Guid IID_ID3D11DeviceContext_PCPS4 = {
+    0xc0bfa96cu, 0xe089u, 0x44fbu,
+    {0x8e,0xaf,0x26,0xf8,0x79,0x61,0x90,0xda}
+};
+
+static const PCPS4Guid IID_IDXGISwapChain_PCPS4 = {
+    0x310d36a0u, 0xd2e7u, 0x4c0au,
+    {0xaa,0x04,0x6a,0x9d,0x23,0xb8,0x88,0x6a}
+};
+
+static int pcps4_guid_equal(
+    const void *a,
+    const PCPS4Guid *b)
+{
+    return a != NULL && b != NULL &&
+           memcmp(a, b, sizeof(*b)) == 0;
+}
+
 enum {
     PCPS4_COM_RES_BUFFER = 1,
     PCPS4_COM_RES_TEXTURE2D,
@@ -308,11 +343,19 @@ static HRESULT com_device_query(
     void *riid,
     void **out)
 {
-    (void)self;
-    (void)riid;
-    if (out != NULL)
-        *out = NULL;
-    return E_NOTIMPL;
+    if (self == NULL || out == NULL)
+        return E_INVALIDARG;
+
+    *out = NULL;
+
+    if (pcps4_guid_equal(riid, &IID_IUnknown_PCPS4) ||
+        pcps4_guid_equal(riid, &IID_ID3D11Device_PCPS4)) {
+        ++self->refs;
+        *out = self;
+        return S_OK;
+    }
+
+    return E_NOINTERFACE;
 }
 
 static UINT com_device_release(PCPS4ComDevice *self)
@@ -351,11 +394,19 @@ static HRESULT com_context_query(
     void *riid,
     void **out)
 {
-    (void)self;
-    (void)riid;
-    if (out != NULL)
-        *out = NULL;
-    return E_NOTIMPL;
+    if (self == NULL || out == NULL)
+        return E_INVALIDARG;
+
+    *out = NULL;
+
+    if (pcps4_guid_equal(riid, &IID_IUnknown_PCPS4) ||
+        pcps4_guid_equal(riid, &IID_ID3D11DeviceContext_PCPS4)) {
+        ++self->refs;
+        *out = self;
+        return S_OK;
+    }
+
+    return E_NOINTERFACE;
 }
 
 static UINT com_context_release(PCPS4ComContext *self)
@@ -384,11 +435,19 @@ static HRESULT com_swap_query(
     void *riid,
     void **out)
 {
-    (void)self;
-    (void)riid;
-    if (out != NULL)
-        *out = NULL;
-    return E_NOTIMPL;
+    if (self == NULL || out == NULL)
+        return E_INVALIDARG;
+
+    *out = NULL;
+
+    if (pcps4_guid_equal(riid, &IID_IUnknown_PCPS4) ||
+        pcps4_guid_equal(riid, &IID_IDXGISwapChain_PCPS4)) {
+        ++self->refs;
+        *out = self;
+        return S_OK;
+    }
+
+    return E_NOINTERFACE;
 }
 
 static UINT com_swap_release(PCPS4ComSwapChain *self)

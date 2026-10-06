@@ -74,6 +74,30 @@ void WINAPI WinMainCRTStartup(void)
     g_swap_desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 
     /*
+     * Private-heap lifecycle smoke. Destroying a heap with a live allocation
+     * must invalidate the handle and reclaim its tracked allocations.
+     */
+    {
+        HANDLE private_heap = HeapCreate(0, 0, 0);
+        void *block;
+
+        if (private_heap == 0)
+            ExitProcess(18);
+        block = HeapAlloc(private_heap, HEAP_ZERO_MEMORY, 24);
+        if (block == 0 || !HeapValidate(private_heap, 0, block)) {
+            if (block != 0)
+                (void)HeapFree(private_heap, 0, block);
+            (void)HeapDestroy(private_heap);
+            ExitProcess(19);
+        }
+        if (!HeapDestroy(private_heap))
+            ExitProcess(20);
+        if (HeapAlloc(private_heap, 0, 8) != 0 ||
+            HeapDestroy(private_heap))
+            ExitProcess(21);
+    }
+
+    /*
      * Process-heap ABI smoke: allocate zeroed memory, query its size, grow it
      * with HEAP_ZERO_MEMORY, verify preserved bytes and the cleared extension,
      * then validate and free the block.

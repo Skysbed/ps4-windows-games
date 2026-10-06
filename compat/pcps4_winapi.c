@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -495,6 +496,36 @@ static void PCPS4_MS_ABI win_SetLastError(DWORD value)
     g_last_error = value;
 }
 
+static DWORD PCPS4_MS_ABI win_GetFileAttributesA(LPCSTR path)
+{
+    struct stat st;
+    char translated[1024];
+
+    if (path == NULL ||
+        pcps4_sys_translate_path(path, 0, translated, sizeof(translated)) != 0 ||
+        stat(translated, &st) != 0) {
+        win_SetLastError(2);
+        return 0xFFFFFFFFu;
+    }
+
+    if (S_ISDIR(st.st_mode))
+        return 0x00000010u; /* FILE_ATTRIBUTE_DIRECTORY */
+
+    return 0x00000080u; /* FILE_ATTRIBUTE_NORMAL */
+}
+
+static DWORD PCPS4_MS_ABI win_GetFileAttributesW(LPCWSTR path)
+{
+    char utf8[1024];
+
+    if (pcps4_wide_to_utf8(path, utf8, sizeof(utf8)) != 0) {
+        win_SetLastError(87);
+        return 0xFFFFFFFFu;
+    }
+
+    return win_GetFileAttributesA(utf8);
+}
+
 static HANDLE PCPS4_MS_ABI win_GetCurrentProcess(void)
 {
     return (HANDLE)(intptr_t)1;
@@ -668,6 +699,8 @@ static void register_kernel32(
     KREG("ReadFile", abi.read_file);
     KREG("WriteFile", abi.write_file);
     KREG("GetFileSize", abi.get_file_size);
+    KREG("GetFileAttributesA", win_GetFileAttributesA);
+    KREG("GetFileAttributesW", win_GetFileAttributesW);
     KREG("SetFilePointer", abi.set_file_pointer);
     KREG("DeleteFileA", abi.delete_file_a);
     KREG("DeleteFileW", abi.delete_file_w);

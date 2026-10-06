@@ -29,6 +29,7 @@ extern "C" {
 typedef void *HANDLE;
 typedef uint32_t DWORD;
 typedef uint16_t WORD;
+typedef int16_t SHORT;
 typedef uint8_t BYTE;
 typedef uint16_t WCHAR;
 typedef char CHAR;

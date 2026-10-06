@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 
 #include <sys/mman.h>
 
@@ -183,11 +184,6 @@ static size_t round_page(size_t n)
     if (n == 0 || n > SIZE_MAX - (page - 1u))
         return 0;
     return (n + page - 1u) & ~(page - 1u);
-}
-
-static void module_log(const char *fmt, const char *name, unsigned a, unsigned b)
-{
-    pcps4_status_log(fmt, name, a, b);
 }
 
 void *pcps4_dll_find(const char *name)

@@ -8,7 +8,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,31 +29,37 @@ jobs:
       - name: Test translation layer
         run: make test
 
-      - name: Verify OpenOrbis installation
+      - name: Verify OpenOrbis installation and packaging tools
         run: |
           test -f "$OO_PS4_TOOLCHAIN/link.x"
           test -f "$OO_PS4_TOOLCHAIN/lib/crt1.o"
           test -x "$OO_PS4_TOOLCHAIN/bin/linux/create-fself"
+          test -x "$OO_PS4_TOOLCHAIN/bin/linux/create-gp4"
+          test -x "$OO_PS4_TOOLCHAIN/bin/linux/PkgTool.Core"
 
-      - name: Translate and build PS4 app
-        run: make
+      - name: Translate, build and package
+        run: make pkg
 
-      - name: Upload eboot.bin
+      - name: Upload installable PS4 package
+        uses: actions/upload-artifact@v4
+        with:
+          name: PcPs4-PKG
+          path: build/package/*.pkg
+          if-no-files-found: error
+
+      - name: Upload eboot
         uses: actions/upload-artifact@v4
         with:
           name: PcPs4-eboot
           path: eboot.bin
+          if-no-files-found: error
 
-      - name: Upload translated source
+      - name: Upload translated source and report
         uses: actions/upload-artifact@v4
         with:
           name: PcPs4-translated-source
           path: |
-            build/generated/main.c
+            build/generated/*.c
+            build/generated/*.cpp
             build/translation.json
-
-      - name: Upload ELF
-        uses: actions/upload-artifact@v4
-        with:
-          name: PcPs4-elf
-          path: build/*.elf
+          if-no-files-found: error

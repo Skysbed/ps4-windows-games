@@ -45,8 +45,10 @@ const char *text = "Sleep(GetTickCount64()) DWORD";
 void *x = (void *)Direct3DCreate9(0);
 """
         blockers = find_blockers(source)
-        self.assertEqual(len(blockers), 2)
-        self.assertEqual(blockers[0].name, "DirectX header")
+        names = {item.name for item in blockers}
+        self.assertIn("DirectX header", names)
+        self.assertIn("DirectX API", names)
+        self.assertEqual(len(blockers), 3)
 
 
 if __name__ == "__main__":

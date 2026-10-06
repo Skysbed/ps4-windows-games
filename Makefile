@@ -61,6 +61,7 @@ STATUS_OBJ := $(INTDIR)/pcps4_status.o
 XINPUT_OBJ := $(INTDIR)/pcps4_xinput.o
 WINAPI_OBJ := $(INTDIR)/pcps4_winapi.o
 GAME_OBJ  := $(INTDIR)/pcps4_game.o
+DLL_OBJ   := $(INTDIR)/pcps4_dll.o
 D3D11_COM_OBJ := $(INTDIR)/pcps4_d3d11_com.o
 ABI_OBJ := $(INTDIR)/pcps4_abi.o
 
@@ -185,6 +186,10 @@ $(WINAPI_OBJ): compat/pcps4_winapi.c compat/pcps4_winapi.h compat/pcps4_compat.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
 
+$(DLL_OBJ): compat/pcps4_dll.c compat/pcps4_dll.h compat/pcps4_pe.h compat/pcps4_loader.h
+	@mkdir -p "$(dir $@)"
+	$(CC) $(CFLAGS) -o "$@" "$<"
+
 $(GAME_OBJ): compat/pcps4_game.c compat/pcps4_game.h compat/pcps4_loader.h compat/pcps4_winapi.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
@@ -216,7 +221,7 @@ $(STATUS_OBJ): compat/pcps4_status.c compat/pcps4_status.h compat/pcps4_gfx.h
 $(INTDIR):
 	@mkdir -p "$(INTDIR)"
 
-$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(D3D11_COM_OBJ) $(ABI_OBJ)
+$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(DLL_OBJ) $(D3D11_COM_OBJ) $(ABI_OBJ)
 	@test -n "$(OBJS)" || (echo "ERROR: no PC source files found in pc_source/."; exit 1)
 	$(LD) $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) \
 	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(GNM_RENDERER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(D3D11_COM_OBJ) $(ABI_OBJ) -o "$@" $(LDFLAGS)
@@ -313,6 +318,7 @@ info:
 	@echo "Target: x86_64-pc-freebsd12-elf"
 	@echo "Translator: $(TRANSLATOR)"
 	@echo "OS adapter: compat/pcps4_sys.[ch]"
+	@echo "Windows PE DLL loader: compat/pcps4_dll.[ch]"
 	@echo "Graphics backend: compat/pcps4_gfx.[ch]"
 	@echo "GPU resources: compat/pcps4_gpu.[ch]"
 	@echo "D3D11 façade: compat/pcps4_d3d11.[h/cpp]"

@@ -3,6 +3,19 @@
 
 #include "pcps4_d3d11.h"
 
+#ifndef __cplusplus
+#include <stdint.h>
+typedef int32_t HRESULT;
+typedef uint32_t UINT;
+typedef uint32_t D3D_DRIVER_TYPE;
+typedef uint32_t D3D11_CREATE_DEVICE_FLAG;
+typedef uint32_t D3D_FEATURE_LEVEL;
+typedef struct DXGI_SWAP_CHAIN_DESC DXGI_SWAP_CHAIN_DESC;
+#ifndef S_OK
+#define S_OK ((HRESULT)0)
+#endif
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif

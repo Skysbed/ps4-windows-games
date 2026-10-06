@@ -18,6 +18,7 @@ extern "C" {
  */
 void pcps4_winapi_build_resolver(pcps4_pe_resolver *resolver);
 void pcps4_winapi_set_module_loader(pcps4_module_loader *loader);
+void pcps4_winapi_set_main_module(const char *name);
 
 #ifdef __cplusplus
 }

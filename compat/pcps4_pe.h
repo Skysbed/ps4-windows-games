@@ -156,7 +156,7 @@ pcps4_pe_status pcps4_pe_iterate_exports(const pcps4_pe_image *image,
 
 /* --- import resolution ------------------------------------------------- */
 
-#define PCPS4_PE_MAX_RESOLVER_SYMBOLS 512
+#define PCPS4_PE_MAX_RESOLVER_SYMBOLS 2048
 
 typedef struct pcps4_pe_symbol {
     char     dll[32];   /* importing module, matched case-insensitively */

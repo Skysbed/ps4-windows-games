@@ -228,6 +228,136 @@ pcps4_pe_status pcps4_pe_rva_to_offset(const pcps4_pe_image *image,
     return PCPS4_PE_ERR_BAD_OFFSET;
 }
 
+pcps4_pe_status pcps4_pe_iterate_exports(const pcps4_pe_image *image,
+                                         pcps4_pe_export_fn cb,
+                                         void *user)
+{
+    uint32_t export_rva;
+    uint32_t export_size;
+    uint32_t export_off;
+    uint32_t functions_rva;
+    uint32_t names_rva;
+    uint32_t ordinals_rva;
+    uint32_t functions_off;
+    uint32_t names_off;
+    uint32_t ordinals_off;
+    uint32_t ordinal_base;
+    uint32_t function_count;
+    uint32_t name_count;
+    uint32_t i;
+    pcps4_pe_status rc;
+
+    if (image == NULL || cb == NULL)
+        return PCPS4_PE_ERR_NULL;
+
+    export_rva = image->directory_rva[PCPS4_PE_DIRECTORY_EXPORT];
+    export_size = image->directory_size[PCPS4_PE_DIRECTORY_EXPORT];
+    if (export_rva == 0 || export_size == 0)
+        return PCPS4_PE_OK;
+
+    if (export_size < 40u)
+        return PCPS4_PE_ERR_TRUNCATED;
+
+    rc = pcps4_pe_rva_to_offset(image, export_rva, &export_off);
+    if (rc != PCPS4_PE_OK)
+        return rc;
+
+    /* IMAGE_EXPORT_DIRECTORY fields used here:
+     * Base, NumberOfFunctions, NumberOfNames,
+     * AddressOfFunctions, AddressOfNames, AddressOfNameOrdinals. */
+    if (!pe_read_u32(image->data, image->size, (size_t)export_off + 16, &ordinal_base) ||
+        !pe_read_u32(image->data, image->size, (size_t)export_off + 20, &function_count) ||
+        !pe_read_u32(image->data, image->size, (size_t)export_off + 24, &name_count) ||
+        !pe_read_u32(image->data, image->size, (size_t)export_off + 28, &functions_rva) ||
+        !pe_read_u32(image->data, image->size, (size_t)export_off + 32, &names_rva) ||
+        !pe_read_u32(image->data, image->size, (size_t)export_off + 36, &ordinals_rva))
+        return PCPS4_PE_ERR_TRUNCATED;
+
+    if (function_count == 0)
+        return PCPS4_PE_OK;
+
+    if (function_count > 0x100000u || name_count > 0x100000u)
+        return PCPS4_PE_ERR_OVERFLOW;
+
+    if (pcps4_pe_rva_to_offset(image, functions_rva, &functions_off) != PCPS4_PE_OK)
+        return PCPS4_PE_ERR_BAD_OFFSET;
+
+    if (name_count != 0) {
+        if (names_rva == 0 || ordinals_rva == 0)
+            return PCPS4_PE_ERR_BAD_OFFSET;
+        if (pcps4_pe_rva_to_offset(image, names_rva, &names_off) != PCPS4_PE_OK ||
+            pcps4_pe_rva_to_offset(image, ordinals_rva, &ordinals_off) != PCPS4_PE_OK)
+            return PCPS4_PE_ERR_BAD_OFFSET;
+    } else {
+        names_off = 0;
+        ordinals_off = 0;
+    }
+
+    for (i = 0; i < function_count; ++i) {
+        uint32_t function_rva;
+        uint32_t ordinal = ordinal_base + i;
+        const char *name = NULL;
+        const char *forwarder = NULL;
+
+        if (ordinal < ordinal_base)
+            return PCPS4_PE_ERR_OVERFLOW;
+
+        if (!pe_read_u32(image->data, image->size,
+                         (size_t)functions_off + (size_t)i * 4u,
+                         &function_rva))
+            return PCPS4_PE_ERR_TRUNCATED;
+
+        if (function_rva == 0)
+            continue;
+
+        if (name_count != 0) {
+            for (uint32_t n = 0; n < name_count; ++n) {
+                uint16_t name_index = 0;
+                uint32_t name_rva_entry = 0;
+                uint32_t name_file_off;
+
+                if (!pe_read_u16(image->data, image->size,
+                                 (size_t)ordinals_off + (size_t)n * 2u,
+                                 &name_index))
+                    return PCPS4_PE_ERR_TRUNCATED;
+
+                if ((uint32_t)name_index != i)
+                    continue;
+
+                if (!pe_read_u32(image->data, image->size,
+                                 (size_t)names_off + (size_t)n * 4u,
+                                 &name_rva_entry))
+                    return PCPS4_PE_ERR_TRUNCATED;
+
+                if (pcps4_pe_rva_to_offset(image, name_rva_entry,
+                                           &name_file_off) != PCPS4_PE_OK)
+                    return PCPS4_PE_ERR_BAD_OFFSET;
+
+                name = pe_read_cstr(image, name_file_off, 4096);
+                if (name == NULL)
+                    return PCPS4_PE_ERR_TRUNCATED;
+                break;
+            }
+        }
+
+        if (function_rva >= export_rva &&
+            function_rva - export_rva < export_size) {
+            uint32_t forward_off;
+            if (pcps4_pe_rva_to_offset(image, function_rva, &forward_off) !=
+                PCPS4_PE_OK)
+                return PCPS4_PE_ERR_BAD_OFFSET;
+            forwarder = pe_read_cstr(image, forward_off, 4096);
+            if (forwarder == NULL)
+                return PCPS4_PE_ERR_TRUNCATED;
+        }
+
+        if (cb(user, name, ordinal, function_rva, forwarder))
+            return PCPS4_PE_OK;
+    }
+
+    return PCPS4_PE_OK;
+}
+
 pcps4_pe_status pcps4_pe_iterate_imports(const pcps4_pe_image *image,
                                          pcps4_pe_import_fn cb, void *user)
 {

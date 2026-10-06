@@ -89,7 +89,7 @@ LDFLAGS := -m elf_x86_64 -pie \
            --eh-frame-hdr \
            -L$(TOOLCHAIN)/lib \
            -lc -lkernel -lc++ -lSceVideoOut \
-           $(if $(PCPS4_ENABLE_GNM),-lSceGnmDriver,) \\
+           $(if $(PCPS4_ENABLE_GNM),-lSceGnmDriver,) \
            -lScePad -lSceUserService \
            $(if $(filter 1,$(PCPS4_ENABLE_OPENGNM)),-L$(PCPS4_OPENGNM_DIR) -lopengnm,) \
            $(TOOLCHAIN)/lib/crt1.o
@@ -150,12 +150,12 @@ $(GPU_OBJ): compat/pcps4_gpu.c compat/pcps4_gpu.h compat/pcps4_gfx.h
 	$(CC) $(CFLAGS) -o "$@" "$<"
 
 $(D3D11_OBJ): compat/pcps4_d3d11.cpp compat/pcps4_d3d11.h compat/pcps4_gpu.h compat/pcps4_shader.h
+	@mkdir -p "$(dir $@)"
+	$(CXX) $(CXXFLAGS) -o "$@" "$<"
 
 $(INTDIR)/pcps4_xinput.o: compat/pcps4_xinput.c compat/pcps4_xinput.h compat/pcps4_compat.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
-	@mkdir -p "$(dir $@)"
-	$(CXX) $(CXXFLAGS) -o "$@" "$<"
 
 $(SHADER_OBJ): compat/pcps4_shader.c compat/pcps4_shader.h
 	@mkdir -p "$(dir $@)"

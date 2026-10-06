@@ -137,6 +137,15 @@ pcps4_pe_status pcps4_pe_map_image(const pcps4_pe_image *image,
 
 #define PCPS4_PE_MAX_RESOLVER_SYMBOLS 512
 
+typedef struct pcps4_pe_symbol {
+    char     dll[32];
+    char     name[64];
+    uint16_t ordinal;
+    uint8_t  by_ordinal;
+    uint8_t  reserved;
+    void    *fn;
+} pcps4_pe_symbol;
+
 typedef void *(*pcps4_pe_resolver_fallback_fn)(
     void *user,
     const char *dll,

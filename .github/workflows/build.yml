@@ -31,35 +31,27 @@ jobs:
 
       - name: Prepare PS4 graphics stack
         run: |
-          mkdir -p "$GITHUB_WORKSPACE/external/ps4-graphics"
-          git clone --depth 1 https://github.com/PS4-OpenGNM/opengnm.git             "$GITHUB_WORKSPACE/external/ps4-graphics/opengnm"
-          git clone --depth 1 https://github.com/PS4-OpenGNM/opengnm-psbc.git             "$GITHUB_WORKSPACE/external/ps4-graphics/opengnm-psbc"
-          git clone --depth 1 https://github.com/doitsujin/dxbc-spirv.git             "$GITHUB_WORKSPACE/external/ps4-graphics/dxbc-spirv"
-          git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git             "$GITHUB_WORKSPACE/external/ps4-graphics/Vulkan-Headers"
-          git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git             "$GITHUB_WORKSPACE/external/ps4-graphics/SPIRV-Headers"
+          mkdir -p "$GITHUB_WORKSPACE/external"
+          git clone --recursive --depth 1 https://github.com/PS4-OpenGNM/opengnm-stack.git "$GITHUB_WORKSPACE/external/ps4-graphics"
+          git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git "$GITHUB_WORKSPACE/external/ps4-graphics/Vulkan-Headers"
+          git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git "$GITHUB_WORKSPACE/external/ps4-graphics/SPIRV-Headers"
 
           cd "$GITHUB_WORKSPACE/external/ps4-graphics/opengnm"
           cp config.orbis.mak config.mak
           make CC=clang AR=ar -j2
 
-          cd "$GITHUB_WORKSPACE/external/ps4-graphics/dxbc-spirv"
+          cd "$GITHUB_WORKSPACE/external/ps4-graphics/opengnm-psbc"
+          make generated
+          make -j2
+          export OO_PS4_TOOLCHAIN="$GITHUB_WORKSPACE/toolchain"
+          make -f Makefile.orbis -j2
+
+          cd "$GITHUB_WORKSPACE/external/ps4-graphics"
+          git clone --depth 1 https://github.com/doitsujin/dxbc-spirv.git dxbc-spirv
+          cd dxbc-spirv
           git submodule update --init --recursive
           meson setup builddir -Denable_tools=true
           ninja -C builddir
-
-          cd "$GITHUB_WORKSPACE/external/ps4-graphics/opengnm-psbc"
-          cp config.orbis.mak config.mak
-          python3 src/util/format/u_format_table.py --enums src/util/format/u_format.yaml > src/util/format/u_format_gen.h
-          python3 src/util/format/u_format_table.py --header src/util/format/u_format.yaml > src/util/format/u_format_pack.h
-          python3 src/util/format/u_format_table.py src/util/format/u_format.yaml > src/util/format/u_format_table.c
-          make -j2
-          make -f Makefile.orbis -j2
-
-      - name: Build PS4 smoke shaders
-        run: |
-          python3 tools/pcps4_shader_pipeline.py             --kind glsl             --stage vertex             --input pc_source/shaders/tri.vert.glsl             --output build/package/assets/shaders/tri.vert.sb             --psbc external/ps4-graphics/opengnm-psbc/opengnm-psbc
-          python3 tools/pcps4_shader_pipeline.py             --kind glsl             --stage fragment             --input pc_source/shaders/tri.frag.glsl             --output build/package/assets/shaders/tri.frag.sb             --psbc external/ps4-graphics/opengnm-psbc/opengnm-psbc
-
       - name: Test translation layer
         run: make test
 

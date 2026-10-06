@@ -170,7 +170,7 @@ $(GP4): $(SFO) $(PACKAGE_EBOOT)
 	cd "$(PACKAGE_ROOT)" && "$(CREATE_GP4)" \
 	    -out "$(notdir $@)" \
 	    --content-id="$(CONTENT_ID)" \
-	    --files "eboot.bin sce_sys/param.sfo"
+	    --files "$(PACKAGE_FILES)"
 
 $(PKG): $(GP4)
 	@test -x "$(PKGTOOL)" || (echo "ERROR: $(PKGTOOL) not found."; exit 1)

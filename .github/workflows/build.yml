@@ -48,6 +48,7 @@ jobs:
           ninja -C builddir
 
           cd "$GITHUB_WORKSPACE/external/ps4-graphics/opengnm-psbc"
+          cp config.orbis.mak config.mak
           make -j2
           make -f Makefile.orbis -j2
 

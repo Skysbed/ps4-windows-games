@@ -10,9 +10,9 @@ TOOLCHAIN     := $(OO_PS4_TOOLCHAIN)
 PCPS4_ENABLE_OPENGNM ?= 0
 PCPS4_GRAPHICS_ROOT ?= external/ps4-graphics
 PCPS4_OPENGNM_DIR := $(PCPS4_GRAPHICS_ROOT)/opengnm
-GNM_RENDERER_OBJ := $(INTDIR)/pcps4_gnm_renderer.o
 INTDIR        := build
 GENERATED     := $(INTDIR)/generated
+GNM_RENDERER_OBJ := $(INTDIR)/pcps4_gnm_renderer.o
 PACKAGE_ROOT  := $(INTDIR)/package
 REPORT        := $(INTDIR)/translation.json
 

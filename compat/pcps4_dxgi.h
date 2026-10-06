@@ -39,6 +39,11 @@ typedef struct PCPS4_DXGI_SWAP_CHAIN_DESC {
 #define PCPS4_DXGI_ERROR_NOT_FOUND    ((HRESULT)0x887A0002L)
 #define PCPS4_DXGI_ERROR_UNSUPPORTED  ((HRESULT)0x887A0004L)
 
+PCPS4_MS_ABI HRESULT pcps4_dxgi_create_device(
+    const void *riid,
+    void **device);
+
+
 PCPS4_MS_ABI HRESULT pcps4_abi_CreateDXGIFactory(
     const void *riid, void **factory);
 

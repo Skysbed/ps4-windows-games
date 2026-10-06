@@ -37,12 +37,20 @@ extern "C" int pcps4_d3d11_game_run(void)
         &feature_level,
         &context);
 
-    if (FAILED(hr) || device == NULL || context == NULL || swap_chain == NULL)
+    if (FAILED(hr) || device == NULL || context == NULL || swap_chain == NULL) {
+        if (context != NULL)
+            context->Release();
+        if (swap_chain != NULL)
+            swap_chain->Release();
+        if (device != NULL)
+            device->Release();
         return -1;
+    }
 
     ID3D11Texture2D *back_buffer = NULL;
     hr = swap_chain->GetBuffer(0, &back_buffer);
     if (FAILED(hr) || back_buffer == NULL) {
+        context->Release();
         swap_chain->Release();
         device->Release();
         return -2;
@@ -52,6 +60,7 @@ extern "C" int pcps4_d3d11_game_run(void)
     hr = device->CreateRenderTargetView(back_buffer, NULL, &rtv);
     if (FAILED(hr) || rtv == NULL) {
         back_buffer->Release();
+        context->Release();
         swap_chain->Release();
         device->Release();
         return -3;
@@ -76,6 +85,7 @@ extern "C" int pcps4_d3d11_game_run(void)
     if (FAILED(hr) || input_layout == NULL) {
         rtv->Release();
         back_buffer->Release();
+        context->Release();
         swap_chain->Release();
         device->Release();
         return -4;
@@ -99,6 +109,7 @@ extern "C" int pcps4_d3d11_game_run(void)
         input_layout->Release();
         rtv->Release();
         back_buffer->Release();
+        context->Release();
         swap_chain->Release();
         device->Release();
         return -5;

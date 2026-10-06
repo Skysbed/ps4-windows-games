@@ -6,6 +6,43 @@
 #include <string.h>
 
 
+
+static int map_dxgi_texture_format(
+    DXGI_FORMAT format,
+    pcps4_gpu_format_t *out)
+{
+    if (out == NULL)
+        return 0;
+
+    switch (format) {
+        case DXGI_FORMAT_R8G8B8A8_UNORM:
+            *out = PCPS4_GPU_FORMAT_RGBA8_UNORM;
+            return 1;
+
+        case DXGI_FORMAT_B8G8R8A8_UNORM:
+            *out = PCPS4_GPU_FORMAT_BGRA8_UNORM;
+            return 1;
+
+        default:
+            return 0;
+    }
+}
+
+static DXGI_FORMAT map_gpu_texture_format(
+    pcps4_gpu_format_t format)
+{
+    switch (format) {
+        case PCPS4_GPU_FORMAT_RGBA8_UNORM:
+            return DXGI_FORMAT_R8G8B8A8_UNORM;
+
+        case PCPS4_GPU_FORMAT_BGRA8_UNORM:
+            return DXGI_FORMAT_B8G8R8A8_UNORM;
+
+        default:
+            return DXGI_FORMAT_UNKNOWN;
+    }
+}
+
 static int is_dxbc_blob(
     const void *data,
     size_t size)
@@ -159,7 +196,7 @@ void ID3D11Texture2D::GetDesc(
     desc->Height = native_desc.height;
     desc->MipLevels = native_desc.mip_levels;
     desc->ArraySize = 1;
-    desc->Format = (DXGI_FORMAT)native_desc.format;
+    desc->Format = map_gpu_texture_format(native_desc.format);
     desc->SampleDesc.Count = 1;
     desc->Usage = D3D11_USAGE_DEFAULT;
     desc->BindFlags = native_desc.bind_flags;
@@ -590,7 +627,10 @@ HRESULT ID3D11Device::CreateTexture2D(
     desc.width = pDesc->Width;
     desc.height = pDesc->Height;
     desc.mip_levels = pDesc->MipLevels;
-    desc.format = (pcps4_gpu_format_t)pDesc->Format;
+    if (!map_dxgi_texture_format(
+            pDesc->Format,
+            &desc.format))
+        return E_INVALIDARG;
     desc.bind_flags = pDesc->BindFlags;
 
     const void *initial =

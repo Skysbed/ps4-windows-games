@@ -959,6 +959,21 @@ static int pcps4_decode_float3(
     return 1;
 }
 
+static int pcps4_decode_float2(
+    const uint8_t *vertex,
+    uint32_t format,
+    float out[2])
+{
+    if (vertex == NULL || out == NULL)
+        return 0;
+
+    if (format != 16u)
+        return 0;
+
+    memcpy(out, vertex, sizeof(float) * 2u);
+    return 1;
+}
+
 static int pcps4_decode_float4(
     const uint8_t *vertex,
     uint32_t format,
@@ -987,6 +1002,79 @@ static float pcps4_blend_factor(
     }
 }
 
+static float pcps4_address_coord(
+    float value,
+    uint32_t mode)
+{
+    if (mode == 1u) { /* WRAP */
+        int whole = (int)value;
+        value -= (float)whole;
+        if (value < 0.0f) value += 1.0f;
+        return value;
+    }
+
+    if (mode == 2u) { /* MIRROR */
+        int whole = (int)value;
+        float frac = value - (float)whole;
+        if (frac < 0.0f) frac += 1.0f;
+        if (whole & 1) frac = 1.0f - frac;
+        return frac;
+    }
+
+    if (value < 0.0f) return 0.0f;
+    if (value > 1.0f) return 1.0f;
+    return value; /* CLAMP/BORDER fallback */
+}
+
+static void pcps4_sample_texture(
+    pcps4_gpu_context_t *context,
+    float u,
+    float v,
+    float out[4])
+{
+    pcps4_gpu_texture_t *texture = NULL;
+    uint32_t address_u = 3u;
+    uint32_t address_v = 3u;
+
+    if (out == NULL) return;
+    out[0] = out[1] = out[2] = out[3] = 1.0f;
+
+    if (context == NULL || context->ps_shader_resources[0] == NULL)
+        return;
+
+    texture = context->ps_shader_resources[0];
+    if (!valid_texture(texture) || texture->data == NULL ||
+        (texture->desc.format != PCPS4_GPU_FORMAT_RGBA8_UNORM &&
+         texture->desc.format != PCPS4_GPU_FORMAT_BGRA8_UNORM))
+        return;
+
+    if (context->ps_samplers[0][4] != 0u) {
+        address_u = context->ps_samplers[0][1];
+        address_v = context->ps_samplers[0][2];
+    }
+
+    u = pcps4_address_coord(u, address_u);
+    v = pcps4_address_coord(v, address_v);
+
+    uint32_t x = (uint32_t)(u * (float)texture->desc.width);
+    uint32_t y = (uint32_t)(v * (float)texture->desc.height);
+    if (x >= texture->desc.width) x = texture->desc.width - 1;
+    if (y >= texture->desc.height) y = texture->desc.height - 1;
+
+    const uint8_t *p =
+        texture->data + (size_t)y * texture->row_pitch + (size_t)x * 4u;
+    if (texture->desc.format == PCPS4_GPU_FORMAT_BGRA8_UNORM) {
+        out[2] = p[0] / 255.0f;
+        out[1] = p[1] / 255.0f;
+        out[0] = p[2] / 255.0f;
+    } else {
+        out[0] = p[0] / 255.0f;
+        out[1] = p[1] / 255.0f;
+        out[2] = p[2] / 255.0f;
+    }
+    out[3] = p[3] / 255.0f;
+}
+
 static int pcps4_raster_triangle(
     pcps4_gpu_context_t *context,
     const float p0[3],
@@ -994,7 +1082,10 @@ static int pcps4_raster_triangle(
     const float p1[3],
     const float c1[4],
     const float p2[3],
-    const float c2[4])
+    const float c2[4],
+    const float t0[2],
+    const float t1[2],
+    const float t2[2])
 {
     pcps4_gpu_texture_t *texture;
     float area;
@@ -1072,6 +1163,18 @@ static int pcps4_raster_triangle(
             float sb = c0[2] * a0 + c1[2] * a1 + c2[2] * a2;
             float sa = c0[3] * a0 + c1[3] * a1 + c2[3] * a2;
 
+            if (t0 != NULL && t1 != NULL && t2 != NULL &&
+                context->ps_shader_resources[0] != NULL) {
+                float tex_u = t0[0] * a0 + t1[0] * a1 + t2[0] * a2;
+                float tex_v = t0[1] * a0 + t1[1] * a1 + t2[1] * a2;
+                float texel[4];
+                pcps4_sample_texture(context, tex_u, tex_v, texel);
+                sr *= texel[0];
+                sg *= texel[1];
+                sb *= texel[2];
+                sa *= texel[3];
+            }
+
             if (context->blend_enabled) {
                 uint8_t *row = texture->data + (size_t)y * texture->row_pitch;
                 float dr = row[x * 4u + 0] / 255.0f;
@@ -1106,6 +1209,7 @@ static int pcps4_cpu_draw_trianglelist(
     const uint32_t vertex_offset = context->vertex_offset;
     int position_index = -1;
     int color_index = -1;
+    int texcoord_index = -1;
 
     if (context == NULL ||
         vertex_count < 3 ||
@@ -1132,6 +1236,8 @@ static int pcps4_cpu_draw_trianglelist(
             position_index = (int)i;
         if (layout[i].semantic_kind == 2u && color_index < 0)
             color_index = (int)i;
+        if (layout[i].semantic_kind == 3u && texcoord_index < 0)
+            texcoord_index = (int)i;
     }
 
     if (position_index < 0 || color_index < 0)
@@ -1141,6 +1247,8 @@ static int pcps4_cpu_draw_trianglelist(
         const uint8_t *v[3];
         float p[3][3];
         float c[3][4];
+        float t[3][2];
+        float (*texcoord)[2] = NULL;
 
         for (uint32_t i = 0; i < 3; ++i) {
             size_t index = (size_t)start_vertex + base + i;
@@ -1160,10 +1268,23 @@ static int pcps4_cpu_draw_trianglelist(
                     layout[color_index].format,
                     c[i]))
                 return PCPS4_GPU_ERR_UNSUPPORTED;
+
+            if (texcoord_index >= 0 &&
+                !pcps4_decode_float2(
+                    v[i] + layout[texcoord_index].aligned_byte_offset,
+                    layout[texcoord_index].format,
+                    t[i]))
+                return PCPS4_GPU_ERR_UNSUPPORTED;
         }
 
+        if (texcoord_index >= 0)
+            texcoord = t;
+
         int rc = pcps4_raster_triangle(
-            context, p[0], c[0], p[1], c[1], p[2], c[2]);
+            context, p[0], c[0], p[1], c[1], p[2], c[2],
+            texcoord != NULL ? texcoord[0] : NULL,
+            texcoord != NULL ? texcoord[1] : NULL,
+            texcoord != NULL ? texcoord[2] : NULL);
         if (rc != PCPS4_GPU_OK)
             return rc;
     }

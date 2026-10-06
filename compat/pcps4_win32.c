@@ -9,6 +9,7 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <dirent.h>
 
 #ifndef S_OK
 #define S_OK ((HRESULT)0)
@@ -137,6 +138,187 @@ static int host_path(LPCSTR p,char *o,size_t z){
     if(p[0]=='/'&&(strncmp(p,"/app0/",6)==0||strncmp(p,"/data/",6)==0)){strncpy(o,p,z-1);o[z-1]=0;return 0;}
     if(snprintf(o,z,"/app0/%s",p)<(int)z)return 0; return -1;
 }
+
+#define FIND_MAGIC 0x46494e44u
+typedef struct {
+    uint32_t magic;
+    DIR *dir;
+    char pattern[260];
+} pcps4_find_handle;
+
+typedef struct {
+    DWORD dwFileAttributes;
+    uint64_t ftCreationTime;
+    uint64_t ftLastAccessTime;
+    uint64_t ftLastWriteTime;
+    DWORD nFileSizeHigh;
+    DWORD nFileSizeLow;
+    DWORD dwReserved0;
+    DWORD dwReserved1;
+    CHAR cFileName[260];
+    CHAR cAlternateFileName[14];
+} pcps4_find_data_a;
+
+typedef struct {
+    DWORD dwFileAttributes;
+    uint64_t ftCreationTime;
+    uint64_t ftLastAccessTime;
+    uint64_t ftLastWriteTime;
+    DWORD nFileSizeHigh;
+    DWORD nFileSizeLow;
+    DWORD dwReserved0;
+    DWORD dwReserved1;
+    WCHAR cFileName[260];
+    WCHAR cAlternateFileName[14];
+} pcps4_find_data_w;
+
+static int find_match(const char *pattern, const char *name)
+{
+    while (*pattern) {
+        if (*pattern == '*') {
+            ++pattern;
+            if (!*pattern) return 1;
+            while (*name) {
+                if (find_match(pattern, name))
+                    return 1;
+                ++name;
+            }
+            return 0;
+        }
+        if (!*name) return 0;
+        if (*pattern != '?' &&
+            ((*pattern >= 'A' && *pattern <= 'Z')
+             ? (char)(*pattern - 'A' + 'a')
+             : *pattern) !=
+            ((*name >= 'A' && *name <= 'Z')
+             ? (char)(*name - 'A' + 'a')
+             : *name))
+            return 0;
+        ++pattern;
+        ++name;
+    }
+    return *name == '\0';
+}
+
+static void find_fill(void *out, const char *name, const struct stat *st)
+{
+    pcps4_find_data_a d;
+    memset(&d,0,sizeof(d));
+    d.dwFileAttributes = (st && S_ISDIR(st->st_mode)) ? 0x10u : 0x80u;
+    if (st) {
+        uint64_t size=(uint64_t)st->st_size;
+        d.nFileSizeHigh=(DWORD)(size>>32);
+        d.nFileSizeLow=(DWORD)size;
+    }
+    strncpy(d.cFileName,name,sizeof(d.cFileName)-1);
+    memcpy(out,&d,sizeof(d));
+}
+
+static int split_find_path(LPCSTR path, char *directory, size_t dir_size,
+                           char *pattern, size_t pattern_size)
+{
+    char host[1024], *slash;
+    if (host_path(path,host,sizeof(host))!=0) return -1;
+    slash=strrchr(host,'/');
+    if(!slash) return -1;
+    *slash='\0';
+    strncpy(directory,host,dir_size-1); directory[dir_size-1]='\0';
+    strncpy(pattern,slash+1,pattern_size-1); pattern[pattern_size-1]='\0';
+    return 0;
+}
+
+static int find_next_a(pcps4_find_handle *h, void *out)
+{
+    struct dirent *ent;
+    if(!h||h->magic!=FIND_MAGIC||!out)return 0;
+    while((ent=readdir(h->dir))!=NULL){
+        char full[1024];
+        struct stat st;
+        if(!find_match(h->pattern,ent->d_name))continue;
+        snprintf(full,sizeof(full),"%s/%s", ".", ent->d_name);
+        /* directory already scoped by opendir; use entry metadata where possible. */
+        memset(&st,0,sizeof(st));
+        if(fstatat(dirfd(h->dir),ent->d_name,&st,0)!=0)
+            continue;
+        find_fill(out,ent->d_name,&st);
+        return 1;
+    }
+    return 0;
+}
+
+PCPS4_MS_ABI HANDLE pcps4_abi_FindFirstFileA(LPCSTR path, void *out)
+{
+    char directory[1024], pattern[260];
+    pcps4_find_handle *h;
+    if(!out||split_find_path(path,directory,sizeof(directory),pattern,sizeof(pattern))!=0)
+        return INVALID_HANDLE_VALUE;
+    h=calloc(1,sizeof(*h)); if(!h)return INVALID_HANDLE_VALUE;
+    h->dir=opendir(directory);
+    if(!h->dir){free(h);return INVALID_HANDLE_VALUE;}
+    h->magic=FIND_MAGIC;
+    strncpy(h->pattern,pattern,sizeof(h->pattern)-1);
+    if(!find_next_a(h,out)){
+        closedir(h->dir); free(h); return INVALID_HANDLE_VALUE;
+    }
+    return h;
+}
+
+PCPS4_MS_ABI HANDLE pcps4_abi_FindFirstFileW(LPCWSTR path, void *out)
+{
+    char utf8[1024];
+    if(pcps4_wide_to_utf8(path,utf8,sizeof(utf8))!=0)return INVALID_HANDLE_VALUE;
+    pcps4_find_data_a temp;
+    HANDLE h=pcps4_abi_FindFirstFileA(utf8,&temp);
+    if(h==INVALID_HANDLE_VALUE)return h;
+    pcps4_find_handle *fh=(pcps4_find_handle*)h;
+    pcps4_find_data_w w; memset(&w,0,sizeof(w));
+    w.dwFileAttributes=temp.dwFileAttributes;
+    w.ftCreationTime=temp.ftCreationTime; w.ftLastAccessTime=temp.ftLastAccessTime;
+    w.ftLastWriteTime=temp.ftLastWriteTime; w.nFileSizeHigh=temp.nFileSizeHigh; w.nFileSizeLow=temp.nFileSizeLow;
+    for(size_t i=0;i<sizeof(w.cFileName)/sizeof(w.cFileName[0])-1&&temp.cFileName[i];++i)w.cFileName[i]=(WCHAR)(unsigned char)temp.cFileName[i];
+    memcpy(out,&w,sizeof(w));
+    return fh;
+}
+
+PCPS4_MS_ABI BOOL pcps4_abi_FindNextFileA(HANDLE handle, void *out)
+{
+    return find_next_a((pcps4_find_handle*)handle,out) ? TRUE : FALSE;
+}
+PCPS4_MS_ABI BOOL pcps4_abi_FindNextFileW(HANDLE handle, void *out)
+{
+    pcps4_find_data_a a;
+    if(!find_next_a((pcps4_find_handle*)handle,&a))return FALSE;
+    pcps4_find_data_w w; memset(&w,0,sizeof(w));
+    w.dwFileAttributes=a.dwFileAttributes; w.ftCreationTime=a.ftCreationTime; w.ftLastAccessTime=a.ftLastAccessTime;
+    w.ftLastWriteTime=a.ftLastWriteTime; w.nFileSizeHigh=a.nFileSizeHigh; w.nFileSizeLow=a.nFileSizeLow;
+    for(size_t i=0;i<259&&a.cFileName[i];++i)w.cFileName[i]=(WCHAR)(unsigned char)a.cFileName[i];
+    memcpy(out,&w,sizeof(w)); return TRUE;
+}
+PCPS4_MS_ABI BOOL pcps4_abi_FindClose(HANDLE handle)
+{
+    pcps4_find_handle *h=(pcps4_find_handle*)handle;
+    if(!h||h->magic!=FIND_MAGIC)return FALSE;
+    h->magic=0; if(h->dir)closedir(h->dir); free(h); return TRUE;
+}
+
+PCPS4_MS_ABI BOOL pcps4_abi_GetFileAttributesExA(LPCSTR path,DWORD info_level,void*out)
+{
+    struct stat st; char host[1024];
+    if(info_level!=0||!out||host_path(path,host,sizeof(host))!=0||stat(host,&st)!=0)return FALSE;
+    pcps4_find_data_a d; memset(&d,0,sizeof(d));
+    d.dwFileAttributes=S_ISDIR(st.st_mode)?0x10u:0x80u;
+    d.nFileSizeHigh=(DWORD)((uint64_t)st.st_size>>32); d.nFileSizeLow=(DWORD)st.st_size;
+    memcpy(out,&d,sizeof(d)); return TRUE;
+}
+PCPS4_MS_ABI BOOL pcps4_abi_GetFileAttributesExW(LPCWSTR path,DWORD level,void*out)
+{
+    char u[1024]; if(pcps4_wide_to_utf8(path,u,sizeof(u))!=0)return FALSE;
+    return pcps4_abi_GetFileAttributesExA(u,level,out);
+}
+PCPS4_MS_ABI DWORD pcps4_abi_GetLogicalDrives(void){return 1u;}
+PCPS4_MS_ABI UINT pcps4_abi_GetDriveTypeA(LPCSTR root){(void)root;return 3u;}
+PCPS4_MS_ABI UINT pcps4_abi_GetDriveTypeW(LPCWSTR root){(void)root;return 3u;}
+
 PCPS4_MS_ABI DWORD pcps4_abi_GetFileAttributesA(LPCSTR p){char h[1024];struct stat s;if(host_path(p,h,sizeof(h))!=0||stat(h,&s)!=0)return 0xffffffffu;return S_ISDIR(s.st_mode)?0x10u:0x80u;}
 PCPS4_MS_ABI DWORD pcps4_abi_GetFileAttributesW(LPCWSTR p){char u[1024];if(pcps4_wide_to_utf8(p,u,sizeof(u))!=0)return 0xffffffffu;return pcps4_abi_GetFileAttributesA(u);}
 

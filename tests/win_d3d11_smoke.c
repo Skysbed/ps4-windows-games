@@ -52,6 +52,39 @@ void WINAPI WinMainCRTStartup(void)
         FreeLibrary(probe_module);
     }
 
+    /*
+     * Exercise the normal DXGI discovery path used by D3D11 applications:
+     * create a DXGI 1.1 factory, enumerate adapter zero, and read its
+     * descriptor before creating the D3D11 device.
+     */
+    {
+        IDXGIFactory1 *factory = 0;
+        IDXGIAdapter1 *adapter = 0;
+        DXGI_ADAPTER_DESC1 adapter_desc;
+
+        hr = CreateDXGIFactory1(
+            &IID_IDXGIFactory1,
+            (void **)&factory);
+        if (FAILED(hr) || !factory)
+            ExitProcess(7);
+
+        hr = factory->lpVtbl->EnumAdapters1(
+            factory,
+            0,
+            &adapter);
+        if (FAILED(hr) || !adapter)
+            ExitProcess(8);
+
+        hr = adapter->lpVtbl->GetDesc1(
+            adapter,
+            &adapter_desc);
+        if (FAILED(hr))
+            ExitProcess(9);
+
+        adapter->lpVtbl->Release(adapter);
+        factory->lpVtbl->Release(factory);
+    }
+
     hr = D3D11CreateDeviceAndSwapChain(
         0,
         D3D_DRIVER_TYPE_HARDWARE,

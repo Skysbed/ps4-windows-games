@@ -61,7 +61,7 @@ jobs:
           set -euxo pipefail
           rm -rf build/win_d3d11_smoke.exe
           mkdir -p build
-          x86_64-w64-mingw32-gcc             -std=c11             -O2             -ffreestanding             -fno-stack-protector             -fno-asynchronous-unwind-tables             -nostdlib             -Wl,--entry=WinMainCRTStartup             -Wl,--subsystem,windows             -o build/win_d3d11_smoke.exe             tests/win_d3d11_smoke.c             -ld3d11 -lkernel32
+          x86_64-w64-mingw32-gcc             -std=c11             -O2             -ffreestanding             -fno-stack-protector             -fno-asynchronous-unwind-tables             -nostdlib             -Wl,--entry=WinMainCRTStartup             -Wl,--subsystem,windows -Wl,--section-alignment,0x4000 -Wl,--file-alignment,0x200             -o build/win_d3d11_smoke.exe             tests/win_d3d11_smoke.c             -ld3d11 -lkernel32
           test -s build/win_d3d11_smoke.exe
           file build/win_d3d11_smoke.exe
           x86_64-w64-mingw32-objdump -p build/win_d3d11_smoke.exe |

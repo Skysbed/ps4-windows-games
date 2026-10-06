@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #define PCPS4_CRASH_PATH "/data/pcps4_crash.txt"
+#define PCPS4_TRACE_PATH "/data/pcps4_trace.txt"
 
 static volatile sig_atomic_t pcps4_fault_seen = 0;
 
@@ -20,10 +21,28 @@ static volatile sig_atomic_t pcps4_fault_seen = 0;
  */
 static const char *volatile pcps4_stage = "startup";
 
+static int pcps4_trace_fd = -2; /* -2 = not opened yet, -1 = unavailable */
+
+static void fd_write_str(int fd, const char *s);
+
 void pcps4_fault_stage(const char *str)
 {
-    if (str != NULL)
-        pcps4_stage = str;
+    if (str == NULL)
+        return;
+    pcps4_stage = str;
+
+    /*
+     * Also append each stage to a trace file with a direct write(): it hits
+     * the filesystem immediately, so even a hard kill (no signal delivered)
+     * leaves the last stage reached.
+     */
+    if (pcps4_trace_fd == -2)
+        pcps4_trace_fd = open(PCPS4_TRACE_PATH,
+                              O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (pcps4_trace_fd >= 0) {
+        fd_write_str(pcps4_trace_fd, str);
+        fd_write_str(pcps4_trace_fd, "\n");
+    }
 }
 
 /* Async-signal-safe helpers: no stdio, no allocation. */

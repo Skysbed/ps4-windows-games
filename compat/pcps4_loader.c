@@ -14,6 +14,7 @@
  */
 
 #include "pcps4_loader.h"
+#include "pcps4_status.h"
 #include "pcps4_fault.h"  /* pcps4_fault_stage: crash breadcrumb */
 
 #include <stdio.h>
@@ -164,9 +165,9 @@ static int pcps4_report_unresolved(
     (void)user;
 
     if (by_name)
-        printf("[pcps4] unresolved import: %s!%s\n", dll, name);
+        pcps4_status_log("[pcps4] unresolved import: %s!%s", dll, name);
     else
-        printf("[pcps4] unresolved import: %s!#%u\n",
+        pcps4_status_log("[pcps4] unresolved import: %s!#%u",
                dll, (unsigned)ordinal);
 
     return 0;
@@ -302,7 +303,7 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
     /* Parse once up front just to learn how much memory to reserve. */
     prc = pcps4_pe_parse(exe, exe_size, &probe);
     if (prc != PCPS4_PE_OK) {
-        printf("[pcps4] load parse failed: %s\n", pcps4_pe_status_str(prc));
+        pcps4_status_log("[pcps4] load parse failed: %s", pcps4_pe_status_str(prc));
         return PCPS4_LOADER_ERR_LOAD;
     }
 
@@ -314,7 +315,7 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
     krc = sceKernelMmap(NULL, map_size, PROT_READ | PROT_WRITE,
                         MAP_PRIVATE | MAP_ANON, -1, 0, &mem);
     if (krc != 0 || mem == NULL) {
-        printf("[pcps4] mmap failed: 0x%x\n", (unsigned)krc);
+        pcps4_status_log("[pcps4] mmap failed: 0x%x", (unsigned)krc);
         return PCPS4_LOADER_ERR_ALLOC;
     }
 
@@ -323,12 +324,12 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
                         (uint64_t)(uintptr_t)mem, resolver,
                         &image, &resolved, &unresolved);
     if (prc != PCPS4_PE_OK) {
-        printf("[pcps4] load failed: %s\n", pcps4_pe_status_str(prc));
+        pcps4_status_log("[pcps4] load failed: %s", pcps4_pe_status_str(prc));
         sceKernelMunmap(mem, map_size);
         return PCPS4_LOADER_ERR_LOAD;
     }
 
-    printf("[pcps4] imports resolved=%u unresolved=%u\n",
+    pcps4_status_log("[pcps4] imports resolved=%u unresolved=%u",
            (unsigned)resolved, (unsigned)unresolved);
 
     if (unresolved != 0) {
@@ -336,15 +337,15 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
             &image, resolver, pcps4_report_unresolved, NULL);
 
         /* Never jump into code that will call a missing API. */
-        printf("[pcps4] refusing to run: %u unresolved import(s)\n",
+        pcps4_status_log("[pcps4] refusing to run: %u unresolved import(s)",
                (unsigned)unresolved);
         sceKernelMunmap(mem, map_size);
         return PCPS4_LOADER_ERR_UNRESOLVED;
     }
 
         if (!pcps4_entry_is_executable(&image)) {
-        printf("[pcps4] refusing to run: PE entry point is not in an "
-               "executable section\n");
+        pcps4_status_log("[pcps4] refusing to run: PE entry point is not in an "
+               "executable section");
         sceKernelMunmap(mem, map_size);
         return PCPS4_LOADER_ERR_PROTECT;
     }
@@ -355,17 +356,19 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
      * is often smaller than the PS4 page size, so permissions are calculated
      * per PS4 page and unioned when sections share a page.
      */
+    pcps4_status_log("[pcps4] loader: applying section protections (image=%p size=0x%zx)", mem, map_size);
     if (pcps4_apply_image_protections(
             &image, (uint8_t *)mem, map_size) != 0) {
-        printf("[pcps4] mprotect(section permissions) failed "
-               "(console may not permit executable memory)\n");
+        pcps4_status_log("[pcps4] mprotect(section permissions) failed "
+               "(console may not permit executable memory)");
         sceKernelMunmap(mem, map_size);
         return PCPS4_LOADER_ERR_PROTECT;
     }
 
+    pcps4_status_log("[pcps4] loader: protections ok, running TLS callbacks");
     if (pcps4_run_tls_callbacks(
             &image, (uint8_t *)mem, map_size) != 0) {
-        printf("[pcps4] PE TLS callback table is invalid\n");
+        pcps4_status_log("[pcps4] PE TLS callback table is invalid");
         sceKernelMunmap(mem, map_size);
         return PCPS4_LOADER_ERR_LOAD;
     }
@@ -373,14 +376,14 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
     entry = (pcps4_entry_fn)(uintptr_t)
             ((uint8_t *)mem + image.entry_point_rva);
 
-    printf("[pcps4] entering binary at %p\n", (void *)entry);
+    pcps4_status_log("[pcps4] entering binary at %p", (void *)entry);
     pcps4_fault_stage("loader: PE entry (before WinMainCRTStartup)");
     {
         int ret = entry();
         pcps4_fault_stage("loader: PE returned");
         if (out_entry_ret)
             *out_entry_ret = (int32_t)ret;
-        printf("[pcps4] binary returned %d (0x%x)\n", ret, (unsigned)ret);
+        pcps4_status_log("[pcps4] binary returned %d (0x%x)", ret, (unsigned)ret);
     }
 
     return PCPS4_LOADER_OK;
@@ -457,19 +460,19 @@ int pcps4_pe_exec_smoke(void)
     exe[TEXT_RAW + 4] = 0x00;
     exe[TEXT_RAW + 5] = 0xC3;
 
-    printf("[pcps4] PE exec smoke: loading self-contained test binary...\n");
+    pcps4_status_log("[pcps4] PE exec smoke: loading self-contained test binary...");
     rc = pcps4_loader_run(exe, sizeof(exe), NULL, &ret);
     if (rc != PCPS4_LOADER_OK) {
-        printf("[pcps4] PE exec smoke FAILED: %s\n",
+        pcps4_status_log("[pcps4] PE exec smoke FAILED: %s",
                pcps4_loader_status_str(rc));
         return 1;
     }
     if (ret != 0x1234) {
-        printf("[pcps4] PE exec smoke FAILED: got 0x%x, expected 0x1234\n",
+        pcps4_status_log("[pcps4] PE exec smoke FAILED: got 0x%x, expected 0x1234",
                (unsigned)ret);
         return 1;
     }
-    printf("[pcps4] PE exec smoke PASSED: executed PE returned 0x1234\n");
+    pcps4_status_log("[pcps4] PE exec smoke PASSED: executed PE returned 0x1234");
     return 0;
 }
 

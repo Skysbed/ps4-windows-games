@@ -592,6 +592,127 @@ void *pcps4_pe_resolver_lookup_ordinal(
     return NULL;
 }
 
+static const char *pe_mapped_cstr(
+    const uint8_t *mapped,
+    size_t mapped_size,
+    uint32_t off,
+    size_t max)
+{
+    size_t i;
+
+    if (mapped == NULL || off >= mapped_size)
+        return NULL;
+
+    for (i = 0; i < max && (size_t)off + i < mapped_size; ++i) {
+        if (mapped[off + i] == '\0')
+            return (const char *)(mapped + off);
+    }
+
+    return NULL;
+}
+
+void *pcps4_pe_lookup_export(
+    const pcps4_pe_image *image,
+    const uint8_t *mapped,
+    size_t mapped_size,
+    const char *name,
+    uint16_t ordinal)
+{
+    uint32_t export_rva;
+    uint32_t export_size;
+    uint32_t base;
+    uint32_t functions;
+    uint32_t names;
+    uint32_t eat_rva;
+    uint32_t name_table_rva;
+    uint32_t ordinal_table_rva;
+    uint32_t function_index = UINT32_MAX;
+
+    if (image == NULL || mapped == NULL || mapped_size == 0)
+        return NULL;
+
+    export_rva = image->directory_rva[PCPS4_PE_DIRECTORY_EXPORT];
+    export_size = image->directory_size[PCPS4_PE_DIRECTORY_EXPORT];
+
+    if (export_rva == 0 || export_size < 40u ||
+        (size_t)export_rva + export_size > mapped_size)
+        return NULL;
+
+    if (!pe_read_u32(mapped, mapped_size, (size_t)export_rva + 16u, &base) ||
+        !pe_read_u32(mapped, mapped_size, (size_t)export_rva + 20u, &functions) ||
+        !pe_read_u32(mapped, mapped_size, (size_t)export_rva + 24u, &names) ||
+        !pe_read_u32(mapped, mapped_size, (size_t)export_rva + 28u, &eat_rva) ||
+        !pe_read_u32(mapped, mapped_size, (size_t)export_rva + 32u, &name_table_rva) ||
+        !pe_read_u32(mapped, mapped_size, (size_t)export_rva + 36u, &ordinal_table_rva))
+        return NULL;
+
+    if (functions == 0 || eat_rva == 0)
+        return NULL;
+
+    if (name != NULL) {
+        if (name_table_rva == 0 || ordinal_table_rva == 0)
+            return NULL;
+
+        for (uint32_t i = 0; i < names; ++i) {
+            uint32_t name_rva = 0;
+            uint16_t name_index = 0;
+            const char *export_name;
+
+            if (!pe_read_u32(
+                    mapped,
+                    mapped_size,
+                    (size_t)name_table_rva + (size_t)i * 4u,
+                    &name_rva) ||
+                !pe_read_u16(
+                    mapped,
+                    mapped_size,
+                    (size_t)ordinal_table_rva + (size_t)i * 2u,
+                    &name_index))
+                return NULL;
+
+            export_name = pe_mapped_cstr(
+                mapped, mapped_size, name_rva, 1024);
+            if (export_name == NULL)
+                return NULL;
+
+            if (strcmp(export_name, name) == 0) {
+                function_index = name_index;
+                break;
+            }
+        }
+    } else {
+        if ((uint32_t)ordinal < base ||
+            (uint32_t)ordinal - base >= functions)
+            return NULL;
+        function_index = (uint32_t)ordinal - base;
+    }
+
+    if (function_index >= functions)
+        return NULL;
+
+    uint32_t function_rva = 0;
+    if (!pe_read_u32(
+            mapped,
+            mapped_size,
+            (size_t)eat_rva + (size_t)function_index * 4u,
+            &function_rva) ||
+        function_rva == 0)
+        return NULL;
+
+    /*
+     * PE marks an export as forwarded when its EAT RVA falls inside the
+     * export-directory range. Such a value is a string, not code.
+     */
+    if (function_rva >= export_rva &&
+        (uint64_t)function_rva < (uint64_t)export_rva + export_size)
+        return NULL;
+
+    if ((size_t)function_rva >= mapped_size)
+        return NULL;
+
+    return (void *)(mapped + function_rva);
+}
+
 static void pe_write_u64(uint8_t *b, size_t off, uint64_t v)
 {
     b[off + 0] = (uint8_t)(v & 0xFF);
@@ -673,6 +794,10 @@ pcps4_pe_status pcps4_pe_bind_imports(const pcps4_pe_image *image,
                 uint16_t ordinal = (uint16_t)(entry & 0xFFFFu);
                 fn = pcps4_pe_resolver_lookup_ordinal(
                     resolver, dll, ordinal);
+                if (fn == NULL && resolver->fallback != NULL)
+                    fn = resolver->fallback(
+                        resolver->fallback_user,
+                        dll, 0, NULL, ordinal);
             } else {
                 uint32_t hn_off;
                 const char *name;
@@ -683,6 +808,10 @@ pcps4_pe_status pcps4_pe_bind_imports(const pcps4_pe_image *image,
                 if (name == NULL)
                     return PCPS4_PE_ERR_TRUNCATED;
                 fn = pcps4_pe_resolver_lookup(resolver, dll, name);
+                if (fn == NULL && resolver->fallback != NULL)
+                    fn = resolver->fallback(
+                        resolver->fallback_user,
+                        dll, 1, name, 0);
             }
 
             pe_write_u64(mapped, iat_slot_rva, (uint64_t)(uintptr_t)fn);
@@ -766,6 +895,10 @@ pcps4_pe_status pcps4_pe_report_unresolved_imports(
                 uint16_t ordinal = (uint16_t)(entry & 0xFFFFu);
                 fn = pcps4_pe_resolver_lookup_ordinal(
                     resolver, dll, ordinal);
+                if (fn == NULL && resolver->fallback != NULL)
+                    fn = resolver->fallback(
+                        resolver->fallback_user,
+                        dll, 0, NULL, ordinal);
                 if (fn == NULL &&
                     cb(user, dll, 0, NULL, ordinal) != 0)
                     return PCPS4_PE_OK;
@@ -782,6 +915,10 @@ pcps4_pe_status pcps4_pe_report_unresolved_imports(
                     return PCPS4_PE_ERR_TRUNCATED;
 
                 fn = pcps4_pe_resolver_lookup(resolver, dll, name);
+                if (fn == NULL && resolver->fallback != NULL)
+                    fn = resolver->fallback(
+                        resolver->fallback_user,
+                        dll, 1, name, 0);
                 if (fn == NULL &&
                     cb(user, dll, 1, name, 0) != 0)
                     return PCPS4_PE_OK;

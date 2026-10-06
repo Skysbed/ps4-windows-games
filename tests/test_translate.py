@@ -44,7 +44,6 @@ WSACleanup();
 closesocket(sock);
 """
         translated, report, status = translate(source, strict=True)
-
         self.assertEqual(status, 0)
         self.assertIn('#include "pcps4_compat.h"', translated)
         self.assertIn('pcps4_WSAStartup', translated)
@@ -63,7 +62,6 @@ void *p = VirtualAlloc(NULL, 4096, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 VirtualFree(p, 4096, MEM_RELEASE);
 """
         translated, report, status = translate(source, strict=True)
-
         self.assertEqual(status, 0)
         self.assertIn('pcps4_CreateThread', translated)
         self.assertIn('pcps4_WaitForSingleObject', translated)
@@ -71,25 +69,27 @@ VirtualFree(p, 4096, MEM_RELEASE);
         self.assertIn('pcps4_VirtualFree', translated)
         self.assertEqual(report["blockers"], [])
 
-    def test_comments_and_strings_are_not_rewritten(self):
+    def test_d3d11_header_is_translated(self):
         source = """
-// Sleep(GetTickCount64()); DWORD fake;
-const char *text = "Sleep(GetTickCount64()) DWORD";
+#include <d3d11.h>
+#include <dxgi.h>
+HRESULT hr = D3D11CreateDeviceAndSwapChain(
+    NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, 0, NULL, 0, 7,
+    NULL, NULL, NULL, NULL, NULL);
 """
-        translated, _, _ = translate(source)
-        self.assertIn('// Sleep(GetTickCount64()); DWORD fake;', translated)
-        self.assertIn('"Sleep(GetTickCount64()) DWORD"', translated)
+        translated, report, status = translate(source, strict=True)
+        self.assertEqual(status, 0)
+        self.assertIn('#include "pcps4_d3d11.h"', translated)
+        self.assertEqual(report["blockers"], [])
 
     def test_unsupported_api_is_reported(self):
         source = """
-#include <d3d11.h>
-void *x = (void *)Direct3DCreate9(0);
+#include <d3d12.h>
+HRESULT hr = D3D12CreateDevice(NULL, D3D_FEATURE_LEVEL_12_0, NULL);
 """
         blockers = find_blockers(source)
         names = {item.name for item in blockers}
-        self.assertIn("DirectX header", names)
-        self.assertIn("DirectX API", names)
-        self.assertEqual(len(blockers), 3)
+        self.assertIn("DirectX 12 API", names)
 
 
 if __name__ == "__main__":

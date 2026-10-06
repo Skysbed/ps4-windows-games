@@ -46,6 +46,13 @@ struct PcPs4MsWrap<R (*)(A...), fn> {
     static R PCPS4_MS_ABI thunk(A... args) { return fn(args...); }
 };
 
+/* Clang's C++ headers mark many libc functions noexcept. Keep the same
+ * compiler-generated ABI bridge for those exact function types. */
+template <typename R, typename... A, R (*fn)(A...) noexcept>
+struct PcPs4MsWrap<R (*)(A...) noexcept, fn> {
+    static R PCPS4_MS_ABI thunk(A... args) noexcept { return fn(args...); }
+};
+
 #define PCPS4_MSW(fn) \
     (reinterpret_cast<const void *>(&PcPs4MsWrap<decltype(&fn), &fn>::thunk))
 

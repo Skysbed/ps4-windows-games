@@ -44,6 +44,7 @@ typedef enum pcps4_pe_status {
 #define PCPS4_PE_NUM_DATA_DIRECTORIES 16
 #define PCPS4_PE_DIRECTORY_IMPORT 1
 #define PCPS4_PE_DIRECTORY_BASERELOC 5
+#define PCPS4_PE_DIRECTORY_TLS 9
 
 /* Characteristics bits we care about. */
 #define PCPS4_PE_SCN_MEM_EXECUTE 0x20000000u
@@ -201,6 +202,22 @@ pcps4_pe_status pcps4_pe_bind_imports(const pcps4_pe_image *image,
  * will be executed there). `resolver` may be NULL to skip binding. On success
  * `out_image` describes the image and the counts report binding results.
  */
+/*
+ * Report each import that does not resolve through the resolver.
+ * This lets the loader print an actionable module/API list before execution.
+ */
+typedef int (*pcps4_pe_unresolved_fn)(void *user,
+                                     const char *dll,
+                                     int by_name,
+                                     const char *name,
+                                     uint16_t ordinal);
+
+pcps4_pe_status pcps4_pe_report_unresolved_imports(
+    const pcps4_pe_image *image,
+    const pcps4_pe_resolver *resolver,
+    pcps4_pe_unresolved_fn cb,
+    void *user);
+
 pcps4_pe_status pcps4_pe_load(const uint8_t *exe, size_t exe_size,
                               uint8_t *dest, size_t dest_size,
                               uint64_t load_base,

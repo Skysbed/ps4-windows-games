@@ -716,39 +716,72 @@ static void register_xinput(
 #undef XREG
 }
 
+static PCPS4_MS_ABI void *crt_malloc(SIZE_T n) { return malloc(n); }
+static PCPS4_MS_ABI void *crt_calloc(SIZE_T n, SIZE_T s) { return calloc(n, s); }
+static PCPS4_MS_ABI void *crt_realloc(void *p, SIZE_T n) { return realloc(p, n); }
+static PCPS4_MS_ABI void crt_free(void *p) { free(p); }
+static PCPS4_MS_ABI void *crt_memcpy(void *d, const void *s, SIZE_T n) { return memcpy(d, s, n); }
+static PCPS4_MS_ABI void *crt_memmove(void *d, const void *s, SIZE_T n) { return memmove(d, s, n); }
+static PCPS4_MS_ABI void *crt_memset(void *d, int c, SIZE_T n) { return memset(d, c, n); }
+static PCPS4_MS_ABI int crt_memcmp(const void *a, const void *b, SIZE_T n) { return memcmp(a, b, n); }
+static PCPS4_MS_ABI SIZE_T crt_strlen(const char *s) { return strlen(s); }
+static PCPS4_MS_ABI int crt_strcmp(const char *a, const char *b) { return strcmp(a, b); }
+static PCPS4_MS_ABI int crt_strncmp(const char *a, const char *b, SIZE_T n) { return strncmp(a, b, n); }
+static PCPS4_MS_ABI char *crt_strstr(const char *a, const char *b) { return strstr(a, b); }
+static PCPS4_MS_ABI char *crt_strchr(const char *s, int c) { return strchr(s, c); }
+static PCPS4_MS_ABI char *crt_strrchr(const char *s, int c) { return strrchr(s, c); }
+static PCPS4_MS_ABI int crt_atoi(const char *s) { return atoi(s); }
+static PCPS4_MS_ABI long crt_atol(const char *s) { return atol(s); }
+static PCPS4_MS_ABI long crt_strtol(const char *s, char **e, int base) { return strtol(s,e,base); }
+static PCPS4_MS_ABI unsigned long crt_strtoul(const char *s, char **e, int base) { return strtoul(s,e,base); }
+static PCPS4_MS_ABI long long crt_strtoll(const char *s, char **e, int base) { return strtoll(s,e,base); }
+static PCPS4_MS_ABI unsigned long long crt_strtoull(const char *s, char **e, int base) { return strtoull(s,e,base); }
+static PCPS4_MS_ABI void crt_abort(void) { abort(); }
+static PCPS4_MS_ABI void crt_exit(int code) { exit(code); }
+static PCPS4_MS_ABI FILE *crt_fopen(const char *p, const char *m) { return fopen(p, m); }
+static PCPS4_MS_ABI int crt_fclose(FILE *f) { return fclose(f); }
+static PCPS4_MS_ABI SIZE_T crt_fread(void *p, SIZE_T s, SIZE_T n, FILE *f) { return fread(p,s,n,f); }
+static PCPS4_MS_ABI SIZE_T crt_fwrite(const void *p, SIZE_T s, SIZE_T n, FILE *f) { return fwrite(p,s,n,f); }
+static PCPS4_MS_ABI int crt_fseek(FILE *f, long o, int w) { return fseek(f,o,w); }
+static PCPS4_MS_ABI long crt_ftell(FILE *f) { return ftell(f); }
+static PCPS4_MS_ABI int crt_rand(void) { return rand(); }
+static PCPS4_MS_ABI void crt_srand(unsigned int s) { srand(s); }
+
 static void register_ucrt(
     pcps4_pe_resolver *resolver,
     const char *dll)
 {
 #define UREG(name, fn) (void)pcps4_pe_resolver_register(resolver, dll, name, (void *)(fn))
-    UREG("malloc", malloc);
-    UREG("calloc", calloc);
-    UREG("realloc", realloc);
-    UREG("free", free);
-    UREG("memcpy", memcpy);
-    UREG("memmove", memmove);
-    UREG("memset", memset);
-    UREG("memcmp", memcmp);
-    UREG("strlen", strlen);
-    UREG("strcmp", strcmp);
-    UREG("strncmp", strncmp);
-    UREG("strstr", strstr);
-    UREG("strchr", strchr);
-    UREG("strrchr", strrchr);
-    UREG("atoi", atoi);
-    UREG("atol", atol);
-    UREG("strtol", strtol);
-    UREG("strtoul", strtoul);
-    UREG("strtoll", strtoll);
-    UREG("strtoull", strtoull);
-    UREG("abort", abort);
-    UREG("exit", exit);
-    UREG("fopen", fopen);
-    UREG("fclose", fclose);
-    UREG("fread", fread);
-    UREG("fwrite", fwrite);
-    UREG("fseek", fseek);
-    UREG("ftell", ftell);
+    UREG("malloc", crt_malloc);
+    UREG("calloc", crt_calloc);
+    UREG("realloc", crt_realloc);
+    UREG("free", crt_free);
+    UREG("memcpy", crt_memcpy);
+    UREG("memmove", crt_memmove);
+    UREG("memset", crt_memset);
+    UREG("memcmp", crt_memcmp);
+    UREG("strlen", crt_strlen);
+    UREG("strcmp", crt_strcmp);
+    UREG("strncmp", crt_strncmp);
+    UREG("strstr", crt_strstr);
+    UREG("strchr", crt_strchr);
+    UREG("strrchr", crt_strrchr);
+    UREG("atoi", crt_atoi);
+    UREG("atol", crt_atol);
+    UREG("strtol", crt_strtol);
+    UREG("strtoul", crt_strtoul);
+    UREG("strtoll", crt_strtoll);
+    UREG("strtoull", crt_strtoull);
+    UREG("abort", crt_abort);
+    UREG("exit", crt_exit);
+    UREG("fopen", crt_fopen);
+    UREG("fclose", crt_fclose);
+    UREG("fread", crt_fread);
+    UREG("fwrite", crt_fwrite);
+    UREG("fseek", crt_fseek);
+    UREG("ftell", crt_ftell);
+    UREG("rand", crt_rand);
+    UREG("srand", crt_srand);
 #undef UREG
 }
 

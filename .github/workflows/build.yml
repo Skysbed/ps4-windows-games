@@ -92,7 +92,7 @@ jobs:
           PACKAGE_ROOT=build/win-smoke/package \
           TITLE="PcPs4 Windows D3D11 Smoke" \
           TITLE_ID=PCPS00002 \
-          CONTENT_ID=IV0000-PCPS00002_00-WIND3D11SMOKE01 \
+          CONTENT_ID=IV0000-PCPS00002_00-WIND3D11SMOKE001 \
           make pkg
 
       - name: Upload PS4 package containing native Windows D3D11 smoke binary

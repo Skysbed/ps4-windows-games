@@ -131,6 +131,54 @@ pcps4_pe_status pcps4_pe_map_image(const pcps4_pe_image *image,
                                    uint8_t *dest, size_t dest_size,
                                    uint64_t load_base);
 
+/* --- import resolution ------------------------------------------------- */
+
+#define PCPS4_PE_MAX_RESOLVER_SYMBOLS 512
+
+typedef struct pcps4_pe_symbol {
+    char   dll[32];   /* importing module, matched case-insensitively */
+    char   name[64];  /* function name, matched case-sensitively */
+    void  *fn;        /* handler to bind into the IAT */
+} pcps4_pe_symbol;
+
+/*
+ * A flat registry of Win32 (or any DLL) symbols that PcPs4 provides. The host
+ * registers the APIs it implements; binding then patches a loaded image's
+ * import table to point at them. Symbols the registry does not have are what
+ * the Win32 runtime still needs to implement.
+ */
+typedef struct pcps4_pe_resolver {
+    pcps4_pe_symbol symbols[PCPS4_PE_MAX_RESOLVER_SYMBOLS];
+    uint32_t        count;
+} pcps4_pe_resolver;
+
+void pcps4_pe_resolver_init(pcps4_pe_resolver *resolver);
+
+/* Register a handler for dll!name. Re-registering the same pair replaces it. */
+pcps4_pe_status pcps4_pe_resolver_register(pcps4_pe_resolver *resolver,
+                                           const char *dll, const char *name,
+                                           void *fn);
+
+/* Returns the handler for dll!name, or NULL if not registered. */
+void *pcps4_pe_resolver_lookup(const pcps4_pe_resolver *resolver,
+                               const char *dll, const char *name);
+
+/*
+ * Bind a mapped image's imports. For each imported-by-name symbol, look it up
+ * in `resolver` and write the handler pointer into that image's IAT slot; a
+ * symbol with no handler (and every import-by-ordinal) is left NULL and
+ * counted as unresolved. `mapped` is the buffer produced by
+ * pcps4_pe_map_image. Counts are optional (pass NULL to ignore).
+ *
+ * An unresolved count > 0 is not an error: it is the precise list of APIs the
+ * binary needs that PcPs4 does not yet provide.
+ */
+pcps4_pe_status pcps4_pe_bind_imports(const pcps4_pe_image *image,
+                                      uint8_t *mapped, size_t mapped_size,
+                                      const pcps4_pe_resolver *resolver,
+                                      uint32_t *out_resolved,
+                                      uint32_t *out_unresolved);
+
 /* Human-readable text for a status code (never NULL). */
 const char *pcps4_pe_status_str(pcps4_pe_status status);
 

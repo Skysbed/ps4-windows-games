@@ -23,6 +23,12 @@ struct pcps4_gpu_context {
     uint32_t src_blend;
     uint32_t dst_blend;
     uint32_t cull_mode;
+    float viewport_x;
+    float viewport_y;
+    float viewport_width;
+    float viewport_height;
+    float viewport_min_depth;
+    float viewport_max_depth;
     pcps4_gpu_buffer_t *vs_constant_buffers[16];
     pcps4_gpu_buffer_t *ps_constant_buffers[16];
     pcps4_gpu_texture_t *vs_shader_resources[16];
@@ -163,6 +169,12 @@ pcps4_gpu_context_t *pcps4_gpu_context_create(pcps4_gpu_device_t *device)
     context->refs = 1;
     context->device = device;
     context->cull_mode = 0; /* no culling until an RS state is explicitly bound */
+    context->viewport_x = 0.0f;
+    context->viewport_y = 0.0f;
+    context->viewport_width = 1280.0f;
+    context->viewport_height = 720.0f;
+    context->viewport_min_depth = 0.0f;
+    context->viewport_max_depth = 1.0f;
     context->primitive_topology = PCPS4_GPU_TOPOLOGY_TRIANGLELIST;
     return context;
 }
@@ -732,6 +744,34 @@ int pcps4_gpu_context_set_cull_mode(
     return PCPS4_GPU_OK;
 }
 
+int pcps4_gpu_context_set_viewport(
+    pcps4_gpu_context_t *context,
+    float x,
+    float y,
+    float width,
+    float height,
+    float min_depth,
+    float max_depth)
+{
+    if (!valid_context(context) ||
+        width <= 0.0f ||
+        height <= 0.0f ||
+        min_depth < 0.0f ||
+        min_depth > 1.0f ||
+        max_depth < 0.0f ||
+        max_depth > 1.0f ||
+        min_depth > max_depth)
+        return PCPS4_GPU_ERR_ARGUMENT;
+
+    context->viewport_x = x;
+    context->viewport_y = y;
+    context->viewport_width = width;
+    context->viewport_height = height;
+    context->viewport_min_depth = min_depth;
+    context->viewport_max_depth = max_depth;
+    return PCPS4_GPU_OK;
+}
+
 static int pcps4_set_slot4(
     pcps4_gpu_buffer_t **slots,
     uint32_t slot,
@@ -1117,10 +1157,15 @@ static int pcps4_raster_triangle(
     min_y = p0[1]; if (p1[1] < min_y) min_y = p1[1]; if (p2[1] < min_y) min_y = p2[1];
     max_y = p0[1]; if (p1[1] > max_y) max_y = p1[1]; if (p2[1] > max_y) max_y = p2[1];
 
-    int32_t x0 = (int32_t)((min_x * 0.5f + 0.5f) * (float)texture->desc.width);
-    int32_t x1 = (int32_t)((max_x * 0.5f + 0.5f) * (float)texture->desc.width);
-    int32_t y0 = (int32_t)((-max_y * 0.5f + 0.5f) * (float)texture->desc.height);
-    int32_t y1 = (int32_t)((-min_y * 0.5f + 0.5f) * (float)texture->desc.height);
+    float vx = context->viewport_x;
+    float vy = context->viewport_y;
+    float vw = context->viewport_width;
+    float vh = context->viewport_height;
+
+    int32_t x0 = (int32_t)(vx + (min_x * 0.5f + 0.5f) * vw);
+    int32_t x1 = (int32_t)(vx + (max_x * 0.5f + 0.5f) * vw);
+    int32_t y0 = (int32_t)(vy + (-max_y * 0.5f + 0.5f) * vh);
+    int32_t y1 = (int32_t)(vy + (-min_y * 0.5f + 0.5f) * vh);
 
     if (x0 < 0) x0 = 0;
     if (y0 < 0) y0 = 0;
@@ -1131,8 +1176,8 @@ static int pcps4_raster_triangle(
 
     for (int32_t y = y0; y <= y1; ++y) {
         for (int32_t x = x0; x <= x1; ++x) {
-            float px = ((float)x + 0.5f) / (float)texture->desc.width * 2.0f - 1.0f;
-            float py = 1.0f - ((float)y + 0.5f) / (float)texture->desc.height * 2.0f;
+            float px = (((float)x + 0.5f) - vx) / vw * 2.0f - 1.0f;
+            float py = 1.0f - (((float)y + 0.5f) - vy) / vh * 2.0f;
             float w0 = pcps4_edge(p1[0], p1[1], p2[0], p2[1], px, py);
             float w1 = pcps4_edge(p2[0], p2[1], p0[0], p0[1], px, py);
             float w2 = pcps4_edge(p0[0], p0[1], p1[0], p1[1], px, py);
@@ -1146,7 +1191,10 @@ static int pcps4_raster_triangle(
             float a1 = w1 * inv_area;
             float a2 = w2 * inv_area;
             float depth = p0[2] * a0 + p1[2] * a1 + p2[2] * a2;
-            depth = depth * 0.5f + 0.5f;
+            depth = context->viewport_min_depth +
+                     (depth * 0.5f + 0.5f) *
+                         (context->viewport_max_depth -
+                          context->viewport_min_depth);
 
             if (context->depth_enabled && context->depth_target != NULL) {
                 float *depth_values = (float *)context->depth_target->data;

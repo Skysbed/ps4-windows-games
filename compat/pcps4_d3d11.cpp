@@ -1217,14 +1217,22 @@ HRESULT pcps4_d3d11_create_device_and_swap_chain(
     if (feature_level != NULL)
         *feature_level = D3D_FEATURE_LEVEL_11_0;
 
-    /*
-     * Keep the immediate context creation consistent with D3D11: callers
-     * may request it via GetImmediateContext(), so the out pointer stays
-     * NULL here.
-     */
+    /* D3D11CreateDeviceAndSwapChain returns the immediate context. The
+     * device keeps its own native-context reference, while the wrapper gets
+     * a second reference so both lifetimes are independent. */
+    pcps4_gpu_context_add_ref(gpu_context);
+    ID3D11DeviceContext *immediate =
+        new (std::nothrow) ID3D11DeviceContext(gpu_context);
+    if (immediate == NULL) {
+        pcps4_gpu_context_destroy(gpu_context);
+        d3d_swap->Release();
+        d3d_device->Release();
+        return E_OUTOFMEMORY;
+    }
+
     *device = d3d_device;
     *swap_chain = d3d_swap;
-    *context = NULL;
+    *context = immediate;
 
     return S_OK;
 }

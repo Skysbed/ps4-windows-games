@@ -2,6 +2,7 @@
 
 #include "pcps4_loader.h"
 #include "pcps4_module.h"
+#include "pcps4_sys.h"
 #include "pcps4_winapi.h"
 
 #include <errno.h>
@@ -138,12 +139,14 @@ int pcps4_game_run_file(const char *path, int32_t *out_entry_ret)
     pcps4_winapi_build_resolver(resolver);
     pcps4_module_loader_init(&module_loader, resolver);
     pcps4_winapi_set_module_loader(&module_loader);
+    pcps4_sys_set_native_game_root(1);
 
     printf("[pcps4] game load: %s (%u bytes)\n",
            path, (unsigned)exe_size);
 
     if (pcps4_pe_parse(exe, exe_size, &main_image) != PCPS4_PE_OK) {
         pcps4_winapi_set_module_loader(NULL);
+        pcps4_sys_set_native_game_root(0);
         free(resolver);
         free(exe);
         printf("[pcps4] game load: main PE parse failed\n");
@@ -170,6 +173,7 @@ int pcps4_game_run_file(const char *path, int32_t *out_entry_ret)
         out_entry_ret);
 
     pcps4_winapi_set_module_loader(NULL);
+    pcps4_sys_set_native_game_root(0);
     free(resolver);
     free(exe);
 

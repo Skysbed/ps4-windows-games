@@ -237,3 +237,102 @@ int pcps4_dxbc_extract_signature(const void *data,
     out->count = element_count;
     return PCPS4_DXBC_OK;
 }
+
+/* Copy a NUL-terminated name at `off` within [body, body+body_size). */
+static void dxbc_copy_name(char *dst, size_t dst_size,
+                           const uint8_t *body, uint32_t body_size,
+                           uint32_t off)
+{
+    size_t n = 0;
+    if (dst_size == 0)
+        return;
+    if (off < body_size) {
+        while (n + 1 < dst_size && (size_t)off + n < body_size) {
+            char c = (char)body[off + n];
+            if (c == '\0')
+                break;
+            dst[n++] = c;
+        }
+    }
+    dst[n] = '\0';
+}
+
+int pcps4_dxbc_extract_resources(const void *data,
+                                 size_t size,
+                                 pcps4_dxbc_resources_t *out)
+{
+    static const char *const rdef_fourcc[] = { "RDEF", NULL };
+
+    const uint8_t *bytes;
+    uint32_t total_size, chunk_count;
+    const uint8_t *body = NULL;
+    uint32_t body_size = 0;
+    uint32_t cb_count, cb_off, rb_count, rb_off, i;
+
+    if (data == NULL || out == NULL)
+        return PCPS4_DXBC_ERR_ARGUMENT;
+
+    memset(out, 0, sizeof(*out));
+
+    if (size < 32)
+        return PCPS4_DXBC_ERR_TRUNCATED;
+    bytes = (const uint8_t *)data;
+    if (memcmp(bytes, "DXBC", 4) != 0)
+        return PCPS4_DXBC_ERR_MAGIC;
+
+    total_size = read_u32(bytes + 24);
+    chunk_count = read_u32(bytes + 28);
+    if (total_size < 32 || total_size > size)
+        return PCPS4_DXBC_ERR_RANGE;
+    if (chunk_count == 0 || chunk_count > 4096)
+        return PCPS4_DXBC_ERR_FORMAT;
+
+    if (!dxbc_find_chunk(bytes, total_size, chunk_count, rdef_fourcc,
+                         &body, &body_size))
+        return PCPS4_DXBC_ERR_NO_SIGNATURE;
+
+    /* RDEF header: cbCount, cbOffset, bindCount, bindOffset, ... */
+    if (body_size < 16)
+        return PCPS4_DXBC_ERR_TRUNCATED;
+    cb_count = read_u32(body + 0);
+    cb_off   = read_u32(body + 4);
+    rb_count = read_u32(body + 8);
+    rb_off   = read_u32(body + 12);
+
+    /* Resource bindings: 32 bytes each. */
+    if (rb_count > PCPS4_DXBC_MAX_BINDINGS)
+        rb_count = PCPS4_DXBC_MAX_BINDINGS;
+    if (rb_count > 0 && !in_range(rb_off, (size_t)rb_count * 32u, body_size))
+        return PCPS4_DXBC_ERR_RANGE;
+    for (i = 0; i < rb_count; ++i) {
+        const uint8_t *e = body + rb_off + (size_t)i * 32u;
+        pcps4_dxbc_binding_t *b = &out->bindings[i];
+        dxbc_copy_name(b->name, sizeof(b->name), body, body_size,
+                       read_u32(e + 0));
+        b->input_type  = read_u32(e + 4);
+        b->return_type = read_u32(e + 8);
+        b->dimension   = read_u32(e + 12);
+        /* e + 16 is numSamples */
+        b->bind_point  = read_u32(e + 20);
+        b->bind_count  = read_u32(e + 24);
+    }
+    out->binding_count = rb_count;
+
+    /* Constant buffers: 24 bytes each. */
+    if (cb_count > PCPS4_DXBC_MAX_CBUFFERS)
+        cb_count = PCPS4_DXBC_MAX_CBUFFERS;
+    if (cb_count > 0 && !in_range(cb_off, (size_t)cb_count * 24u, body_size))
+        return PCPS4_DXBC_ERR_RANGE;
+    for (i = 0; i < cb_count; ++i) {
+        const uint8_t *e = body + cb_off + (size_t)i * 24u;
+        pcps4_dxbc_cbuffer_t *c = &out->cbuffers[i];
+        dxbc_copy_name(c->name, sizeof(c->name), body, body_size,
+                       read_u32(e + 0));
+        c->variable_count = read_u32(e + 4);
+        /* e + 8 is variable offset */
+        c->size = read_u32(e + 12);
+    }
+    out->cbuffer_count = cb_count;
+
+    return PCPS4_DXBC_OK;
+}

@@ -158,10 +158,117 @@ static void test_signature(void)
           == PCPS4_DXBC_ERR_NO_SIGNATURE);
 }
 
+/*
+ * Second container: a pixel shader (SM5.0) with an RDEF chunk declaring
+ *   cbuffer PerFrame (64 bytes, 2 vars) at b0
+ *   Texture2D diffuseTex at t0
+ *   SamplerState linearSampler at s0
+ */
+static size_t g_rdef_total;
+
+static void build_dxbc_rdef(uint8_t *b)
+{
+    size_t rdef_off, shex_off, body;
+    const uint32_t names = 148;
+
+    memset(b, 0, DXBC_SIZE * 2);
+    memcpy(b, "DXBC", 4);
+
+    rdef_off = 32 + 2 * 4;
+    memcpy(b + rdef_off, "RDEF", 4);
+    body = rdef_off + 8;
+
+    /* RDEF header (28 bytes). */
+    w32(b, body + 0, 1);            /* cbuffer count */
+    w32(b, body + 4, 124);          /* cbuffer offset */
+    w32(b, body + 8, 3);            /* binding count */
+    w32(b, body + 12, 28);          /* binding offset */
+    w32(b, body + 16, 0xFFFF0500u); /* version: pixel, 5.0 */
+
+    /* Binding 0: PerFrame, cbuffer, b0. */
+    w32(b, body + 28 + 0, names + 0);
+    w32(b, body + 28 + 4, PCPS4_DXBC_INPUT_CBUFFER);
+    w32(b, body + 28 + 20, 0);
+    w32(b, body + 28 + 24, 1);
+    /* Binding 1: diffuseTex, texture2D (dim 4), t0. */
+    w32(b, body + 60 + 0, names + 9);
+    w32(b, body + 60 + 4, PCPS4_DXBC_INPUT_TEXTURE);
+    w32(b, body + 60 + 8, 5);       /* return type float */
+    w32(b, body + 60 + 12, 4);      /* D3D_SRV_DIMENSION_TEXTURE2D */
+    w32(b, body + 60 + 20, 0);
+    w32(b, body + 60 + 24, 1);
+    /* Binding 2: linearSampler, sampler, s0. */
+    w32(b, body + 92 + 0, names + 20);
+    w32(b, body + 92 + 4, PCPS4_DXBC_INPUT_SAMPLER);
+    w32(b, body + 92 + 20, 0);
+    w32(b, body + 92 + 24, 1);
+
+    /* Constant buffer 0: PerFrame, 2 variables, 64 bytes. */
+    w32(b, body + 124 + 0, names + 0);
+    w32(b, body + 124 + 4, 2);
+    w32(b, body + 124 + 12, 64);
+
+    memcpy(b + body + names, "PerFrame", 9);
+    memcpy(b + body + names + 9, "diffuseTex", 11);
+    memcpy(b + body + names + 20, "linearSampler", 14);
+    w32(b, rdef_off + 4, names + 34);   /* RDEF body size */
+
+    shex_off = body + names + 34;
+    memcpy(b + shex_off, "SHEX", 4);
+    w32(b, shex_off + 8, (0u << 16) | (5u << 4)); /* pixel, 5.0 */
+    w32(b, shex_off + 12, 2);
+    w32(b, shex_off + 4, 8);
+
+    g_rdef_total = shex_off + 16;
+    w32(b, 32 + 0, (uint32_t)rdef_off);
+    w32(b, 32 + 4, (uint32_t)shex_off);
+    w32(b, 24, (uint32_t)g_rdef_total);
+    w32(b, 28, 2);
+}
+
+static void test_resources(void)
+{
+    uint8_t b[DXBC_SIZE * 2];
+    pcps4_dxbc_info_t info;
+    pcps4_dxbc_resources_t res;
+
+    build_dxbc_rdef(b);
+
+    CHECK(pcps4_dxbc_inspect(b, g_rdef_total, &info) == PCPS4_DXBC_OK);
+    CHECK(info.program_type == PCPS4_DXBC_PROGRAM_PIXEL);
+    CHECK(info.rdef_chunk_count == 1);
+
+    CHECK(pcps4_dxbc_extract_resources(b, g_rdef_total, &res)
+          == PCPS4_DXBC_OK);
+    CHECK(res.binding_count == 3);
+    CHECK(strcmp(res.bindings[0].name, "PerFrame") == 0);
+    CHECK(res.bindings[0].input_type == PCPS4_DXBC_INPUT_CBUFFER);
+    CHECK(strcmp(res.bindings[1].name, "diffuseTex") == 0);
+    CHECK(res.bindings[1].input_type == PCPS4_DXBC_INPUT_TEXTURE);
+    CHECK(res.bindings[1].dimension == 4);
+    CHECK(strcmp(res.bindings[2].name, "linearSampler") == 0);
+    CHECK(res.bindings[2].input_type == PCPS4_DXBC_INPUT_SAMPLER);
+    CHECK(res.bindings[2].bind_point == 0);
+
+    CHECK(res.cbuffer_count == 1);
+    CHECK(strcmp(res.cbuffers[0].name, "PerFrame") == 0);
+    CHECK(res.cbuffers[0].size == 64);
+    CHECK(res.cbuffers[0].variable_count == 2);
+
+    /* The first container has no RDEF -> reported cleanly. */
+    {
+        uint8_t b2[DXBC_SIZE];
+        build_dxbc(b2);
+        CHECK(pcps4_dxbc_extract_resources(b2, g_total, &res)
+              == PCPS4_DXBC_ERR_NO_SIGNATURE);
+    }
+}
+
 int main(void)
 {
     test_inspect();
     test_signature();
+    test_resources();
 
     if (g_failures == 0) {
         printf("dxbc_host_test: all checks passed\n");

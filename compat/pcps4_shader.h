@@ -87,6 +87,57 @@ int pcps4_dxbc_extract_signature(const void *data,
                                  int which,
                                  pcps4_dxbc_signature_t *out);
 
+/* --- resource bindings (RDEF) ------------------------------------------ */
+
+/* D3D_SHADER_INPUT_TYPE values. */
+enum {
+    PCPS4_DXBC_INPUT_CBUFFER = 0,
+    PCPS4_DXBC_INPUT_TBUFFER = 1,
+    PCPS4_DXBC_INPUT_TEXTURE = 2,
+    PCPS4_DXBC_INPUT_SAMPLER = 3,
+    PCPS4_DXBC_INPUT_UAV_RWTYPED = 4,
+    PCPS4_DXBC_INPUT_STRUCTURED = 5,
+    PCPS4_DXBC_INPUT_UAV_RWSTRUCTURED = 6,
+    PCPS4_DXBC_INPUT_BYTEADDRESS = 7,
+    PCPS4_DXBC_INPUT_UAV_RWBYTEADDRESS = 8
+};
+
+#define PCPS4_DXBC_MAX_BINDINGS 32
+#define PCPS4_DXBC_MAX_CBUFFERS 16
+#define PCPS4_DXBC_RESOURCE_NAME_MAX 48
+
+typedef struct {
+    char     name[PCPS4_DXBC_RESOURCE_NAME_MAX];
+    uint32_t input_type;   /* PCPS4_DXBC_INPUT_* */
+    uint32_t return_type;
+    uint32_t dimension;    /* D3D_SRV_DIMENSION (texture shape) */
+    uint32_t bind_point;   /* register slot: b#, t#, s#, u# */
+    uint32_t bind_count;
+} pcps4_dxbc_binding_t;
+
+typedef struct {
+    char     name[PCPS4_DXBC_RESOURCE_NAME_MAX];
+    uint32_t size;            /* bytes */
+    uint32_t variable_count;
+} pcps4_dxbc_cbuffer_t;
+
+typedef struct {
+    pcps4_dxbc_binding_t bindings[PCPS4_DXBC_MAX_BINDINGS];
+    uint32_t binding_count;
+    pcps4_dxbc_cbuffer_t cbuffers[PCPS4_DXBC_MAX_CBUFFERS];
+    uint32_t cbuffer_count;
+} pcps4_dxbc_resources_t;
+
+/*
+ * Read a shader's resource definitions (RDEF): every bound resource (constant
+ * buffers, textures, samplers, UAVs) with its register slot, plus each
+ * constant buffer's size. Returns PCPS4_DXBC_ERR_NO_SIGNATURE if the shader
+ * has no RDEF chunk (e.g. it was stripped).
+ */
+int pcps4_dxbc_extract_resources(const void *data,
+                                 size_t size,
+                                 pcps4_dxbc_resources_t *out);
+
 #ifdef __cplusplus
 }
 #endif

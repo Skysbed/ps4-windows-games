@@ -276,7 +276,7 @@ void *pcps4_dll_load(
         return NULL;
 
     normalize_name(path, name, sizeof(name));
-    if (name[0] == '\0')
+    if (name[0] == '\\0')
         return NULL;
 
     lock();
@@ -303,7 +303,9 @@ void *pcps4_dll_load(
 
     rc = pcps4_pe_parse(file_data, file_size, &probe);
     if (rc != PCPS4_PE_OK) {
-        module_log("[pcps4] DLL %s parse failed: %s", name, 0, 0);
+        pcps4_status_log(
+            "[pcps4] DLL %s parse failed: %s",
+            name, pcps4_pe_status_str(rc));
         free(file_data);
         return NULL;
     }
@@ -327,6 +329,41 @@ void *pcps4_dll_load(
         }
     }
 
+    /*
+     * Publish the mapped module before resolving imports. This prevents
+     * dependency cycles from recursively allocating the same DLL forever.
+     * A cyclic dependency may still fail to resolve an as-yet-uninitialized
+     * export; failure is reported instead of looping.
+     */
+    lock();
+    module = find_name_locked(name);
+    if (module != NULL) {
+        if (module->refs != UINT32_MAX)
+            ++module->refs;
+        mem = module->base;
+        unlock();
+        free(file_data);
+        (void)sceKernelMunmap((void *)mem, map_size);
+        return mem;
+    }
+
+    module = find_free_locked();
+    if (module == NULL) {
+        unlock();
+        free(file_data);
+        (void)sceKernelMunmap(mem, map_size);
+        return NULL;
+    }
+
+    memset(module, 0, sizeof(*module));
+    module->magic = PCPS4_DLL_MAGIC;
+    module->refs = 1;
+    module->loading = 1;
+    module->base = mem;
+    module->map_size = map_size;
+    memcpy(module->name, name, strlen(name) + 1);
+    unlock();
+
     memset(&image, 0, sizeof(image));
     rc = pcps4_pe_load(
         file_data, file_size,
@@ -347,6 +384,9 @@ void *pcps4_dll_load(
                 pcps4_pe_status_str(rc),
             (unsigned)resolved,
             (unsigned)unresolved);
+        lock();
+        memset(module, 0, sizeof(*module));
+        unlock();
         (void)sceKernelMunmap(mem, map_size);
         return NULL;
     }
@@ -356,6 +396,9 @@ void *pcps4_dll_load(
         pcps4_status_log(
             "[pcps4] DLL %s refused: entry point not executable",
             name);
+        lock();
+        memset(module, 0, sizeof(*module));
+        unlock();
         (void)sceKernelMunmap(mem, map_size);
         return NULL;
     }
@@ -365,41 +408,14 @@ void *pcps4_dll_load(
         pcps4_status_log(
             "[pcps4] DLL %s protection setup failed",
             name);
+        lock();
+        memset(module, 0, sizeof(*module));
+        unlock();
         (void)sceKernelMunmap(mem, map_size);
         return NULL;
     }
 
-    /*
-     * Reserve the module slot before TLS/DllMain so circular dependency
-     * resolution can still find the mapped image. The image is not advertised
-     * as initialized until after DllMain returns.
-     */
-    lock();
-    module = find_name_locked(name);
-    if (module != NULL) {
-        if (module->refs != UINT32_MAX)
-            ++module->refs;
-        unlock();
-        (void)sceKernelMunmap(mem, map_size);
-        return module->base;
-    }
-    module = find_free_locked();
-    if (module == NULL) {
-        unlock();
-        (void)sceKernelMunmap(mem, map_size);
-        pcps4_status_log("[pcps4] DLL load refused: module table full");
-        return NULL;
-    }
-
-    memset(module, 0, sizeof(*module));
-    module->magic = PCPS4_DLL_MAGIC;
-    module->refs = 1;
-    module->loading = 1;
-    module->base = mem;
-    module->map_size = map_size;
-    memcpy(module->name, name, strlen(name) + 1);
     module->image = image;
-    unlock();
 
     if (pcps4_loader_run_tls_callbacks(
             &module->image,

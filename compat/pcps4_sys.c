@@ -7,6 +7,7 @@
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <time.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <orbis/libkernel.h>
@@ -167,6 +168,41 @@ pcps4_os_handle_t *pcps4_sys_file_open(const char *path,
 
     handle->value.fd = fd;
     return handle;
+}
+
+int64_t pcps4_sys_file_size(pcps4_os_handle_t *handle)
+{
+    if (!valid_handle(handle) || handle->kind != PCPS4_HANDLE_FILE)
+        return -1;
+    off_t current = lseek(handle->value.fd, 0, SEEK_CUR);
+    if (current < 0) return -1;
+    off_t end = lseek(handle->value.fd, 0, SEEK_END);
+    if (end < 0) {
+        (void)lseek(handle->value.fd, current, SEEK_SET);
+        return -1;
+    }
+    (void)lseek(handle->value.fd, current, SEEK_SET);
+    return (int64_t)end;
+}
+
+int64_t pcps4_sys_file_seek(pcps4_os_handle_t *handle, int64_t offset, int origin)
+{
+    if (!valid_handle(handle) || handle->kind != PCPS4_HANDLE_FILE)
+        return -1;
+    off_t result = lseek(
+        handle->value.fd, (off_t)offset,
+        origin == 0 ? SEEK_SET : origin == 1 ? SEEK_CUR : SEEK_END);
+    return result < 0 ? -1 : (int64_t)result;
+}
+
+int pcps4_sys_file_delete(const char *path)
+{
+    return path != NULL ? unlink(path) : -1;
+}
+
+int pcps4_sys_file_mkdir(const char *path)
+{
+    return path != NULL ? mkdir(path, 0755) : -1;
 }
 
 int pcps4_sys_file_read(pcps4_os_handle_t *handle,

@@ -53,6 +53,7 @@ SHADER_OBJ := $(INTDIR)/pcps4_shader.o
 PE_OBJ    := $(INTDIR)/pcps4_pe.o
 LOADER_OBJ := $(INTDIR)/pcps4_loader.o
 STATUS_OBJ := $(INTDIR)/pcps4_status.o
+XINPUT_OBJ := $(INTDIR)/pcps4_xinput.o
 
 ELF := $(INTDIR)/$(PROJECT).elf
 OELF := $(INTDIR)/$(PROJECT).oelf
@@ -88,7 +89,8 @@ LDFLAGS := -m elf_x86_64 -pie \
            --eh-frame-hdr \
            -L$(TOOLCHAIN)/lib \
            -lc -lkernel -lc++ -lSceVideoOut \
-           $(if $(PCPS4_ENABLE_GNM),-lSceGnmDriver,) \
+           $(if $(PCPS4_ENABLE_GNM),-lSceGnmDriver,) \\
+           -lScePad -lSceUserService \
            $(if $(filter 1,$(PCPS4_ENABLE_OPENGNM)),-L$(PCPS4_OPENGNM_DIR) -lopengnm,) \
            $(TOOLCHAIN)/lib/crt1.o
 
@@ -106,7 +108,7 @@ all: pkg
 
 translate: $(TRANSLATED)
 
-$(GENERATED)/%.c: pc_source/%.c $(TRANSLATOR) compat/pcps4_compat.h compat/pcps4_sys.h
+$(GENERATED)/%.c: pc_source/%.c $(TRANSLATOR) compat/pcps4_compat.h compat/pcps4_xinput.h compat/pcps4_sys.h
 	@mkdir -p "$(dir $@)"
 	$(PYTHON) "$(TRANSLATOR)" "$<" --out "$@" --report "$(REPORT)" --strict
 
@@ -148,6 +150,10 @@ $(GPU_OBJ): compat/pcps4_gpu.c compat/pcps4_gpu.h compat/pcps4_gfx.h
 	$(CC) $(CFLAGS) -o "$@" "$<"
 
 $(D3D11_OBJ): compat/pcps4_d3d11.cpp compat/pcps4_d3d11.h compat/pcps4_gpu.h compat/pcps4_shader.h
+
+$(INTDIR)/pcps4_xinput.o: compat/pcps4_xinput.c compat/pcps4_xinput.h compat/pcps4_compat.h
+	@mkdir -p "$(dir $@)"
+	$(CC) $(CFLAGS) -o "$@" "$<"
 	@mkdir -p "$(dir $@)"
 	$(CXX) $(CXXFLAGS) -o "$@" "$<"
 
@@ -170,10 +176,10 @@ $(STATUS_OBJ): compat/pcps4_status.c compat/pcps4_status.h compat/pcps4_gfx.h
 $(INTDIR):
 	@mkdir -p "$(INTDIR)"
 
-$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ)
+$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ)
 	@test -n "$(OBJS)" || (echo "ERROR: no PC source files found in pc_source/."; exit 1)
 	$(LD) $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) \
-	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(GNM_RENDERER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) -o "$@" $(LDFLAGS)
+	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(GNM_RENDERER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) -o "$@" $(LDFLAGS)
 
 eboot.bin: $(ELF)
 	@test -n "$(OO_PS4_TOOLCHAIN)" || (echo "ERROR: OO_PS4_TOOLCHAIN is not set."; exit 1)

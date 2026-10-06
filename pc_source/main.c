@@ -1,23 +1,30 @@
 /*
  * Windows-style PC input source.
- * PcPs4 translates the supported Win32/MSVC surface before compilation.
+ * This file is intentionally written against a small Win32/MSVC surface.
+ * PcPs4 translates it before OpenOrbis compiles it.
  */
 
 #include <stdio.h>
 #include <windows.h>
+
+void pcps4_runtime_demo(char *buffer, size_t buffer_size);
 
 static volatile LONG demo_value = 0;
 
 int main(void)
 {
     DWORD start = GetTickCount64();
+    char buffer[32];
+
     InterlockedIncrement(&demo_value);
     Sleep(10);
+    pcps4_runtime_demo(buffer, sizeof(buffer));
 
     printf("PcPs4 translated source is running.\n");
     printf("Elapsed: %u ms\n", (unsigned)(GetTickCount64() - start));
     printf("PID: %u\n", GetCurrentProcessId());
     printf("Value: %d\n", (int)demo_value);
+    printf("Buffer: %s\n", buffer);
 
     return 0;
 }

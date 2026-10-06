@@ -18,6 +18,7 @@ const char *text = "Sleep(GetTickCount64())";
 DWORD started = GetTickCount64();
 Sleep(1);
 BOOL ok = TRUE;
+InterlockedIncrement(&counter);
 """
         translated, report, status = translate(source, strict=True)
 
@@ -26,6 +27,7 @@ BOOL ok = TRUE;
         self.assertIn('uint32_t started = pcps4_monotonic_ms();', translated)
         self.assertIn('pcps4_sleep_ms(1);', translated)
         self.assertIn('int ok = 1;', translated)
+        self.assertIn('pcps4_interlocked_increment(&counter);', translated)
         self.assertEqual(report["blockers"], [])
 
     def test_comments_and_strings_are_not_rewritten(self):

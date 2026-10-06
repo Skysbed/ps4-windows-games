@@ -1,64 +1,107 @@
 # PcPs4
 
-PcPs4 is a source-level translation layer that takes PC-oriented C/C++ source, rewrites a supported subset of Windows/MSVC APIs into portable PcPs4 compatibility calls, and then builds the translated result with the OpenOrbis PS4 Toolchain.
+PcPs4 is a source-level translation layer for moving PC-oriented C/C++ projects toward PS4 homebrew builds.
 
-## The pipeline
+It takes source written against a supported subset of Windows/MSVC APIs, rewrites that source into PcPs4 compatibility calls, and then sends the translated sources through the OpenOrbis PS4 Toolchain.
 
-    PC / Windows-style C/C++
-            |
-            v
-    tools/pcps4_translate.py
-            |
-            v
-    PcPs4 compatibility layer
-            |
-            v
-    OpenOrbis Clang -> ld.lld
-            |
-            v
-    ELF -> create-fself -> eboot.bin
+## Pipeline
 
-The translator is intentionally source-level. It does not claim to convert an arbitrary Windows .exe. Code that depends on DirectX, WinSock, Win32 GUI, registry, DLL loading, or other unsupported subsystems is reported as a blocker instead of being silently broken.
+    PC / Windows-style C or C++
+                |
+                v
+       pcps4_translate.py
+                |
+                v
+       PcPs4 compatibility layer
+                |
+                v
+       OpenOrbis Clang / Clang++
+                |
+                v
+           ld.lld + ELF
+                |
+                v
+             create-fself
+                |
+                v
+             eboot.bin
 
-## Currently translated
+This is source translation, not binary conversion. An arbitrary Windows .exe is not magically portable to PS4 because its executable format, imports, graphics APIs, filesystem APIs, ABI and runtime may all depend on Windows.
 
-- windows.h / synchapi.h -> pcps4_compat.h
+## What translates now
+
+Headers:
+- windows.h -> pcps4_compat.h
+- synchapi.h -> pcps4_compat.h
+
+Timing/process:
 - Sleep(ms) -> pcps4_sleep_ms(ms)
 - GetTickCount64() -> pcps4_monotonic_ms()
 - GetTickCount() -> 32-bit cast of pcps4_monotonic_ms()
 - GetCurrentProcessId() -> pcps4_get_current_process_id()
+
+Atomics:
 - InterlockedIncrement/Decrement -> compiler atomic wrappers
-- common Win32 scalar types such as DWORD, BOOL, UINT, LONG, HRESULT
-- MSVC calling conventions/storage annotations such as WINAPI and __stdcall
-- _stricmp/_strnicmp/stricmp/strnicmp -> POSIX string comparison
-- ZeroMemory/RtlZeroMemory/CopyMemory/MoveMemory -> libc memory operations
 
-Comments and string/character literals are protected from rewriting.
+Common Win32/MSVC types:
+- DWORD, WORD, BYTE
+- UINT, UINT64, ULONG
+- LONG, LONGLONG, ULONGLONG
+- HRESULT, BOOL, INT
+- CHAR, WCHAR
+- LPCSTR, LPSTR, LPVOID, PVOID, SIZE_T
+- __int64
 
-## Unsupported APIs
+MSVC annotations:
+- WINAPI, __stdcall, __cdecl, __fastcall
+- supported __declspec(dllimport/dllexport/nothrow)
 
-The translator detects and reports, among others:
+String/memory compatibility:
+- _stricmp/_strnicmp/stricmp/strnicmp -> strcasecmp/strncasecmp
+- ZeroMemory/RtlZeroMemory -> memset
+- CopyMemory -> memcpy
+- MoveMemory -> memmove
+
+The scanner masks comments and string/character literals before matching, so text such as "Sleep(GetTickCount64())" is not rewritten.
+
+## Blockers
+
+Strict translation reports unsupported Windows subsystems before the compiler runs:
 
 - DirectX headers/APIs
 - Winsock
-- Win32 window/message APIs
+- Win32 GUI/message APIs
 - Windows DLL loading
 - Windows registry
 - Win32 file APIs
 - Win32 synchronization APIs
 
-Strict mode makes these blockers a hard build failure.
+That is intentional. A blocker means the project needs a subsystem-level port rather than an unsafe regex rewrite.
 
-## Use the translator directly
+## Multi-file projects
+
+Put PC source in pc_source/:
+
+    pc_source/main.c
+    pc_source/runtime.c
+    pc_source/game.cpp
+
+The Makefile discovers C and C++ files automatically, translates each one into build/generated/, and links all generated object files.
+
+Translate without linking:
+
+    make translate
+
+Run the translator directly:
 
     python3 tools/pcps4_translate.py pc_source/main.c \
       --out build/generated/main.c \
       --report build/translation.json \
       --strict
 
-## Build the app
+## Build
 
-Set the OpenOrbis toolchain root:
+Install OpenOrbis and set its root:
 
     export OO_PS4_TOOLCHAIN=/path/to/OpenOrbis-PS4-Toolchain
 
@@ -68,23 +111,19 @@ Then:
     make translate
     make
 
-The build produces:
+Outputs:
 
-- build/generated/main.c
-- build/translation.json
-- build/PcPs4.elf
-- build/PcPs4.oelf
-- eboot.bin
+    build/generated/*.c
+    build/generated/*.cpp
+    build/translation.json
+    build/PcPs4.elf
+    build/PcPs4.oelf
+    eboot.bin
 
-The Makefile follows the OpenOrbis sample flow: Clang targets x86_64-pc-freebsd12-elf, the OpenOrbis linker script and libraries are used for the ELF, and create-fself creates eboot.bin.
+The OpenOrbis integration follows the upstream sample build model: PS4-compatible x86-64 compilation, the OpenOrbis linker script/libraries, and create-fself for eboot generation.
 
-## Roadmap
+## Next translation work
 
-1. Multi-file translation.
-2. More Win32 filesystem/threading/process APIs.
-3. Socket/network translation.
-4. DirectX-to-PS4 graphics abstraction.
-5. Automatic project discovery and dependency mapping.
-6. GP4/package generation.
+The architecture is ready for deeper adapters. The next substantial layer is filesystem/path handling, threading/synchronization, socket translation, and eventually a graphics abstraction for PC projects that currently talk directly to DirectX.
 
 OpenOrbis: https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain

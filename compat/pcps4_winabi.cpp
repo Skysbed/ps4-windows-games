@@ -23,6 +23,16 @@ static const char *pcps4_winabi_strrchr(const char *a, int c)
     return strrchr(a, c);
 }
 
+static void PCPS4_MS_ABI pcps4_winabi_abort(void)
+{
+    abort();
+}
+
+static void PCPS4_MS_ABI pcps4_winabi_exit(int code)
+{
+    exit(code);
+}
+
 /*
  * Each assignment below is a compiler-generated MS-x64 thunk. The original
  * implementation remains System-V so translated PcPs4 code can continue
@@ -109,8 +119,8 @@ void pcps4_winabi_fill(pcps4_winabi_exports *exports)
     WABI(strtoul_fn, strtoul);
     WABI(strtoll_fn, strtoll);
     WABI(strtoull_fn, strtoull);
-    WABI(abort_fn, abort);
-    WABI(exit_fn, exit);
+    WABI(abort_fn, pcps4_winabi_abort);
+    WABI(exit_fn, pcps4_winabi_exit);
     WABI(fopen_fn, fopen);
     WABI(fclose_fn, fclose);
     WABI(fread_fn, fread);

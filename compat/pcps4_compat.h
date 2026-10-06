@@ -414,33 +414,7 @@ static inline int pcps4_wide_to_utf8(
     return 0;
 }
 
-static inline BOOL pcps4_CreateFileW(
-    LPCWSTR path,
-    uint32_t desired_access,
-    uint32_t share_mode,
-    void *security_attributes,
-    uint32_t creation_disposition,
-    uint32_t attributes,
-    void *template_file)
-{
-    char utf8[1024];
-
-    if (pcps4_wide_to_utf8(path, utf8, sizeof(utf8)) != 0)
-        return FALSE;
-
-    return (pcps4_CreateFileA(
-        utf8,
-        desired_access,
-        share_mode,
-        security_attributes,
-        creation_disposition,
-        attributes,
-        template_file) != INVALID_HANDLE_VALUE)
-        ? TRUE
-        : FALSE;
-}
-
-static inline HANDLE pcps4_CreateFileW_handle(
+static inline HANDLE pcps4_CreateFileW(
     LPCWSTR path,
     uint32_t desired_access,
     uint32_t share_mode,

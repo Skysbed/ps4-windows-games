@@ -11,6 +11,121 @@
 #include <time.h>
 
 static __thread DWORD g_last_error = 0;
+typedef struct pcps4_module_handle {
+    uint32_t magic;
+    char name[128];
+} pcps4_module_handle;
+
+#define PCPS4_MODULE_MAGIC 0x504d4f44u
+
+static pcps4_pe_resolver *g_resolver = NULL;
+
+static int module_name_normalize(
+    const char *input,
+    char *output,
+    size_t output_size)
+{
+    const char *base;
+    size_t i;
+    size_t length;
+
+    if (input == NULL || output == NULL || output_size < 2)
+        return -1;
+
+    base = strrchr(input, '/');
+    base = base != NULL ? base + 1 : input;
+
+    length = strlen(base);
+    if (length + 1 > output_size)
+        return -1;
+
+    for (i = 0; i < length; ++i) {
+        char ch = base[i];
+        if (ch >= 'A' && ch <= 'Z')
+            ch = (char)(ch - 'A' + 'a');
+        output[i] = ch;
+    }
+    output[length] = '\0';
+
+    if (strchr(output, '.') == NULL) {
+        static const char suffix[] = ".dll";
+        size_t have = strlen(output);
+        if (have + sizeof(suffix) > output_size)
+            return -1;
+        memcpy(output + have, suffix, sizeof(suffix));
+    }
+
+    return 0;
+}
+
+static HMODULE win_LoadLibraryA(LPCSTR name)
+{
+    pcps4_module_handle *module;
+    char normalized[128];
+
+    if (module_name_normalize(name, normalized, sizeof(normalized)) != 0) {
+        win_SetLastError(87);
+        return NULL;
+    }
+
+    module = (pcps4_module_handle *)calloc(1, sizeof(*module));
+    if (module == NULL) {
+        win_SetLastError(8);
+        return NULL;
+    }
+
+    module->magic = PCPS4_MODULE_MAGIC;
+    memcpy(module->name, normalized, strlen(normalized) + 1);
+    return (HMODULE)module;
+}
+
+static HMODULE win_GetModuleHandleA(LPCSTR name)
+{
+    return win_LoadLibraryA(name);
+}
+
+static FARPROC win_GetProcAddress(
+    HMODULE module,
+    LPCSTR name)
+{
+    pcps4_module_handle *handle = (pcps4_module_handle *)module;
+    void *fn = NULL;
+
+    if (name == NULL || g_resolver == NULL)
+        return NULL;
+
+    if (handle == NULL || handle->magic != PCPS4_MODULE_MAGIC) {
+        win_SetLastError(6);
+        return NULL;
+    }
+
+    if (name[0] >= '0' && name[0] <= '9') {
+        uint16_t ordinal = (uint16_t)strtoul(name, NULL, 10);
+        fn = pcps4_pe_resolver_lookup_ordinal(
+            g_resolver, handle->name, ordinal);
+    } else {
+        fn = pcps4_pe_resolver_lookup(
+            g_resolver, handle->name, name);
+    }
+
+    if (fn == NULL)
+        win_SetLastError(127);
+
+    return (FARPROC)fn;
+}
+
+static BOOL win_FreeLibrary(HMODULE module)
+{
+    pcps4_module_handle *handle = (pcps4_module_handle *)module;
+
+    if (handle == NULL || handle->magic != PCPS4_MODULE_MAGIC)
+        return FALSE;
+
+    handle->magic = 0;
+    free(handle);
+    return TRUE;
+}
+
 
 static DWORD win_GetLastError(void)
 {
@@ -212,6 +327,10 @@ static void register_kernel32(
     KREG("HeapFree", win_HeapFree);
     KREG("RtlMoveMemory", win_RtlMoveMemory);
     KREG("ExitProcess", win_ExitProcess);
+    KREG("LoadLibraryA", win_LoadLibraryA);
+    KREG("GetModuleHandleA", win_GetModuleHandleA);
+    KREG("GetProcAddress", win_GetProcAddress);
+    KREG("FreeLibrary", win_FreeLibrary);
 #undef KREG
 }
 
@@ -307,6 +426,7 @@ void pcps4_winapi_build_resolver(pcps4_pe_resolver *resolver)
         return;
 
     pcps4_pe_resolver_init(resolver);
+    g_resolver = resolver;
 
     register_kernel32(resolver, "KERNEL32.dll");
     register_kernel32(resolver, "KERNELBASE.dll");

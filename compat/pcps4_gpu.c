@@ -1161,8 +1161,6 @@ static int pcps4_cpu_draw_indexed(
 }
 
 int pcps4_gpu_context_draw_indexed(
-
-int pcps4_gpu_context_draw_indexed(
     pcps4_gpu_context_t *context,
     uint32_t index_count,
     uint32_t start_index,

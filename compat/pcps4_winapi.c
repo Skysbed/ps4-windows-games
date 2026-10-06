@@ -9,6 +9,7 @@
 #include "pcps4_dll.h"
 #include "pcps4_status.h"
 #include "pcps4_win32.h"
+#include "pcps4_dxgi.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -691,6 +692,18 @@ static void register_winsock(
 #undef WREG
 }
 
+static void register_dxgi(
+    pcps4_pe_resolver *resolver,
+    const char *dll)
+{
+    (void)pcps4_pe_resolver_register(
+        resolver, dll, "CreateDXGIFactory",
+        (void *)pcps4_abi_CreateDXGIFactory);
+    (void)pcps4_pe_resolver_register(
+        resolver, dll, "CreateDXGIFactory1",
+        (void *)pcps4_abi_CreateDXGIFactory1);
+}
+
 static void register_xinput(
     pcps4_pe_resolver *resolver,
     const char *dll)
@@ -753,6 +766,7 @@ void pcps4_winapi_build_resolver(pcps4_pe_resolver *resolver)
     register_kernel32(resolver, "KERNELBASE.dll");
     register_winsock(resolver, "WS2_32.dll");
     register_d3d11(resolver, "d3d11.dll");
+    register_dxgi(resolver, "dxgi.dll");
     register_xinput(resolver, "XINPUT1_4.dll");
     register_xinput(resolver, "XINPUT1_3.dll");
     register_ucrt(resolver, "ucrtbase.dll");

@@ -60,6 +60,7 @@ LOADER_OBJ := $(INTDIR)/pcps4_loader.o
 STATUS_OBJ := $(INTDIR)/pcps4_status.o
 XINPUT_OBJ := $(INTDIR)/pcps4_xinput.o
 WINAPI_OBJ := $(INTDIR)/pcps4_winapi.o
+WINABI_OBJ := $(INTDIR)/pcps4_winabi.o
 GAME_OBJ  := $(INTDIR)/pcps4_game.o
 D3D11_COM_OBJ := $(INTDIR)/pcps4_d3d11_com.o
 
@@ -115,6 +116,7 @@ PE_MAP_HOST_TEST := $(INTDIR)/pe_map_host_test
 PE_BIND_HOST_TEST := $(INTDIR)/pe_bind_host_test
 DXBC_HOST_TEST := $(INTDIR)/dxbc_host_test
 ABI_THUNK_HOST_TEST := $(INTDIR)/abi_thunk_host_test
+WINABI_SYNTAX_TEST := $(INTDIR)/winabi_syntax.ok
 
 all: pkg
 
@@ -181,9 +183,13 @@ $(INTDIR)/pcps4_xinput.o: compat/pcps4_xinput.c compat/pcps4_xinput.h compat/pcp
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
 
-$(WINAPI_OBJ): compat/pcps4_winapi.c compat/pcps4_winapi.h compat/pcps4_compat.h compat/pcps4_xinput.h compat/pcps4_pe.h
+$(WINAPI_OBJ): compat/pcps4_winapi.c compat/pcps4_winapi.h compat/pcps4_winabi.h compat/pcps4_compat.h compat/pcps4_xinput.h compat/pcps4_pe.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
+
+$(WINABI_OBJ): compat/pcps4_winabi.cpp compat/pcps4_winabi.h compat/pcps4_msabi.h compat/pcps4_compat.h compat/pcps4_xinput.h
+	@mkdir -p "$(dir $@)"
+	$(CXX) $(CXXFLAGS) -o "$@" "$<"
 
 $(GAME_OBJ): compat/pcps4_game.c compat/pcps4_game.h compat/pcps4_loader.h compat/pcps4_winapi.h
 	@mkdir -p "$(dir $@)"
@@ -212,10 +218,10 @@ $(STATUS_OBJ): compat/pcps4_status.c compat/pcps4_status.h compat/pcps4_gfx.h
 $(INTDIR):
 	@mkdir -p "$(INTDIR)"
 
-$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(D3D11_COM_OBJ)
+$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(WINABI_OBJ) $(GAME_OBJ) $(D3D11_COM_OBJ)
 	@test -n "$(OBJS)" || (echo "ERROR: no PC source files found in pc_source/."; exit 1)
 	$(LD) $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) \
-	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(GNM_RENDERER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(D3D11_COM_OBJ) -o "$@" $(LDFLAGS)
+	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(GNM_RENDERER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(WINABI_OBJ) $(GAME_OBJ) $(D3D11_COM_OBJ) -o "$@" $(LDFLAGS)
 
 $(EBOOT): $(ELF)
 	@test -n "$(OO_PS4_TOOLCHAIN)" || (echo "ERROR: OO_PS4_TOOLCHAIN is not set."; exit 1)
@@ -280,7 +286,7 @@ pkg: $(PKG) eboot.bin
 test:
 	$(PYTHON) -m unittest discover -s tests -v
 
-test-host: $(PE_HOST_TEST) $(PE_MAP_HOST_TEST) $(PE_BIND_HOST_TEST) $(DXBC_HOST_TEST) $(ABI_THUNK_HOST_TEST)
+test-host: $(PE_HOST_TEST) $(PE_MAP_HOST_TEST) $(PE_BIND_HOST_TEST) $(DXBC_HOST_TEST) $(ABI_THUNK_HOST_TEST) $(WINABI_SYNTAX_TEST)
 	"$(PE_HOST_TEST)"
 	"$(PE_MAP_HOST_TEST)"
 	"$(PE_BIND_HOST_TEST)"
@@ -301,6 +307,10 @@ $(DXBC_HOST_TEST): compat/pcps4_shader.c compat/pcps4_shader.h tests/dxbc_host_t
 
 $(ABI_THUNK_HOST_TEST): compat/pcps4_msabi.h tests/abi_thunk_host_test.cpp | $(INTDIR)
 	$(HOST_CXX) $(HOST_CXXFLAGS) -o "$@" tests/abi_thunk_host_test.cpp
+
+$(WINABI_SYNTAX_TEST): compat/pcps4_winabi.cpp compat/pcps4_winabi.h compat/pcps4_msabi.h compat/pcps4_compat.h compat/pcps4_xinput.h | $(INTDIR)
+	$(HOST_CXX) $(HOST_CXXFLAGS) -fsyntax-only compat/pcps4_winabi.cpp
+	@touch "$@"
 
 info:
 	@test -n "$(OO_PS4_TOOLCHAIN)" || (echo "ERROR: OO_PS4_TOOLCHAIN is not set."; exit 1)

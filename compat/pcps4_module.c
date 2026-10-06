@@ -307,6 +307,25 @@ static int register_export(
     return 0;
 }
 
+static int report_unresolved_module_import(
+    void *unused,
+    const char *dll,
+    int by_name,
+    const char *import_name,
+    uint16_t ordinal)
+{
+    (void)unused;
+
+    if (by_name)
+        printf("[pcps4] unresolved import: %s!%s\n",
+               dll, import_name);
+    else
+        printf("[pcps4] unresolved import: %s!#%u\n",
+               dll, (unsigned)ordinal);
+
+    return 0;
+}
+
 struct dependency_context {
     pcps4_module_loader *loader;
     int error;
@@ -501,18 +520,7 @@ pcps4_module_status pcps4_module_loader_load(
         (void)pcps4_pe_report_unresolved_imports(
             &module->image,
             loader->resolver,
-            /* Use the generic loader logger by printing here. */
-            [](void *unused, const char *dll, int by_name,
-               const char *import_name, uint16_t ordinal) -> int {
-                (void)unused;
-                if (by_name)
-                    printf("[pcps4] unresolved import: %s!%s\n",
-                           dll, import_name);
-                else
-                    printf("[pcps4] unresolved import: %s!#%u\n",
-                           dll, (unsigned)ordinal);
-                return 0;
-            },
+            report_unresolved_module_import,
             NULL);
         return PCPS4_MODULE_ERR_IMPORTS;
     }

@@ -14,6 +14,7 @@
  */
 
 #include "pcps4_loader.h"
+#include "pcps4_fault.h"  /* pcps4_fault_stage: crash breadcrumb */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -373,8 +374,10 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
             ((uint8_t *)mem + image.entry_point_rva);
 
     printf("[pcps4] entering binary at %p\n", (void *)entry);
+    pcps4_fault_stage("loader: PE entry (before WinMainCRTStartup)");
     {
         int ret = entry();
+        pcps4_fault_stage("loader: PE returned");
         if (out_entry_ret)
             *out_entry_ret = (int32_t)ret;
         printf("[pcps4] binary returned %d (0x%x)\n", ret, (unsigned)ret);

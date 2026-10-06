@@ -13,6 +13,16 @@ extern "C" {
  */
 int pcps4_fault_install(void);
 
+/*
+ * Record the stage the app is currently executing. This is a single pointer
+ * store (async-signal-safe and safe to call from inside a running PE's call
+ * chain - no stdio, no allocation), and `str` must point to a string literal
+ * with static lifetime. If the app then faults, the handler writes this label
+ * - plus the signal and faulting address - to /data/pcps4_crash.txt, so a
+ * crash can be pinpointed from the console without a PC attached.
+ */
+void pcps4_fault_stage(const char *str);
+
 #ifdef __cplusplus
 }
 #endif

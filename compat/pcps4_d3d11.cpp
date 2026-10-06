@@ -2,7 +2,7 @@
 #include "pcps4_d3d11.h"
 #include "pcps4_shader.h"
 #include "pcps4_gnm_renderer.h"
-#include "pcps4_status.h"  /* pcps4_status_log -> /data/pcps4_log.txt */
+#include "pcps4_fault.h"  /* pcps4_fault_stage: crash breadcrumb */
 
 #include <limits.h>
 #include <new>
@@ -305,6 +305,7 @@ HRESULT IDXGISwapChain::Present(UINT SyncInterval, UINT Flags)
         return E_FAIL;
 
     uint64_t current_frame = frame_id++;
+    pcps4_fault_stage("d3d11: IDXGISwapChain::Present");
 
     /* Stretch a CPU back buffer onto the display framebuffer first. */
     if (back_texture != NULL && graphics != NULL) {
@@ -314,44 +315,13 @@ HRESULT IDXGISwapChain::Present(UINT SyncInterval, UINT Flags)
         if (pcps4_gpu_texture_cpu_data(back_texture->native, &pixels,
                                        &pitch, &w, &h) != PCPS4_GPU_OK)
             return E_FAIL;
-
-        /*
-         * Present diagnostics -> /data/pcps4_log.txt (first 2 frames only).
-         * This records the real dimensions, pitch and a few source pixels so
-         * the present/scale path can be diagnosed from the log alone, without
-         * a PC attached to capture klog.
-         */
-        if (current_frame < 2) {
-            size_t last = (size_t)(h ? h - 1 : 0) * pitch;
-            size_t mido = (size_t)(h / 2) * pitch + (size_t)(w / 2) * 4u;
-            pcps4_status_log(
-                "[pcps4] present#%llu swap=%ux%u back=%ux%u pitch=%zu "
-                "display=%ux%u",
-                (unsigned long long)current_frame,
-                (unsigned)width, (unsigned)height,
-                (unsigned)w, (unsigned)h, pitch,
-                (unsigned)graphics->width, (unsigned)graphics->height);
-            pcps4_status_log(
-                "[pcps4]   src px: TL=%02x%02x%02x%02x "
-                "C=%02x%02x%02x%02x BL=%02x%02x%02x%02x",
-                pixels[0], pixels[1], pixels[2], pixels[3],
-                pixels[mido + 0], pixels[mido + 1],
-                pixels[mido + 2], pixels[mido + 3],
-                pixels[last + 0], pixels[last + 1],
-                pixels[last + 2], pixels[last + 3]);
-        }
-
+        pcps4_fault_stage("d3d11: Present blit");
         if (pcps4_gfx_blit_rgba8_scaled(graphics, pixels, w, h,
                                         (uint32_t)pitch) != PCPS4_GFX_OK)
             return E_FAIL;
-    } else if (current_frame < 2) {
-        pcps4_status_log(
-            "[pcps4] present#%llu no CPU back buffer (back_texture=%p "
-            "graphics=%p) swap=%ux%u",
-            (unsigned long long)current_frame,
-            (void *)back_texture, (void *)graphics,
-            (unsigned)width, (unsigned)height);
     }
+
+    pcps4_fault_stage("d3d11: Present flip");
 
     return pcps4_gpu_context_present(
                context,
@@ -364,6 +334,8 @@ HRESULT IDXGISwapChain::GetBuffer(
     UINT Buffer,
     ID3D11Texture2D **Resource)
 {
+    pcps4_fault_stage("d3d11: IDXGISwapChain::GetBuffer");
+
     if (Buffer != 0 ||
         Resource == NULL ||
         context == NULL ||
@@ -437,6 +409,8 @@ void ID3D11DeviceContext::OMSetRenderTargets(
 {
     (void)pDepthStencilView;
 
+    pcps4_fault_stage("d3d11: OMSetRenderTargets");
+
     if (native == NULL)
         return;
 
@@ -464,6 +438,8 @@ void ID3D11DeviceContext::ClearRenderTargetView(
     ID3D11RenderTargetView *pRenderTargetView,
     const float ColorRGBA[4])
 {
+    pcps4_fault_stage("d3d11: ClearRenderTargetView");
+
     if (native == NULL || ColorRGBA == NULL)
         return;
 
@@ -1158,6 +1134,8 @@ HRESULT ID3D11Device::CreateRenderTargetView(
 {
     (void)pDesc;
 
+    pcps4_fault_stage("d3d11: CreateRenderTargetView");
+
     if (pResource == NULL ||
         pResource->native == NULL ||
         ppRTView == NULL)
@@ -1503,6 +1481,8 @@ HRESULT pcps4_d3d11_create_device_and_swap_chain(
     ID3D11DeviceContext **context,
     IDXGISwapChain **swap_chain)
 {
+    pcps4_fault_stage("d3d11: CreateDeviceAndSwapChain");
+
     if (swap_chain_desc == NULL ||
         device == NULL ||
         context == NULL ||

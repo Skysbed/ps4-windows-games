@@ -13,6 +13,7 @@ struct pcps4_gpu_device {
 
 struct pcps4_gpu_context {
     uint32_t magic;
+    uint32_t refs;
     pcps4_gpu_device_t *device;
     pcps4_gpu_render_target_t *render_target;
     uint32_t primitive_topology;
@@ -145,14 +146,27 @@ pcps4_gpu_context_t *pcps4_gpu_context_create(pcps4_gpu_device_t *device)
     if (context == NULL) return NULL;
 
     context->magic = CTX_MAGIC;
+    context->refs = 1;
     context->device = device;
     context->primitive_topology = PCPS4_GPU_TOPOLOGY_TRIANGLELIST;
     return context;
 }
 
+void pcps4_gpu_context_add_ref(pcps4_gpu_context_t *context)
+{
+    if (!valid_context(context))
+        return;
+    if (context->refs != UINT32_MAX)
+        ++context->refs;
+}
+
 void pcps4_gpu_context_destroy(pcps4_gpu_context_t *context)
 {
     if (!valid_context(context)) return;
+    if (context->refs > 1) {
+        --context->refs;
+        return;
+    }
     context->magic = 0;
     context->graphics = NULL;
     context->gnm_renderer = NULL;

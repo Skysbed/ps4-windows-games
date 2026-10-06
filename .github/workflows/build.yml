@@ -1,0 +1,21 @@
+name: OpenOrbis build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build
+        uses: OpenOrbis/toolchain-action@main
+        with:
+          version: v0.5.1
+          command: make
+
+      - name: Verify eboot
+        run: test -f eboot.bin

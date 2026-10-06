@@ -29,6 +29,9 @@ void *pcps4_sys_vm_alloc(void *address, size_t length, uint32_t protection);
 int pcps4_sys_vm_free(void *address, size_t length);
 
 /* Files */
+void pcps4_sys_set_native_game_root(int enabled);
+int pcps4_sys_translate_path(const char *path, int writing,
+                             char *out, size_t out_size);
 pcps4_os_handle_t *pcps4_sys_file_open(const char *path,
                                         uint32_t desired_access,
                                         uint32_t share_mode,

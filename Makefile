@@ -65,6 +65,7 @@ DLL_OBJ   := $(INTDIR)/pcps4_dll.o
 D3D11_COM_OBJ := $(INTDIR)/pcps4_d3d11_com.o
 ABI_OBJ := $(INTDIR)/pcps4_abi.o
 WIN32_OBJ := $(INTDIR)/pcps4_win32.o
+DXGI_OBJ := $(INTDIR)/pcps4_dxgi.o
 
 ELF := $(INTDIR)/$(PROJECT).elf
 OELF := $(INTDIR)/$(PROJECT).oelf
@@ -208,6 +209,11 @@ $(WIN32_OBJ): compat/pcps4_win32.c compat/pcps4_win32.h compat/pcps4_compat.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
 
+
+$(DXGI_OBJ): compat/pcps4_dxgi.c compat/pcps4_dxgi.h compat/pcps4_d3d11_com.h compat/pcps4_compat.h
+	@mkdir -p "$(dir $@)"
+	$(CC) $(CFLAGS) -o "$@" "$<"
+
 $(SHADER_OBJ): compat/pcps4_shader.c compat/pcps4_shader.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
@@ -227,7 +233,7 @@ $(STATUS_OBJ): compat/pcps4_status.c compat/pcps4_status.h compat/pcps4_gfx.h
 $(INTDIR):
 	@mkdir -p "$(INTDIR)"
 
-$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(DLL_OBJ) $(D3D11_COM_OBJ) $(ABI_OBJ) $(WIN32_OBJ)
+$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(DLL_OBJ) $(D3D11_COM_OBJ) $(ABI_OBJ) $(WIN32_OBJ) $(DXGI_OBJ)
 	@test -n "$(OBJS)" || (echo "ERROR: no PC source files found in pc_source/."; exit 1)
 	$(LD) $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) \
 	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(GNM_RENDERER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(DLL_OBJ) $(D3D11_COM_OBJ) $(ABI_OBJ) $(WIN32_OBJ) -o "$@" $(LDFLAGS)

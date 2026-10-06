@@ -7,7 +7,7 @@
  *   - the resolved IAT slot now holds the registered handler pointer,
  *   - the ordinal (unregistered) slot is left NULL,
  *   - counts are resolved=1, unresolved=1.
- * Also exercises the resolver's register/replace/lookup directly.
+ * Also exercises both name- and ordinal-based resolver registration.
  */
 
 #include "../compat/pcps4_pe.h"
@@ -121,6 +121,7 @@ static void build_pe(uint8_t *b)
 
 /* A stand-in handler; we only compare its address. */
 static int fake_getprocaddress(void) { return 42; }
+static int fake_ordinal(void) { return 84; }
 
 static void test_resolver_api(void)
 {
@@ -131,6 +132,7 @@ static void test_resolver_api(void)
     CHECK(r.count == 0);
     CHECK(pcps4_pe_resolver_lookup(&r, "KERNEL32.dll", "GetProcAddress")
           == NULL);
+    CHECK(pcps4_pe_resolver_lookup_ordinal(&r, "KERNEL32.dll", 7) == NULL);
 
     CHECK(pcps4_pe_resolver_register(&r, "KERNEL32.dll", "GetProcAddress", p)
           == PCPS4_PE_OK);
@@ -140,6 +142,11 @@ static void test_resolver_api(void)
     /* Function name match is case-sensitive. */
     CHECK(pcps4_pe_resolver_lookup(&r, "KERNEL32.dll", "getprocaddress")
           == NULL);
+
+    CHECK(pcps4_pe_resolver_register_ordinal(
+              &r, "KERNEL32.dll", 7, (void *)fake_ordinal) == PCPS4_PE_OK);
+    CHECK(pcps4_pe_resolver_lookup_ordinal(
+              &r, "kernel32.dll", 7) == (void *)fake_ordinal);
 
     /* Re-registering replaces, does not grow. */
     CHECK(pcps4_pe_resolver_register(&r, "KERNEL32.dll", "GetProcAddress",
@@ -166,16 +173,20 @@ static void test_bind(void)
     pcps4_pe_resolver_init(&r);
     CHECK(pcps4_pe_resolver_register(&r, "KERNEL32.dll", "GetProcAddress", p)
           == PCPS4_PE_OK);
+    CHECK(pcps4_pe_resolver_register_ordinal(
+              &r, "KERNEL32.dll", 7, (void *)fake_ordinal)
+          == PCPS4_PE_OK);
 
     CHECK(pcps4_pe_bind_imports(&img, dest, sizeof(dest), &r,
                                 &resolved, &unresolved) == PCPS4_PE_OK);
-    CHECK(resolved == 1);
-    CHECK(unresolved == 1);
+    CHECK(resolved == 2);
+    CHECK(unresolved == 0);
 
     /* The by-name slot now holds our handler. */
     CHECK(get64(dest, IAT_RVA + 0) == (uint64_t)(uintptr_t)p);
-    /* The by-ordinal slot is left NULL (no name-based handler). */
-    CHECK(get64(dest, IAT_RVA + 8) == 0);
+    /* The by-ordinal slot is resolved through the ordinal registry. */
+    CHECK(get64(dest, IAT_RVA + 8) ==
+          (uint64_t)(uintptr_t)(void *)fake_ordinal);
 }
 
 static void test_load_unified(void)
@@ -191,13 +202,16 @@ static void test_load_unified(void)
     pcps4_pe_resolver_init(&r);
     CHECK(pcps4_pe_resolver_register(&r, "KERNEL32.dll", "GetProcAddress", p)
           == PCPS4_PE_OK);
+    CHECK(pcps4_pe_resolver_register_ordinal(
+              &r, "KERNEL32.dll", 7, (void *)fake_ordinal)
+          == PCPS4_PE_OK);
 
     /* One call does parse + map + bind. */
     CHECK(pcps4_pe_load(buf, sizeof(buf), dest, sizeof(dest),
                         0x140000000ull, &r, &img,
                         &resolved, &unresolved) == PCPS4_PE_OK);
-    CHECK(resolved == 1);
-    CHECK(unresolved == 1);
+    CHECK(resolved == 2);
+    CHECK(unresolved == 0);
     CHECK(get64(dest, IAT_RVA + 0) == (uint64_t)(uintptr_t)p);
 
     /* Resolver NULL skips binding but still maps. */

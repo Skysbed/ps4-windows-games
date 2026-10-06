@@ -30,6 +30,9 @@ extern "C" {
 
 typedef void *HANDLE;
 typedef uint32_t DWORD;
+typedef uint32_t UINT;
+typedef int32_t HRESULT;
+typedef uintptr_t ULONG_PTR;
 typedef uint16_t WORD;
 typedef int16_t SHORT;
 typedef uint8_t BYTE;

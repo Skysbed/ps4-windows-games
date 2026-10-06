@@ -30,9 +30,7 @@ When launched, PcPs4 shows its own results on the TV:
 - a top banner that turns fully green or red when all tests finish;
 - the app stays on the result screen (close it from the PS button menu).
 
-Each diagnostic PKG has package-versioned log files. For v3, use `/data/pcps4_v3_runtime_log.txt` for PcPs4 runtime/status messages, `/data/pcps4_v3_windows_game_log.txt` for Windows game execution, `/data/pcps4_v3_trace.txt` for execution-stage breadcrumbs, and `/data/pcps4_v3_crash.txt` for fatal faults.
-(retrievable over FTP). If the app ever crashes, the last line shows which step
-it reached.
+Each diagnostic package uses package-versioned logs. v4 uses /data/pcps4_v4_runtime_log.txt for PcPs4 status and results, /data/pcps4_v4_windows_game_log.txt for PE loading/import resolution/game execution, /data/pcps4_v4_trace.txt for detailed execution-stage breadcrumbs, and /data/pcps4_v4_crash.txt for fatal faults. v3 files are left separate so evidence from the two packages cannot be mistaken for each other.
 
 ## Components
 
@@ -118,9 +116,9 @@ the existing startup tests:
 
 Set `PCPS4_RUN_GAME=0` to return to the old status-screen-only behaviour.
 
-## Current v3 diagnostic scope
+## Current v4 diagnostic scope
 
-The v3 Windows PE probe exercises loading an adjacent PE DLL and resolving its export, DXGI adapter discovery, D3D11 swap-chain creation, vertex-buffer and input-layout setup, triangle-list `Draw` through the implemented CPU geometry backend, repeated `Present` calls, graphics cleanup, and return to the status screen. The CPU draw path currently consumes POSITION/COLOR data directly; it does not execute arbitrary DXBC shader programs.
+The v4 Windows PE diagnostic checks process-heap allocation, zero-memory initialization, reallocation, HeapSize, HeapValidate, and HeapFree; loads a bundled PE DLL and resolves its export; enumerates the DXGI adapter; creates a D3D11 swap chain; sets up a vertex buffer and input layout; issues a triangle-list Draw; presents 240 frames; releases graphics objects; and returns to the PcPs4 result screen. The CPU draw path currently consumes POSITION/COLOR data directly; it does not execute arbitrary DXBC shader programs.
 
 ## Open work
 

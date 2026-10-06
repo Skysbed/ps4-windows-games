@@ -56,6 +56,43 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
 void pcps4_pe_exit_process(uint32_t code);
 
 /*
+ * Load a PE32+ DLL from a PS4 filesystem path. Dependencies are resolved
+ * lazily through the supplied resolver. Successfully loaded modules remain
+ * mapped for the life of the process so exported function addresses stay
+ * valid for running game threads.
+ */
+void *pcps4_loader_load_library(
+    const char *path,
+    const pcps4_pe_resolver *resolver);
+
+/* Find an already-loaded module by Windows-style module name. */
+void *pcps4_loader_find_module(const char *name);
+
+/* Resolve an export from a DLL loaded by pcps4_loader_load_library(). */
+void *pcps4_loader_get_export(
+    void *module,
+    const char *name,
+    uint16_t ordinal);
+
+/* Release a module reference without unmapping live code. */
+int pcps4_loader_free_library(void *module);
+
+/* True when a module is a PcPs4-loaded Windows PE module base. */
+int pcps4_loader_is_module(void *module);
+
+/* Shared PE image-finalization helpers used by the DLL loader. */
+int pcps4_loader_apply_image_protections(
+    const pcps4_pe_image *image,
+    uint8_t *mem,
+    size_t map_size);
+int pcps4_loader_run_tls_callbacks(
+    const pcps4_pe_image *image,
+    uint8_t *mem,
+    size_t map_size);
+int pcps4_loader_entry_is_executable(
+    const pcps4_pe_image *image);
+
+/*
  * Self-contained hardware smoke test: builds a tiny PE whose entry is
  * `mov eax, 0x1234; ret`, runs it through pcps4_loader_run, and verifies the
  * returned value. Prints what happened. Returns 0 on success, non-zero on

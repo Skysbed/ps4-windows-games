@@ -7,10 +7,6 @@
 #define PCPS4_MS_ABI __attribute__((ms_abi))
 #else
 #define PCPS4_MS_ABI
-#ifdef __cplusplus
-}
-#endif
-
 #endif
 
 #ifndef S_OK
@@ -76,11 +72,14 @@ PCPS4_MS_ABI HRESULT pcps4_dxgi_create_device(
     const void *riid,
     void **device);
 
-
 PCPS4_MS_ABI HRESULT pcps4_abi_CreateDXGIFactory(
     const void *riid, void **factory);
 
 PCPS4_MS_ABI HRESULT pcps4_abi_CreateDXGIFactory1(
     const void *riid, void **factory);
 
+#ifdef __cplusplus
+}
 #endif
+
+#endif /* PCPS4_DXGI_H */

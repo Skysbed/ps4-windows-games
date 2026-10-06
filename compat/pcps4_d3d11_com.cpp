@@ -12,22 +12,22 @@ typedef struct PCPS4Guid {
     uint8_t data4[8];
 } PCPS4Guid;
 
-static PCPS4_MS_ABI const PCPS4Guid IID_IUnknown_PCPS4 = {
+static const PCPS4Guid IID_IUnknown_PCPS4 = {
     0x00000000u, 0x0000u, 0x0000u,
     {0xC0,0x00,0x00,0x00,0x00,0x00,0x00,0x46}
 };
 
-static PCPS4_MS_ABI const PCPS4Guid IID_ID3D11Device_PCPS4 = {
+static const PCPS4Guid IID_ID3D11Device_PCPS4 = {
     0xdb6f6ddbu, 0xac77u, 0x4e88u,
     {0x82,0x53,0x81,0x9d,0xf9,0xbb,0xf1,0x40}
 };
 
-static PCPS4_MS_ABI const PCPS4Guid IID_ID3D11DeviceContext_PCPS4 = {
+static const PCPS4Guid IID_ID3D11DeviceContext_PCPS4 = {
     0xc0bfa96cu, 0xe089u, 0x44fbu,
     {0x8e,0xaf,0x26,0xf8,0x79,0x61,0x90,0xda}
 };
 
-static PCPS4_MS_ABI const PCPS4Guid IID_IDXGISwapChain_PCPS4 = {
+static const PCPS4Guid IID_IDXGISwapChain_PCPS4 = {
     0x310d36a0u, 0xd2e7u, 0x4c0au,
     {0xaa,0x04,0x6a,0x9d,0x23,0xb8,0x88,0x6a}
 };
@@ -331,13 +331,13 @@ static PCPS4_MS_ABI PCPS4ComResource *wrap_resource(
 }
 
 /* Forward declarations for the static PCPS4_MS_ABI vtables. */
-static PCPS4_MS_ABI const void *g_device_vtbl[PCPS4_COM_DEVICE_SLOTS];
-static PCPS4_MS_ABI const void *g_context_vtbl[PCPS4_COM_CONTEXT_SLOTS];
-static PCPS4_MS_ABI const void *g_swap_vtbl[PCPS4_COM_SWAP_SLOTS];
-static PCPS4_MS_ABI const void *g_devicechild_vtbl[PCPS4_COM_RESOURCE_DEVICECHILD_SLOTS];
-static PCPS4_MS_ABI const void *g_view_vtbl[PCPS4_COM_RESOURCE_VIEW_SLOTS];
-static PCPS4_MS_ABI const void *g_desc_vtbl[PCPS4_COM_RESOURCE_DESC_SLOTS];
-static PCPS4_MS_ABI const void *g_resource_full_vtbl[PCPS4_COM_RESOURCE_DESC_FULL_SLOTS];
+static const void *g_device_vtbl[PCPS4_COM_DEVICE_SLOTS];
+static const void *g_context_vtbl[PCPS4_COM_CONTEXT_SLOTS];
+static const void *g_swap_vtbl[PCPS4_COM_SWAP_SLOTS];
+static const void *g_devicechild_vtbl[PCPS4_COM_RESOURCE_DEVICECHILD_SLOTS];
+static const void *g_view_vtbl[PCPS4_COM_RESOURCE_VIEW_SLOTS];
+static const void *g_desc_vtbl[PCPS4_COM_RESOURCE_DESC_SLOTS];
+static const void *g_resource_full_vtbl[PCPS4_COM_RESOURCE_DESC_FULL_SLOTS];
 
 static PCPS4_MS_ABI HRESULT com_device_query(
     PCPS4ComDevice *self,
@@ -1148,7 +1148,7 @@ static PCPS4_MS_ABI void vtbl_fill_hresult(const void **v, size_t n)
 
 static PCPS4_MS_ABI void init_vtables(void)
 {
-    static PCPS4_MS_ABI int initialized = 0;
+    static int initialized = 0;
     if (initialized) return;
     initialized = 1;
 

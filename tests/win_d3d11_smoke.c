@@ -428,6 +428,35 @@ static int check_dynamic_resolution(void)
     return 0;
 }
 
+static int check_local_dll(void)
+{
+    typedef int (WINAPI *local_probe_fn)(int);
+    HMODULE module;
+    FARPROC proc;
+    local_probe_fn probe;
+
+    module = LoadLibraryA("pcps4_local_smoke.dll");
+    if (module == NULL)
+        return 1;
+
+    proc = GetProcAddress(module, "PcPs4LocalProbe");
+    if (proc == NULL) {
+        FreeLibrary(module);
+        return 2;
+    }
+
+    probe = (local_probe_fn)proc;
+    if (probe(37) != 634) {
+        FreeLibrary(module);
+        return 3;
+    }
+
+    if (!FreeLibrary(module))
+        return 4;
+
+    return 0;
+}
+
 static int check_winsock(void)
 {
     WSADATA data;
@@ -831,17 +860,21 @@ void WINAPI WinMainCRTStartup(void)
     if (rc != 0)
         smoke_fail(90u + (UINT)rc);
 
+    rc = check_local_dll();
+    if (rc != 0)
+        smoke_fail(105u + (UINT)rc);
+
     rc = check_winsock();
     if (rc != 0)
-        smoke_fail(110u + (UINT)rc);
+        smoke_fail(120u + (UINT)rc);
 
     rc = check_xinput();
     if (rc != 0)
-        smoke_fail(130u + (UINT)rc);
+        smoke_fail(140u + (UINT)rc)
 
     rc = check_d3d11();
     if (rc != 0)
-        smoke_fail(150u + (UINT)rc);
+        smoke_fail(160u + (UINT)rc)
 
     ExitProcess(0);
 }

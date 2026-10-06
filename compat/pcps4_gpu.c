@@ -148,6 +148,7 @@ pcps4_gpu_context_t *pcps4_gpu_context_create(pcps4_gpu_device_t *device)
     context->magic = CTX_MAGIC;
     context->refs = 1;
     context->device = device;
+    context->cull_mode = 0; /* no culling until an RS state is explicitly bound */
     context->primitive_topology = PCPS4_GPU_TOPOLOGY_TRIANGLELIST;
     return context;
 }
@@ -635,6 +636,154 @@ int pcps4_gpu_context_set_primitive_topology(
     return PCPS4_GPU_OK;
 }
 
+int pcps4_gpu_context_set_depth_target(
+    pcps4_gpu_context_t *context,
+    pcps4_gpu_texture_t *texture)
+{
+    if (!valid_context(context))
+        return PCPS4_GPU_ERR_ARGUMENT;
+    if (texture != NULL && !valid_texture(texture))
+        return PCPS4_GPU_ERR_ARGUMENT;
+    if (texture != NULL &&
+        (texture->desc.format != PCPS4_GPU_FORMAT_R32_FLOAT ||
+         (texture->desc.bind_flags & PCPS4_GPU_BIND_DEPTH_STENCIL) == 0))
+        return PCPS4_GPU_ERR_UNSUPPORTED;
+    context->depth_target = texture;
+    return PCPS4_GPU_OK;
+}
+
+int pcps4_gpu_context_clear_depth(
+    pcps4_gpu_context_t *context,
+    float depth)
+{
+    if (!valid_context(context) || context->depth_target == NULL ||
+        context->depth_target->data == NULL)
+        return PCPS4_GPU_ERR_STATE;
+
+    if (depth < 0.0f) depth = 0.0f;
+    if (depth > 1.0f) depth = 1.0f;
+
+    size_t count =
+        (size_t)context->depth_target->desc.width *
+        context->depth_target->desc.height;
+    float *values = (float *)context->depth_target->data;
+    for (size_t i = 0; i < count; ++i)
+        values[i] = depth;
+    return PCPS4_GPU_OK;
+}
+
+int pcps4_gpu_context_set_depth_state(
+    pcps4_gpu_context_t *context,
+    uint32_t enabled,
+    uint32_t write_enabled)
+{
+    if (!valid_context(context))
+        return PCPS4_GPU_ERR_ARGUMENT;
+    context->depth_enabled = enabled ? 1u : 0u;
+    context->depth_write_enabled = write_enabled ? 1u : 0u;
+    return PCPS4_GPU_OK;
+}
+
+int pcps4_gpu_context_set_blend_state(
+    pcps4_gpu_context_t *context,
+    uint32_t enabled,
+    uint32_t src_blend,
+    uint32_t dst_blend)
+{
+    if (!valid_context(context))
+        return PCPS4_GPU_ERR_ARGUMENT;
+    context->blend_enabled = enabled ? 1u : 0u;
+    context->src_blend = src_blend;
+    context->dst_blend = dst_blend;
+    return PCPS4_GPU_OK;
+}
+
+int pcps4_gpu_context_set_cull_mode(
+    pcps4_gpu_context_t *context,
+    uint32_t cull_mode)
+{
+    if (!valid_context(context))
+        return PCPS4_GPU_ERR_ARGUMENT;
+    context->cull_mode = cull_mode;
+    return PCPS4_GPU_OK;
+}
+
+static int pcps4_set_slot4(
+    pcps4_gpu_buffer_t **slots,
+    uint32_t slot,
+    pcps4_gpu_buffer_t *buffer)
+{
+    if (slot >= 16 || (buffer != NULL && !valid_buffer(buffer)))
+        return PCPS4_GPU_ERR_ARGUMENT;
+    slots[slot] = buffer;
+    return PCPS4_GPU_OK;
+}
+
+static int pcps4_set_tex_slot(
+    pcps4_gpu_texture_t **slots,
+    uint32_t slot,
+    pcps4_gpu_texture_t *texture)
+{
+    if (slot >= 16 || (texture != NULL && !valid_texture(texture)))
+        return PCPS4_GPU_ERR_ARGUMENT;
+    slots[slot] = texture;
+    return PCPS4_GPU_OK;
+}
+
+int pcps4_gpu_context_set_constant_buffer(
+    pcps4_gpu_context_t *context,
+    uint32_t stage,
+    uint32_t slot,
+    pcps4_gpu_buffer_t *buffer)
+{
+    if (!valid_context(context))
+        return PCPS4_GPU_ERR_ARGUMENT;
+    return stage == PCPS4_GPU_SHADER_VERTEX
+        ? pcps4_set_slot4(context->vs_constant_buffers, slot, buffer)
+        : stage == PCPS4_GPU_SHADER_PIXEL
+            ? pcps4_set_slot4(context->ps_constant_buffers, slot, buffer)
+            : PCPS4_GPU_ERR_ARGUMENT;
+}
+
+int pcps4_gpu_context_set_shader_resource(
+    pcps4_gpu_context_t *context,
+    uint32_t stage,
+    uint32_t slot,
+    pcps4_gpu_texture_t *texture)
+{
+    if (!valid_context(context))
+        return PCPS4_GPU_ERR_ARGUMENT;
+    return stage == PCPS4_GPU_SHADER_VERTEX
+        ? pcps4_set_tex_slot(context->vs_shader_resources, slot, texture)
+        : stage == PCPS4_GPU_SHADER_PIXEL
+            ? pcps4_set_tex_slot(context->ps_shader_resources, slot, texture)
+            : PCPS4_GPU_ERR_ARGUMENT;
+}
+
+int pcps4_gpu_context_set_sampler(
+    pcps4_gpu_context_t *context,
+    uint32_t stage,
+    uint32_t slot,
+    uint32_t filter,
+    uint32_t address_u,
+    uint32_t address_v,
+    uint32_t address_w)
+{
+    uint32_t (*slots)[5];
+    if (!valid_context(context) || slot >= 16 || stage < PCPS4_GPU_SHADER_VERTEX ||
+        stage > PCPS4_GPU_SHADER_PIXEL)
+        return PCPS4_GPU_ERR_ARGUMENT;
+    slots = stage == PCPS4_GPU_SHADER_VERTEX
+        ? context->vs_samplers
+        : context->ps_samplers;
+    slots[slot][0] = filter;
+    slots[slot][1] = address_u;
+    slots[slot][2] = address_v;
+    slots[slot][3] = address_w;
+    slots[slot][4] = 1u;
+    return PCPS4_GPU_OK;
+}
+
 int pcps4_gpu_context_clear(
     pcps4_gpu_context_t *context,
     pcps4_gfx_color_t color)
@@ -664,7 +813,6 @@ int pcps4_gpu_context_clear(
                    ? PCPS4_GPU_OK
                    : PCPS4_GPU_ERR_BACKEND;
     }
-
     pcps4_gpu_texture_t *texture =
         context->render_target->texture;
 
@@ -678,6 +826,9 @@ int pcps4_gpu_context_clear(
 
     if (texture->data == NULL)
         return PCPS4_GPU_ERR_STATE;
+
+    if (context->depth_target != NULL)
+        (void)pcps4_gpu_context_clear_depth(context, 1.0f);
 
     /* RGBA8 textures store bytes r,g,b,a (D3D DXGI_FORMAT_R8G8B8A8). */
     for (uint32_t y = 0; y < texture->desc.height; ++y) {
@@ -799,8 +950,21 @@ static int pcps4_decode_float4(
     return 1;
 }
 
+static float pcps4_blend_factor(
+    uint32_t factor,
+    float src_alpha)
+{
+    switch (factor) {
+        case 1u: return 0.0f; /* ZERO */
+        case 2u: return 1.0f; /* ONE */
+        case 5u: return src_alpha; /* SRC_ALPHA */
+        case 6u: return 1.0f - src_alpha; /* INV_SRC_ALPHA */
+        default: return 1.0f;
+    }
+}
+
 static int pcps4_raster_triangle(
-    pcps4_gpu_texture_t *texture,
+    pcps4_gpu_context_t *context,
     const float p0[3],
     const float c0[4],
     const float p1[3],
@@ -808,81 +972,97 @@ static int pcps4_raster_triangle(
     const float p2[3],
     const float c2[4])
 {
+    pcps4_gpu_texture_t *texture;
     float area;
-    float min_x;
-    float max_x;
-    float min_y;
-    float max_y;
+    float min_x, max_x, min_y, max_y;
 
-    if (texture == NULL ||
+    if (context == NULL ||
+        !valid_context(context) ||
+        context->render_target == NULL ||
+        !valid_rtv(context->render_target))
+        return PCPS4_GPU_ERR_STATE;
+
+    texture = context->render_target->texture;
+    if (texture == NULL || texture->data == NULL ||
         p0 == NULL || p1 == NULL || p2 == NULL ||
         c0 == NULL || c1 == NULL || c2 == NULL)
         return PCPS4_GPU_ERR_ARGUMENT;
 
-    if (p0[2] < -1.0f || p0[2] > 1.0f ||
-        p1[2] < -1.0f || p1[2] > 1.0f ||
-        p2[2] < -1.0f || p2[2] > 1.0f)
-        return PCPS4_GPU_ERR_UNSUPPORTED;
-
-    area = pcps4_edge(
-        p0[0], p0[1], p1[0], p1[1], p2[0], p2[1]);
-
+    area = pcps4_edge(p0[0], p0[1], p1[0], p1[1], p2[0], p2[1]);
     if (area == 0.0f)
         return PCPS4_GPU_OK;
 
-    min_x = p0[0];
-    if (p1[0] < min_x) min_x = p1[0];
-    if (p2[0] < min_x) min_x = p2[0];
+    /* D3D11 default front face is counter-clockwise. */
+    if ((context->cull_mode == 3u && area > 0.0f) ||
+        (context->cull_mode == 2u && area < 0.0f))
+        return PCPS4_GPU_OK;
 
-    max_x = p0[0];
-    if (p1[0] > max_x) max_x = p1[0];
-    if (p2[0] > max_x) max_x = p2[0];
+    min_x = p0[0]; if (p1[0] < min_x) min_x = p1[0]; if (p2[0] < min_x) min_x = p2[0];
+    max_x = p0[0]; if (p1[0] > max_x) max_x = p1[0]; if (p2[0] > max_x) max_x = p2[0];
+    min_y = p0[1]; if (p1[1] < min_y) min_y = p1[1]; if (p2[1] < min_y) min_y = p2[1];
+    max_y = p0[1]; if (p1[1] > max_y) max_y = p1[1]; if (p2[1] > max_y) max_y = p2[1];
 
-    min_y = p0[1];
-    if (p1[1] < min_y) min_y = p1[1];
-    if (p2[1] < min_y) min_y = p2[1];
-
-    max_y = p0[1];
-    if (p1[1] > max_y) max_y = p1[1];
-    if (p2[1] > max_y) max_y = p2[1];
-
-    int32_t x0 = (int32_t)((min_x * 0.5f + 0.5f) *
-                           (float)texture->desc.width);
-    int32_t x1 = (int32_t)((max_x * 0.5f + 0.5f) *
-                           (float)texture->desc.width);
-    int32_t y0 = (int32_t)((-max_y * 0.5f + 0.5f) *
-                           (float)texture->desc.height);
-    int32_t y1 = (int32_t)((-min_y * 0.5f + 0.5f) *
-                           (float)texture->desc.height);
+    int32_t x0 = (int32_t)((min_x * 0.5f + 0.5f) * (float)texture->desc.width);
+    int32_t x1 = (int32_t)((max_x * 0.5f + 0.5f) * (float)texture->desc.width);
+    int32_t y0 = (int32_t)((-max_y * 0.5f + 0.5f) * (float)texture->desc.height);
+    int32_t y1 = (int32_t)((-min_y * 0.5f + 0.5f) * (float)texture->desc.height);
 
     if (x0 < 0) x0 = 0;
     if (y0 < 0) y0 = 0;
     if (x1 >= (int32_t)texture->desc.width) x1 = (int32_t)texture->desc.width - 1;
     if (y1 >= (int32_t)texture->desc.height) y1 = (int32_t)texture->desc.height - 1;
+    if (x0 > x1 || y0 > y1)
+        return PCPS4_GPU_OK;
 
     for (int32_t y = y0; y <= y1; ++y) {
         for (int32_t x = x0; x <= x1; ++x) {
             float px = ((float)x + 0.5f) / (float)texture->desc.width * 2.0f - 1.0f;
             float py = 1.0f - ((float)y + 0.5f) / (float)texture->desc.height * 2.0f;
-
             float w0 = pcps4_edge(p1[0], p1[1], p2[0], p2[1], px, py);
             float w1 = pcps4_edge(p2[0], p2[1], p0[0], p0[1], px, py);
             float w2 = pcps4_edge(p0[0], p0[1], p1[0], p1[1], px, py);
 
-            if ((area > 0.0f && w0 >= 0.0f && w1 >= 0.0f && w2 >= 0.0f) ||
-                (area < 0.0f && w0 <= 0.0f && w1 <= 0.0f && w2 <= 0.0f)) {
-                float inv_area = 1.0f / area;
-                float a0 = w0 * inv_area;
-                float a1 = w1 * inv_area;
-                float a2 = w2 * inv_area;
+            if (!((area > 0.0f && w0 >= 0.0f && w1 >= 0.0f && w2 >= 0.0f) ||
+                  (area < 0.0f && w0 <= 0.0f && w1 <= 0.0f && w2 <= 0.0f)))
+                continue;
 
-                pcps4_write_pixel(
-                    texture, x, y,
-                    c0[0] * a0 + c1[0] * a1 + c2[0] * a2,
-                    c0[1] * a0 + c1[1] * a1 + c2[1] * a2,
-                    c0[2] * a0 + c1[2] * a1 + c2[2] * a2,
-                    c0[3] * a0 + c1[3] * a1 + c2[3] * a2);
+            float inv_area = 1.0f / area;
+            float a0 = w0 * inv_area;
+            float a1 = w1 * inv_area;
+            float a2 = w2 * inv_area;
+            float depth = p0[2] * a0 + p1[2] * a1 + p2[2] * a2;
+            depth = depth * 0.5f + 0.5f;
+
+            if (context->depth_enabled && context->depth_target != NULL) {
+                float *depth_values = (float *)context->depth_target->data;
+                size_t depth_index = (size_t)y * context->depth_target->desc.width + (size_t)x;
+                float current = depth_values[depth_index];
+                if (depth >= current)
+                    continue;
+                if (context->depth_write_enabled)
+                    depth_values[depth_index] = depth;
             }
+
+            float sr = c0[0] * a0 + c1[0] * a1 + c2[0] * a2;
+            float sg = c0[1] * a0 + c1[1] * a1 + c2[1] * a2;
+            float sb = c0[2] * a0 + c1[2] * a1 + c2[2] * a2;
+            float sa = c0[3] * a0 + c1[3] * a1 + c2[3] * a2;
+
+            if (context->blend_enabled) {
+                uint8_t *row = texture->data + (size_t)y * texture->row_pitch;
+                float dr = row[x * 4u + 0] / 255.0f;
+                float dg = row[x * 4u + 1] / 255.0f;
+                float db = row[x * 4u + 2] / 255.0f;
+                float da = row[x * 4u + 3] / 255.0f;
+                float sf = pcps4_blend_factor(context->src_blend, sa);
+                float df = pcps4_blend_factor(context->dst_blend, sa);
+                sr = sr * sf + dr * df;
+                sg = sg * sf + dg * df;
+                sb = sb * sf + db * df;
+                sa = sa * sf + da * df;
+            }
+
+            pcps4_write_pixel(texture, x, y, sr, sg, sb, sa);
         }
     }
 
@@ -959,7 +1139,7 @@ static int pcps4_cpu_draw_trianglelist(
         }
 
         int rc = pcps4_raster_triangle(
-            texture, p[0], c[0], p[1], c[1], p[2], c[2]);
+            context, p[0], c[0], p[1], c[1], p[2], c[2]);
         if (rc != PCPS4_GPU_OK)
             return rc;
     }
@@ -1166,7 +1346,7 @@ static int pcps4_cpu_draw_indexed(
         }
 
         int rc = pcps4_raster_triangle(
-            texture, p[0], c[0], p[1], c[1], p[2], c[2]);
+            context, p[0], c[0], p[1], c[1], p[2], c[2]);
         if (rc != PCPS4_GPU_OK)
             return rc;
     }

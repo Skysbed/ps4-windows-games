@@ -25,6 +25,17 @@ It takes source written against a supported subset of Windows/MSVC APIs, rewrite
                 |
                 v
              eboot.bin
+                |
+                v
+             create-gp4
+                |
+                v
+           PkgTool.Core
+                |
+                v
+              .pkg
+
+The default `make` target builds the .pkg. The package is generated from eboot.bin and sce_sys/param.sfo using OpenOrbis's GP4/package tooling.
 
 This is source translation, not binary conversion. An arbitrary Windows .exe is not magically portable to PS4 because its executable format, imports, graphics APIs, filesystem APIs, ABI and runtime may all depend on Windows.
 
@@ -110,6 +121,7 @@ Then:
     make test
     make translate
     make
+    # same as: make pkg
 
 Outputs:
 
@@ -119,6 +131,9 @@ Outputs:
     build/PcPs4.elf
     build/PcPs4.oelf
     eboot.bin
+    build/package/IV0000-PCPS00001_00-PCPS4TRANSLATOR01.pkg
+
+GitHub Actions uploads the .pkg as the `PcPs4-PKG` artifact on a successful build.
 
 The OpenOrbis integration follows the upstream sample build model: PS4-compatible x86-64 compilation, the OpenOrbis linker script/libraries, and create-fself for eboot generation.
 

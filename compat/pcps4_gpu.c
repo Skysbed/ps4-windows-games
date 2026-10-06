@@ -27,6 +27,7 @@ struct pcps4_gpu_buffer {
     pcps4_gpu_device_t *device;
     pcps4_gpu_buffer_desc_t desc;
     uint8_t *data;
+    uint32_t mapped;
 };
 
 struct pcps4_gpu_texture {

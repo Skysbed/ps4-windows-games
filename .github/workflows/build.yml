@@ -8,55 +8,64 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    env:
+      OPENORBIS_VERSION: v0.5.4
+      OO_PS4_TOOLCHAIN: ${{ github.workspace }}/toolchain
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download OpenOrbis v0.5.4 LLVM 18 toolchain
-        env:
-          OPENORBIS_VERSION: v0.5.4
-        run: |
-          mkdir -p "$GITHUB_WORKSPACE/toolchain"
-          curl -fL "https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain/releases/download/$OPENORBIS_VERSION/toolchain-llvm-18.tar.gz" |
-            tar -xz --strip-components=2 -C "$GITHUB_WORKSPACE/toolchain"
-          echo "OO_PS4_TOOLCHAIN=$GITHUB_WORKSPACE/toolchain" >> "$GITHUB_ENV"
-
       - name: Install host build tools
         run: |
+          set -euxo pipefail
           sudo apt-get update
-          sudo apt-get install -y clang lld make python3
+          sudo apt-get install -y clang lld make python3 mingw-w64
 
-      - name: Test translation layer
-        run: make test
-
-      - name: Test PE loader (host)
-        run: make test-host
-
-      - name: Build native Windows D3D11 smoke binary
+      - name: Download OpenOrbis LLVM 18 toolchain
         run: |
-          sudo apt-get update
-          sudo apt-get install -y mingw-w64
-          mkdir -p build
-          x86_64-w64-mingw32-gcc \
-            -std=c11 \
-            -O2 \
-            -ffreestanding \
-            -fno-stack-protector \
-            -fno-asynchronous-unwind-tables \
-            -nostdlib \
-            -Wl,--entry=WinMainCRTStartup \
-            -Wl,--subsystem,windows \
-            -o build/win_d3d11_smoke.exe \
-            tests/win_d3d11_smoke.c \
-            -ld3d11 -lkernel32
-
-      - name: Verify OpenOrbis installation and packaging tools
-        run: |
+          set -euxo pipefail
+          rm -rf "$OO_PS4_TOOLCHAIN" toolchain.tar.gz
+          mkdir -p "$OO_PS4_TOOLCHAIN"
+          curl -fL --retry 4 --retry-all-errors --retry-delay 2             "https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain/releases/download/$OPENORBIS_VERSION/toolchain-llvm-18.tar.gz"             -o toolchain.tar.gz
+          tar -tzf toolchain.tar.gz >/dev/null
+          tar -xzf toolchain.tar.gz --strip-components=2 -C "$OO_PS4_TOOLCHAIN"
           test -f "$OO_PS4_TOOLCHAIN/link.x"
           test -f "$OO_PS4_TOOLCHAIN/lib/crt1.o"
           test -x "$OO_PS4_TOOLCHAIN/bin/linux/create-fself"
           test -x "$OO_PS4_TOOLCHAIN/bin/linux/create-gp4"
           test -x "$OO_PS4_TOOLCHAIN/bin/linux/PkgTool.Core"
+          rm -f toolchain.tar.gz
+
+      - name: Print build environment
+        run: |
+          set -euxo pipefail
+          git rev-parse HEAD
+          clang --version
+          lld --version
+          make --version | head -n 1
+          python3 --version
+          x86_64-w64-mingw32-gcc --version | head -n 1
+          printf 'OpenOrbis tools:\n'
+          ls -lh "$OO_PS4_TOOLCHAIN/bin/linux/create-fself"                 "$OO_PS4_TOOLCHAIN/bin/linux/create-gp4"                 "$OO_PS4_TOOLCHAIN/bin/linux/PkgTool.Core"
+
+      - name: Run translation and host tests
+        run: |
+          set -euxo pipefail
+          make test
+          make test-host
+
+      - name: Build native Windows D3D11 smoke binary
+        run: |
+          set -euxo pipefail
+          rm -rf build/win_d3d11_smoke.exe
+          mkdir -p build
+          x86_64-w64-mingw32-gcc             -std=c11             -O2             -ffreestanding             -fno-stack-protector             -fno-asynchronous-unwind-tables             -nostdlib             -Wl,--entry=WinMainCRTStartup             -Wl,--subsystem,windows             -o build/win_d3d11_smoke.exe             tests/win_d3d11_smoke.c             -ld3d11 -lkernel32
+          test -s build/win_d3d11_smoke.exe
+          file build/win_d3d11_smoke.exe
+          x86_64-w64-mingw32-objdump -p build/win_d3d11_smoke.exe |
+            sed -n '/The Import Tables/,$p' | head -n 100
 
       - name: Upload native Windows D3D11 smoke binary
         uses: actions/upload-artifact@v4
@@ -65,41 +74,83 @@ jobs:
           path: build/win_d3d11_smoke.exe
           if-no-files-found: error
 
-      - name: Translate, build and package
-        run: PCPS4_ENABLE_OPENGNM=0 make pkg
+      - name: Build and package base PS4 executable
+        run: |
+          set -euxo pipefail
+          PCPS4_ENABLE_OPENGNM=0           PCPS4_RUN_GAME=1           make -B pkg
+          test -s build/package/*.gp4
+          test -s build/package/*.pkg
+          test -s eboot.bin
 
-      - name: Upload installable PS4 package
+      - name: Validate base package contents
+        run: |
+          set -euxo pipefail
+          echo '--- base package tree ---'
+          find build/package -maxdepth 4 -type f -printf '%P %s bytes\n' | sort
+          test -f build/package/eboot.bin
+          test -f build/package/sce_sys/param.sfo
+          test -f build/package/sce_sys/icon0.png
+          test -f build/package/sce_sys/about/right.sprx
+          test -f build/package/sce_module/libc.prx
+          test -f build/package/sce_module/libSceFios2.prx
+          test -s build/package/*.pkg
+          test -s build/package/*.gp4
+
+      - name: Upload installable base PS4 package
         uses: actions/upload-artifact@v4
         with:
           name: PcPs4-PKG
           path: build/package/*.pkg
           if-no-files-found: error
 
-      - name: Upload eboot
+      - name: Upload base GP4 and eboot
         uses: actions/upload-artifact@v4
         with:
-          name: PcPs4-eboot
-          path: eboot.bin
+          name: PcPs4-PKG-Diagnostics
+          path: |
+            build/package/*.gp4
+            eboot.bin
           if-no-files-found: error
 
-      - name: Package native Windows D3D11 smoke binary for PS4
+      - name: Stage and package bundled Windows D3D11 smoke executable
         run: |
+          set -euxo pipefail
+          rm -rf build/win-game build/win-smoke
           mkdir -p build/win-game
           cp build/win_d3d11_smoke.exe build/win-game/game.exe
-          PCPS4_BUNDLED_GAME=1 \
-          PCPS4_GAME_DIR="$GITHUB_WORKSPACE/build/win-game" \
-          INTDIR=build/win-smoke \
-          PACKAGE_ROOT=build/win-smoke/package \
-          TITLE="PcPs4 Windows D3D11 Smoke" \
-          TITLE_ID=PCPS00002 \
-          CONTENT_ID=IV0000-PCPS00002_00-WIND3D11SMOKE001 \
-          make pkg
+          test -s build/win-game/game.exe
+
+          PCPS4_ENABLE_OPENGNM=0           PCPS4_RUN_GAME=1           PCPS4_BUNDLED_GAME=1           PCPS4_GAME_DIR="$GITHUB_WORKSPACE/build/win-game"           INTDIR=build/win-smoke           PACKAGE_ROOT=build/win-smoke/package           TITLE="PcPs4 Windows D3D11 Smoke"           TITLE_ID=PCPS00002           CONTENT_ID=IV0000-PCPS00002_00-WIND3D11SMOKE001           make -B pkg
+
+      - name: Validate bundled Windows PE package
+        run: |
+          set -euxo pipefail
+          echo '--- bundled package tree ---'
+          find build/win-smoke/package -maxdepth 6 -type f -printf '%P %s bytes\n' | sort
+          test -f build/win-smoke/package/game/game.exe
+          test -s build/win-smoke/package/game/game.exe
+          test -s build/win-smoke/package/*.gp4
+          test -s build/win-smoke/package/*.pkg
+
+          GP4="$(find build/win-smoke/package -maxdepth 1 -name '*.gp4' -type f -print -quit)"
+          echo '--- bundled GP4 ---'
+          sed -n '1,220p' "$GP4"
+          grep -Eq 'game/game\\.exe|game/game.exe' "$GP4"
 
       - name: Upload PS4 package containing native Windows D3D11 smoke binary
         uses: actions/upload-artifact@v4
         with:
           name: PcPs4-PKG-Windows-D3D11-Smoke
           path: build/win-smoke/package/*.pkg
+          if-no-files-found: error
+
+      - name: Upload bundled GP4 diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: PcPs4-PKG-Windows-D3D11-Smoke-Diagnostics
+          path: |
+            build/win-smoke/package/*.gp4
+            build/win-smoke/package/game/game.exe
           if-no-files-found: error
 
       - name: Upload translated source and report

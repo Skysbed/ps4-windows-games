@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <windows.h>
+#include "pcps4_status.h"
 
 void pcps4_runtime_demo(char *buffer, size_t buffer_size);
 int pcps4_gnm_smoke_run(void);

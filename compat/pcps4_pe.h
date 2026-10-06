@@ -42,6 +42,7 @@ typedef enum pcps4_pe_status {
 #define PCPS4_PE_MACHINE_AMD64 0x8664u
 #define PCPS4_PE_MAGIC_PE32PLUS 0x20bu
 #define PCPS4_PE_NUM_DATA_DIRECTORIES 16
+#define PCPS4_PE_DIRECTORY_EXPORT 0
 #define PCPS4_PE_DIRECTORY_IMPORT 1
 #define PCPS4_PE_DIRECTORY_BASERELOC 5
 #define PCPS4_PE_DIRECTORY_TLS 9
@@ -154,6 +155,8 @@ typedef struct pcps4_pe_symbol {
 typedef struct pcps4_pe_resolver {
     pcps4_pe_symbol symbols[PCPS4_PE_MAX_RESOLVER_SYMBOLS];
     uint32_t        count;
+    pcps4_pe_resolver_fallback_fn fallback;
+    void            *fallback_user;
 } pcps4_pe_resolver;
 
 void pcps4_pe_resolver_init(pcps4_pe_resolver *resolver);
@@ -177,6 +180,31 @@ pcps4_pe_status pcps4_pe_resolver_register_ordinal(
 void *pcps4_pe_resolver_lookup_ordinal(
     const pcps4_pe_resolver *resolver,
     const char *dll,
+    uint16_t ordinal);
+
+typedef void *(*pcps4_pe_resolver_fallback_fn)(
+    void *user,
+    const char *dll,
+    int by_name,
+    const char *name,
+    uint16_t ordinal);
+
+/*
+ * Optional lazy resolver used for DLL-backed imports. The flat registry is
+ * consulted first; this callback is only invoked when the registry has no
+ * match.
+ */
+
+/*
+ * Look up an exported symbol in a mapped PE image. Names are matched exactly;
+ * ordinals use the image's export ordinal base. Forwarded exports return NULL
+ * because they require resolving another module.
+ */
+void *pcps4_pe_lookup_export(
+    const pcps4_pe_image *image,
+    const uint8_t *mapped,
+    size_t mapped_size,
+    const char *name,
     uint16_t ordinal);
 
 /*

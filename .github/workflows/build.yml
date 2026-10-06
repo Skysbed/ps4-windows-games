@@ -158,6 +158,13 @@ jobs:
           path: build/win-smoke/package/*.pkg
           if-no-files-found: error
 
+      - name: Upload FINAL one-package PS4 Windows smoke
+        uses: actions/upload-artifact@v4
+        with:
+          name: PcPs4-FINAL-Windows-Game-Diagnostic-PKG
+          path: build/win-smoke/package/*.pkg
+          if-no-files-found: error
+
       - name: Upload bundled GP4 diagnostics
         uses: actions/upload-artifact@v4
         with:

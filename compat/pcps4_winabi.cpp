@@ -34,7 +34,7 @@ static void PCPS4_MS_ABI pcps4_winabi_exit(int code)
 }
 
 static FILE *pcps4_winabi_wfopen(
-    const wchar_t *path, const wchar_t *mode)
+    LPCWSTR path, LPCWSTR mode)
 {
     char utf8_path[1024];
     char utf8_mode[64];

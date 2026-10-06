@@ -3,3 +3,5 @@ x64/
 *.elf
 *.oelf
 *.pkg
+eboot.bin
+__pycache__/

@@ -8,6 +8,12 @@
 
 #include <sys/mman.h>
 
+extern int sceKernelUsleep(unsigned int microseconds);
+extern int32_t sceKernelMmap(void *addr, size_t len, int32_t prot,
+                             int32_t flags, int32_t fd, off_t offset,
+                             void **res);
+extern int32_t sceKernelMunmap(void *addr, size_t len);
+
 #define PCPS4_DLL_MAX_MODULES 96u
 #define PCPS4_DLL_NAME_MAX 128u
 #define PCPS4_DLL_PATH_MAX 1024u
@@ -22,7 +28,7 @@
 #define PCPS4_MS_ABI
 #endif
 
-typedef BOOL (PCPS4_MS_ABI *pcps4_dll_entry_fn)(
+typedef int (PCPS4_MS_ABI *pcps4_dll_entry_fn)(
     void *module,
     uint32_t reason,
     void *reserved);

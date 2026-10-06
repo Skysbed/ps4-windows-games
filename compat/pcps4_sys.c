@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200112L
 #include "pcps4_sys.h"
 
 #include <errno.h>

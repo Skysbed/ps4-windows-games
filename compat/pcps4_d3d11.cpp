@@ -62,6 +62,10 @@ HRESULT ID3D11InputLayout::apply(
         native_elements[i].format = elements[i].Format;
         native_elements[i].semantic_index =
             elements[i].SemanticIndex;
+        if (strcmp(elements[i].SemanticName, "POSITION") == 0)
+            native_elements[i].semantic_kind = 1u;
+        else if (strcmp(elements[i].SemanticName, "COLOR") == 0)
+            native_elements[i].semantic_kind = 2u;
     }
 
     return pcps4_gpu_context_set_input_layout(
@@ -486,6 +490,9 @@ void ID3D11DeviceContext::IASetPrimitiveTopology(
     if (Topology < D3D11_PRIMITIVE_TOPOLOGY_POINTLIST ||
         Topology > D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP)
         return;
+
+    (void)pcps4_gpu_context_set_primitive_topology(
+        native, (uint32_t)Topology);
 }
 
 HRESULT ID3D11DeviceContext::Map(

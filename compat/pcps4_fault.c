@@ -49,48 +49,29 @@ static void fd_write_uint(int fd, unsigned long value)
     fd_write_str(fd, &buf[i]);
 }
 
-static void fd_write_hex(int fd, uint64_t value)
-{
-    static const char digits[] = "0123456789abcdef";
-    char buf[19];
-    size_t i = sizeof(buf);
-    buf[--i] = '\0';
-    do {
-        buf[--i] = digits[value & 0xFu];
-        value >>= 4;
-    } while (value != 0 && i > 0);
-    (void)write(fd, "0x", 2);
-    fd_write_str(fd, &buf[i]);
-}
-
-static void emit_report(int fd, int signal_number, const void *fault_addr)
+static void emit_report(int fd, int signal_number)
 {
     fd_write_str(fd, "PcPs4: fatal fault signal=");
     fd_write_uint(fd, (unsigned long)signal_number);
-    fd_write_str(fd, " addr=");
-    fd_write_hex(fd, (uint64_t)(uintptr_t)fault_addr);
     fd_write_str(fd, " stage=");
     fd_write_str(fd, pcps4_stage);
     fd_write_str(fd, "\n");
 }
 
-static void pcps4_fault_handler(int signal_number, siginfo_t *info, void *ucontext)
+static void pcps4_fault_handler(int signal_number)
 {
-    const void *fault_addr = info != NULL ? info->si_addr : NULL;
     int fd;
-
-    (void)ucontext;
 
     if (pcps4_fault_seen)
         _exit(128 + signal_number);
     pcps4_fault_seen = 1;
 
     /* klog (captured over a PC) and a file on the console (captured over FTP). */
-    emit_report(STDERR_FILENO, signal_number, fault_addr);
+    emit_report(STDERR_FILENO, signal_number);
 
     fd = open(PCPS4_CRASH_PATH, O_WRONLY | O_CREAT | O_TRUNC, 0666);
     if (fd >= 0) {
-        emit_report(fd, signal_number, fault_addr);
+        emit_report(fd, signal_number);
         (void)close(fd);
     }
 
@@ -113,9 +94,9 @@ int pcps4_fault_install(void)
     struct sigaction action;
     size_t i;
 
+    action.sa_handler = pcps4_fault_handler;
     sigemptyset(&action.sa_mask);
-    action.sa_flags = SA_SIGINFO;
-    action.sa_sigaction = pcps4_fault_handler;
+    action.sa_flags = 0;
 
     for (i = 0; i < sizeof(signals) / sizeof(signals[0]); ++i) {
         if (sigaction(signals[i], &action, NULL) != 0) {

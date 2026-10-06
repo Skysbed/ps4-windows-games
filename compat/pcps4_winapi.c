@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200112L
 #include "pcps4_winapi.h"
 
 #include "pcps4_compat.h"
@@ -303,8 +304,6 @@ void pcps4_winapi_build_resolver(pcps4_pe_resolver *resolver)
     register_ucrt(resolver, "VCRUNTIME140.dll");
     register_ucrt(resolver, "MSVCRT.dll");
 
-    (void)pcps4_pe_resolver_register_ordinal(
-        resolver, "KERNEL32.dll", 1, (void *)win_GetLastError);
 
     /*
      * Some compilers import the memory functions from the API-set CRT DLL

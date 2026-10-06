@@ -711,6 +711,16 @@ static void register_kernel32(
     KREG("IsDebuggerPresent", pcps4_abi_IsDebuggerPresent);
     KREG("GetFileAttributesA", pcps4_abi_GetFileAttributesA);
     KREG("GetFileAttributesW", pcps4_abi_GetFileAttributesW);
+    KREG("FindFirstFileA", pcps4_abi_FindFirstFileA);
+    KREG("FindFirstFileW", pcps4_abi_FindFirstFileW);
+    KREG("FindNextFileA", pcps4_abi_FindNextFileA);
+    KREG("FindNextFileW", pcps4_abi_FindNextFileW);
+    KREG("FindClose", pcps4_abi_FindClose);
+    KREG("GetFileAttributesExA", pcps4_abi_GetFileAttributesExA);
+    KREG("GetFileAttributesExW", pcps4_abi_GetFileAttributesExW);
+    KREG("GetLogicalDrives", pcps4_abi_GetLogicalDrives);
+    KREG("GetDriveTypeA", pcps4_abi_GetDriveTypeA);
+    KREG("GetDriveTypeW", pcps4_abi_GetDriveTypeW);
     KREG("RegisterClassExA", pcps4_abi_RegisterClassExA);
     KREG("RegisterClassExW", pcps4_abi_RegisterClassExW);
     KREG("UnregisterClassA", pcps4_abi_UnregisterClassA);

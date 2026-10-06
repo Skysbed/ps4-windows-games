@@ -115,7 +115,8 @@ static int valid_rtv(const pcps4_gpu_render_target_t *r)
 static int valid_format(pcps4_gpu_format_t format)
 {
     return format == PCPS4_GPU_FORMAT_RGBA8_UNORM ||
-           format == PCPS4_GPU_FORMAT_BGRA8_UNORM;
+           format == PCPS4_GPU_FORMAT_BGRA8_UNORM ||
+           format == PCPS4_GPU_FORMAT_R32_FLOAT;
 }
 
 pcps4_gpu_device_t *pcps4_gpu_device_create(void)
@@ -237,6 +238,16 @@ void pcps4_gpu_buffer_destroy(pcps4_gpu_buffer_t *buffer)
     free(buffer->data);
     buffer->data = NULL;
     free(buffer);
+}
+
+int pcps4_gpu_buffer_get_size(
+    const pcps4_gpu_buffer_t *buffer,
+    size_t *size)
+{
+    if (!valid_buffer(buffer) || size == NULL)
+        return PCPS4_GPU_ERR_ARGUMENT;
+    *size = buffer->desc.size;
+    return PCPS4_GPU_OK;
 }
 
 int pcps4_gpu_buffer_update(pcps4_gpu_buffer_t *buffer,

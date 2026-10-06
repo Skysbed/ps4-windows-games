@@ -239,12 +239,12 @@ pcps4_pe_status pcps4_pe_iterate_exports(const pcps4_pe_image *image,
     uint32_t names_rva;
     uint32_t ordinals_rva;
     uint32_t functions_off;
-    uint32_t names_off;
-    uint32_t ordinals_off;
+    uint32_t names_off = 0;
+    uint32_t ordinals_off = 0;
     uint32_t ordinal_base;
     uint32_t function_count;
     uint32_t name_count;
-    uint32_t i;
+    uint8_t *named = NULL;
     pcps4_pe_status rc;
 
     if (image == NULL || cb == NULL)
@@ -254,7 +254,6 @@ pcps4_pe_status pcps4_pe_iterate_exports(const pcps4_pe_image *image,
     export_size = image->directory_size[PCPS4_PE_DIRECTORY_EXPORT];
     if (export_rva == 0 || export_size == 0)
         return PCPS4_PE_OK;
-
     if (export_size < 40u)
         return PCPS4_PE_ERR_TRUNCATED;
 
@@ -262,9 +261,7 @@ pcps4_pe_status pcps4_pe_iterate_exports(const pcps4_pe_image *image,
     if (rc != PCPS4_PE_OK)
         return rc;
 
-    /* IMAGE_EXPORT_DIRECTORY fields used here:
-     * Base, NumberOfFunctions, NumberOfNames,
-     * AddressOfFunctions, AddressOfNames, AddressOfNameOrdinals. */
+    /* IMAGE_EXPORT_DIRECTORY: Base, function/name counts and three tables. */
     if (!pe_read_u32(image->data, image->size, (size_t)export_off + 16, &ordinal_base) ||
         !pe_read_u32(image->data, image->size, (size_t)export_off + 20, &function_count) ||
         !pe_read_u32(image->data, image->size, (size_t)export_off + 24, &name_count) ||
@@ -276,6 +273,7 @@ pcps4_pe_status pcps4_pe_iterate_exports(const pcps4_pe_image *image,
     if (function_count == 0)
         return PCPS4_PE_OK;
 
+    /* Keep table walking bounded. named[] is one byte per function slot. */
     if (function_count > 0x100000u || name_count > 0x100000u)
         return PCPS4_PE_ERR_OVERFLOW;
 
@@ -288,73 +286,111 @@ pcps4_pe_status pcps4_pe_iterate_exports(const pcps4_pe_image *image,
         if (pcps4_pe_rva_to_offset(image, names_rva, &names_off) != PCPS4_PE_OK ||
             pcps4_pe_rva_to_offset(image, ordinals_rva, &ordinals_off) != PCPS4_PE_OK)
             return PCPS4_PE_ERR_BAD_OFFSET;
-    } else {
-        names_off = 0;
-        ordinals_off = 0;
+        named = (uint8_t *)calloc((size_t)function_count, 1);
+        if (named == NULL)
+            return PCPS4_PE_ERR_NO_SPACE;
     }
 
-    for (i = 0; i < function_count; ++i) {
+    /* Report all named exports first and mark their function-table slots. */
+    for (uint32_t n = 0; n < name_count; ++n) {
+        uint16_t function_index;
+        uint32_t name_rva_entry;
+        uint32_t name_file_off;
         uint32_t function_rva;
-        uint32_t ordinal = ordinal_base + i;
-        const char *name = NULL;
+        uint32_t ordinal;
+        const char *name;
         const char *forwarder = NULL;
 
-        if (ordinal < ordinal_base)
-            return PCPS4_PE_ERR_OVERFLOW;
-
-        if (!pe_read_u32(image->data, image->size,
-                         (size_t)functions_off + (size_t)i * 4u,
-                         &function_rva))
+        if (!pe_read_u16(image->data, image->size,
+                         (size_t)ordinals_off + (size_t)n * 2u,
+                         &function_index)) {
+            free(named);
             return PCPS4_PE_ERR_TRUNCATED;
-
-        if (function_rva == 0)
-            continue;
-
-        if (name_count != 0) {
-            for (uint32_t n = 0; n < name_count; ++n) {
-                uint16_t name_index = 0;
-                uint32_t name_rva_entry = 0;
-                uint32_t name_file_off;
-
-                if (!pe_read_u16(image->data, image->size,
-                                 (size_t)ordinals_off + (size_t)n * 2u,
-                                 &name_index))
-                    return PCPS4_PE_ERR_TRUNCATED;
-
-                if ((uint32_t)name_index != i)
-                    continue;
-
-                if (!pe_read_u32(image->data, image->size,
-                                 (size_t)names_off + (size_t)n * 4u,
-                                 &name_rva_entry))
-                    return PCPS4_PE_ERR_TRUNCATED;
-
-                if (pcps4_pe_rva_to_offset(image, name_rva_entry,
-                                           &name_file_off) != PCPS4_PE_OK)
-                    return PCPS4_PE_ERR_BAD_OFFSET;
-
-                name = pe_read_cstr(image, name_file_off, 4096);
-                if (name == NULL)
-                    return PCPS4_PE_ERR_TRUNCATED;
-                break;
-            }
+        }
+        if ((uint32_t)function_index >= function_count) {
+            free(named);
+            return PCPS4_PE_ERR_BAD_OFFSET;
+        }
+        if (!pe_read_u32(image->data, image->size,
+                         (size_t)names_off + (size_t)n * 4u,
+                         &name_rva_entry)) {
+            free(named);
+            return PCPS4_PE_ERR_TRUNCATED;
+        }
+        if (pcps4_pe_rva_to_offset(image, name_rva_entry, &name_file_off) !=
+            PCPS4_PE_OK) {
+            free(named);
+            return PCPS4_PE_ERR_BAD_OFFSET;
+        }
+        name = pe_read_cstr(image, name_file_off, 4096);
+        if (name == NULL) {
+            free(named);
+            return PCPS4_PE_ERR_TRUNCATED;
+        }
+        if (!pe_read_u32(image->data, image->size,
+                         (size_t)functions_off + (size_t)function_index * 4u,
+                         &function_rva)) {
+            free(named);
+            return PCPS4_PE_ERR_TRUNCATED;
+        }
+        if (function_rva == 0) {
+            free(named);
+            return PCPS4_PE_ERR_BAD_OFFSET;
+        }
+        named[function_index] = 1;
+        ordinal = ordinal_base + (uint32_t)function_index;
+        if (ordinal < ordinal_base) {
+            free(named);
+            return PCPS4_PE_ERR_OVERFLOW;
         }
 
         if (function_rva >= export_rva &&
             function_rva - export_rva < export_size) {
             uint32_t forward_off;
             if (pcps4_pe_rva_to_offset(image, function_rva, &forward_off) !=
-                PCPS4_PE_OK)
+                PCPS4_PE_OK) {
+                free(named);
                 return PCPS4_PE_ERR_BAD_OFFSET;
+            }
             forwarder = pe_read_cstr(image, forward_off, 4096);
-            if (forwarder == NULL)
+            if (forwarder == NULL) {
+                free(named);
                 return PCPS4_PE_ERR_TRUNCATED;
+            }
         }
 
-        if (cb(user, name, ordinal, function_rva, forwarder))
+        if (cb(user, name, ordinal, function_rva, forwarder)) {
+            free(named);
             return PCPS4_PE_OK;
+        }
     }
 
+    /* Report valid ordinal-only exports. */
+    for (uint32_t i = 0; i < function_count; ++i) {
+        uint32_t function_rva;
+        uint32_t ordinal = ordinal_base + i;
+
+        if (named != NULL && named[i] != 0)
+            continue;
+        if (ordinal < ordinal_base) {
+            free(named);
+            return PCPS4_PE_ERR_OVERFLOW;
+        }
+        if (!pe_read_u32(image->data, image->size,
+                         (size_t)functions_off + (size_t)i * 4u,
+                         &function_rva)) {
+            free(named);
+            return PCPS4_PE_ERR_TRUNCATED;
+        }
+        if (function_rva == 0)
+            continue;
+        if (cb(user, NULL, ordinal, function_rva, NULL)) {
+            free(named);
+            return PCPS4_PE_OK;
+        }
+    }
+
+    free(named);
     return PCPS4_PE_OK;
 }
 

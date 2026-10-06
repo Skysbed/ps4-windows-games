@@ -239,7 +239,60 @@ static PCPS4_MS_ABI HMODULE win_LoadLibraryA(LPCSTR name)
 
 static PCPS4_MS_ABI HMODULE win_GetModuleHandleA(LPCSTR name)
 {
+    pcps4_module_handle *builtin;
+    char normalized[128];
+    void *loaded;
+
+    if (name == NULL)
+        return NULL;
+
+    loaded = pcps4_dll_find(name);
+    if (loaded != NULL)
+        return (HMODULE)loaded;
+
+    if (module_name_normalize(name, normalized, sizeof(normalized)) != 0)
+        return NULL;
+
+    /*
+     * Built-in modules have no mapped PE image but their exports are present
+     * in the resolver registry. Mirror Windows' GetModuleHandle semantics
+     * without forcing a file load.
+     */
+    builtin = (pcps4_module_handle *)calloc(1, sizeof(*builtin));
+    if (builtin == NULL)
+        return NULL;
+
+    builtin->magic = PCPS4_MODULE_MAGIC;
+    memcpy(builtin->name, normalized, strlen(normalized) + 1);
+    return (HMODULE)builtin;
+}
+
+static PCPS4_MS_ABI HMODULE win_LoadLibraryExA(
+    LPCSTR name,
+    HANDLE file,
+    DWORD flags)
+{
+    (void)file;
+    (void)flags;
     return win_LoadLibraryA(name);
+}
+
+static PCPS4_MS_ABI HMODULE win_LoadLibraryExW(
+    LPCWSTR name,
+    HANDLE file,
+    DWORD flags)
+{
+    char utf8[1024];
+
+    (void)file;
+    (void)flags;
+
+    if (pcps4_wide_to_utf8(name, utf8, sizeof(utf8)) != 0) {
+        win_SetLastError(87);
+        return NULL;
+    }
+
+    return win_LoadLibraryExA(utf8, file, flags);
 }
 
 static PCPS4_MS_ABI FARPROC win_GetProcAddress(
@@ -541,6 +594,8 @@ static void register_kernel32(
     KREG("ExitProcess", win_ExitProcess);
     KREG("LoadLibraryA", win_LoadLibraryA);
     KREG("LoadLibraryW", win_LoadLibraryW);
+    KREG("LoadLibraryExA", win_LoadLibraryExA);
+    KREG("LoadLibraryExW", win_LoadLibraryExW);
     KREG("GetModuleHandleA", win_GetModuleHandleA);
     KREG("GetModuleHandleW", win_GetModuleHandleW);
     KREG("GetProcAddress", win_GetProcAddress);

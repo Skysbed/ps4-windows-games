@@ -4,6 +4,8 @@
 #include "pcps4_compat.h"
 #include "pcps4_xinput.h"
 #include "pcps4_d3d11_com.h"
+#include "pcps4_loader.h"
+#include "pcps4_msabi.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -213,9 +215,14 @@ static HANDLE win_GetCurrentThread(void)
     return (HANDLE)(intptr_t)1;
 }
 
-static void win_ExitProcess(UINT code)
+static void PCPS4_MS_ABI win_ExitProcess(UINT code)
 {
-    exit((int)code);
+    /*
+     * Hand control back to the loader that launched this PE instead of
+     * calling the host exit(), which would tear down the whole PcPs4 app
+     * (status screen included) before the bundled-game result can be shown.
+     */
+    pcps4_loader_request_exit((int)code);
 }
 
 static DWORD win_GetEnvironmentVariableA(
@@ -407,12 +414,16 @@ static void register_d3d11(
     pcps4_pe_resolver *resolver,
     const char *dll)
 {
+    /*
+     * The PE calls these the Microsoft-x64 way, so register the MS-ABI entry
+     * points (…_ms), not the System V implementations.
+     */
     (void)pcps4_pe_resolver_register(
         resolver, dll, "D3D11CreateDeviceAndSwapChain",
-        (void *)pcps4_d3d11_com_create_device_and_swap_chain);
+        (void *)pcps4_d3d11_com_create_device_and_swap_chain_ms);
     (void)pcps4_pe_resolver_register(
         resolver, dll, "D3D11CreateDevice",
-        (void *)pcps4_d3d11_com_create_device);
+        (void *)pcps4_d3d11_com_create_device_ms);
 }
 
 static void register_winsock(
@@ -497,6 +508,16 @@ void pcps4_winapi_build_resolver(pcps4_pe_resolver *resolver)
     pcps4_pe_resolver_init(resolver);
     g_resolver = resolver;
 
+    /*
+     * ABI NOTE: a loaded PE calls every import the Microsoft-x64 way, so each
+     * registered entry must be an MS-ABI function (see pcps4_msabi.h). The
+     * D3D11 entries and ExitProcess below are wrapped; the remaining kernel32 /
+     * ucrt / winsock / xinput handlers are still registered as their System V
+     * implementations. That is enough for the D3D11 smoke binary (it imports
+     * only ExitProcess + D3D11CreateDeviceAndSwapChain), but a real game that
+     * imports e.g. memcpy or CreateFileA needs those wrapped the same way
+     * before it can call them without corrupting its own state.
+     */
     register_kernel32(resolver, "KERNEL32.dll");
     register_kernel32(resolver, "KERNELBASE.dll");
     register_winsock(resolver, "WS2_32.dll");

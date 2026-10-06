@@ -2,6 +2,7 @@
 #define PCPS4_D3D11_COM_H
 
 #include "pcps4_d3d11.h"
+#include "pcps4_msabi.h"
 
 #ifndef __cplusplus
 #include <stdint.h>
@@ -40,6 +41,37 @@ HRESULT pcps4_d3d11_com_create_device_and_swap_chain(
     void **ppImmediateContext);
 
 HRESULT pcps4_d3d11_com_create_device(
+    void *pAdapter,
+    D3D_DRIVER_TYPE DriverType,
+    void *Software,
+    D3D11_CREATE_DEVICE_FLAG Flags,
+    const D3D_FEATURE_LEVEL *pFeatureLevels,
+    UINT FeatureLevels,
+    UINT SDKVersion,
+    void **ppDevice,
+    D3D_FEATURE_LEVEL *pFeatureLevel,
+    void **ppImmediateContext);
+
+/*
+ * Microsoft-x64 entry points registered in the import table. A native Windows
+ * PE reaches D3D11 through these; they translate the MS calling convention to
+ * System V and forward to the implementations above.
+ */
+HRESULT PCPS4_MS_ABI pcps4_d3d11_com_create_device_and_swap_chain_ms(
+    void *pAdapter,
+    D3D_DRIVER_TYPE DriverType,
+    void *Software,
+    D3D11_CREATE_DEVICE_FLAG Flags,
+    const D3D_FEATURE_LEVEL *pFeatureLevels,
+    UINT FeatureLevels,
+    UINT SDKVersion,
+    const DXGI_SWAP_CHAIN_DESC *pSwapChainDesc,
+    void **ppSwapChain,
+    void **ppDevice,
+    D3D_FEATURE_LEVEL *pFeatureLevel,
+    void **ppImmediateContext);
+
+HRESULT PCPS4_MS_ABI pcps4_d3d11_com_create_device_ms(
     void *pAdapter,
     D3D_DRIVER_TYPE DriverType,
     void *Software,

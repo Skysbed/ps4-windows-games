@@ -1,4 +1,5 @@
 #include "pcps4_d3d11_com.h"
+#include "pcps4_msabi.h"
 
 #include <new>
 #include <stdlib.h>
@@ -1138,11 +1139,11 @@ static UINT ctx_get_flags(PCPS4ComContext *self)
 /* vtable population helpers. */
 static void vtbl_clear(const void **v, size_t n)
 {
-    for (size_t i=0;i<n;++i) v[i]=(const void *)com_noop;
+    for (size_t i=0;i<n;++i) v[i]=PCPS4_MSW(com_noop);
 }
 static void vtbl_fill_hresult(const void **v, size_t n)
 {
-    for (size_t i=0;i<n;++i) v[i]=(const void *)com_nyi;
+    for (size_t i=0;i<n;++i) v[i]=PCPS4_MSW(com_nyi);
 }
 
 static void init_vtables(void)
@@ -1160,87 +1161,87 @@ static void init_vtables(void)
     vtbl_fill_hresult(g_resource_full_vtbl, PCPS4_COM_RESOURCE_DESC_FULL_SLOTS);
 
     /* ID3D11Device: QI/AddRef/Release + selected creation methods. */
-    g_device_vtbl[0]=(const void *)com_device_query;
-    g_device_vtbl[1]=(const void *)com_device_addref;
-    g_device_vtbl[2]=(const void *)com_device_release;
-    g_device_vtbl[3]=(const void *)device_create_buffer;
-    g_device_vtbl[5]=(const void *)device_create_texture2d;
-    g_device_vtbl[7]=(const void *)device_create_srv;
-    g_device_vtbl[9]=(const void *)device_create_rtv;
-    g_device_vtbl[10]=(const void *)device_create_dsv;
-    g_device_vtbl[11]=(const void *)device_create_input_layout;
-    g_device_vtbl[12]=(const void *)device_create_vs;
-    g_device_vtbl[15]=(const void *)device_create_ps;
-    g_device_vtbl[20]=(const void *)device_create_blend;
-    g_device_vtbl[21]=(const void *)device_create_depth_state;
-    g_device_vtbl[22]=(const void *)device_create_rasterizer;
-    g_device_vtbl[23]=(const void *)device_create_sampler;
-    g_device_vtbl[37]=(const void *)device_get_feature_level;
-    g_device_vtbl[38]=(const void *)device_get_creation_flags;
-    g_device_vtbl[39]=(const void *)device_get_removed_reason;
-    g_device_vtbl[40]=(const void *)device_get_immediate_context;
-    g_device_vtbl[41]=(const void *)device_set_exception_mode;
-    g_device_vtbl[42]=(const void *)device_get_exception_mode;
+    g_device_vtbl[0]=PCPS4_MSW(com_device_query);
+    g_device_vtbl[1]=PCPS4_MSW(com_device_addref);
+    g_device_vtbl[2]=PCPS4_MSW(com_device_release);
+    g_device_vtbl[3]=PCPS4_MSW(device_create_buffer);
+    g_device_vtbl[5]=PCPS4_MSW(device_create_texture2d);
+    g_device_vtbl[7]=PCPS4_MSW(device_create_srv);
+    g_device_vtbl[9]=PCPS4_MSW(device_create_rtv);
+    g_device_vtbl[10]=PCPS4_MSW(device_create_dsv);
+    g_device_vtbl[11]=PCPS4_MSW(device_create_input_layout);
+    g_device_vtbl[12]=PCPS4_MSW(device_create_vs);
+    g_device_vtbl[15]=PCPS4_MSW(device_create_ps);
+    g_device_vtbl[20]=PCPS4_MSW(device_create_blend);
+    g_device_vtbl[21]=PCPS4_MSW(device_create_depth_state);
+    g_device_vtbl[22]=PCPS4_MSW(device_create_rasterizer);
+    g_device_vtbl[23]=PCPS4_MSW(device_create_sampler);
+    g_device_vtbl[37]=PCPS4_MSW(device_get_feature_level);
+    g_device_vtbl[38]=PCPS4_MSW(device_get_creation_flags);
+    g_device_vtbl[39]=PCPS4_MSW(device_get_removed_reason);
+    g_device_vtbl[40]=PCPS4_MSW(device_get_immediate_context);
+    g_device_vtbl[41]=PCPS4_MSW(device_set_exception_mode);
+    g_device_vtbl[42]=PCPS4_MSW(device_get_exception_mode);
 
     /* Context methods: indices match the public D3D11 base vtable. */
-    g_context_vtbl[0]=(const void *)com_context_query;
-    g_context_vtbl[1]=(const void *)com_context_addref;
-    g_context_vtbl[2]=(const void *)com_context_release;
-    g_context_vtbl[3]=(const void *)com_context_get_device;
-    g_context_vtbl[7]=(const void *)ctx_VSSetConstantBuffers;
-    g_context_vtbl[8]=(const void *)ctx_PSSetShaderResources;
-    g_context_vtbl[9]=(const void *)ctx_PSSetShader;
-    g_context_vtbl[10]=(const void *)ctx_PSSetSamplers;
-    g_context_vtbl[11]=(const void *)ctx_VSSetShader;
-    g_context_vtbl[12]=(const void *)ctx_DrawIndexed;
-    g_context_vtbl[13]=(const void *)ctx_Draw;
-    g_context_vtbl[14]=(const void *)ctx_Map;
-    g_context_vtbl[15]=(const void *)ctx_Unmap;
-    g_context_vtbl[16]=(const void *)ctx_PSSetConstantBuffers;
-    g_context_vtbl[17]=(const void *)ctx_IASetInputLayout;
-    g_context_vtbl[18]=(const void *)ctx_IASetVertexBuffers;
-    g_context_vtbl[19]=(const void *)ctx_IASetIndexBuffer;
-    g_context_vtbl[20]=(const void *)com_noop;
-    g_context_vtbl[21]=(const void *)com_noop;
-    g_context_vtbl[24]=(const void *)ctx_IASetPrimitiveTopology;
-    g_context_vtbl[25]=(const void *)ctx_VSSetShaderResources;
-    g_context_vtbl[26]=(const void *)ctx_VSSetSamplers;
-    g_context_vtbl[33]=(const void *)ctx_OMSetRenderTargets;
-    g_context_vtbl[35]=(const void *)ctx_OMSetBlendState;
-    g_context_vtbl[36]=(const void *)ctx_OMSetDepthStencilState;
-    g_context_vtbl[42]=(const void *)ctx_RSSetState;
-    g_context_vtbl[43]=(const void *)ctx_RSSetViewports;
-    g_context_vtbl[47]=(const void *)ctx_UpdateSubresource;
-    g_context_vtbl[49]=(const void *)ctx_ClearRenderTargetView;
-    g_context_vtbl[52]=(const void *)ctx_ClearDepthStencilView;
-    g_context_vtbl[110]=(const void *)ctx_Flush;
+    g_context_vtbl[0]=PCPS4_MSW(com_context_query);
+    g_context_vtbl[1]=PCPS4_MSW(com_context_addref);
+    g_context_vtbl[2]=PCPS4_MSW(com_context_release);
+    g_context_vtbl[3]=PCPS4_MSW(com_context_get_device);
+    g_context_vtbl[7]=PCPS4_MSW(ctx_VSSetConstantBuffers);
+    g_context_vtbl[8]=PCPS4_MSW(ctx_PSSetShaderResources);
+    g_context_vtbl[9]=PCPS4_MSW(ctx_PSSetShader);
+    g_context_vtbl[10]=PCPS4_MSW(ctx_PSSetSamplers);
+    g_context_vtbl[11]=PCPS4_MSW(ctx_VSSetShader);
+    g_context_vtbl[12]=PCPS4_MSW(ctx_DrawIndexed);
+    g_context_vtbl[13]=PCPS4_MSW(ctx_Draw);
+    g_context_vtbl[14]=PCPS4_MSW(ctx_Map);
+    g_context_vtbl[15]=PCPS4_MSW(ctx_Unmap);
+    g_context_vtbl[16]=PCPS4_MSW(ctx_PSSetConstantBuffers);
+    g_context_vtbl[17]=PCPS4_MSW(ctx_IASetInputLayout);
+    g_context_vtbl[18]=PCPS4_MSW(ctx_IASetVertexBuffers);
+    g_context_vtbl[19]=PCPS4_MSW(ctx_IASetIndexBuffer);
+    g_context_vtbl[20]=PCPS4_MSW(com_noop);
+    g_context_vtbl[21]=PCPS4_MSW(com_noop);
+    g_context_vtbl[24]=PCPS4_MSW(ctx_IASetPrimitiveTopology);
+    g_context_vtbl[25]=PCPS4_MSW(ctx_VSSetShaderResources);
+    g_context_vtbl[26]=PCPS4_MSW(ctx_VSSetSamplers);
+    g_context_vtbl[33]=PCPS4_MSW(ctx_OMSetRenderTargets);
+    g_context_vtbl[35]=PCPS4_MSW(ctx_OMSetBlendState);
+    g_context_vtbl[36]=PCPS4_MSW(ctx_OMSetDepthStencilState);
+    g_context_vtbl[42]=PCPS4_MSW(ctx_RSSetState);
+    g_context_vtbl[43]=PCPS4_MSW(ctx_RSSetViewports);
+    g_context_vtbl[47]=PCPS4_MSW(ctx_UpdateSubresource);
+    g_context_vtbl[49]=PCPS4_MSW(ctx_ClearRenderTargetView);
+    g_context_vtbl[52]=PCPS4_MSW(ctx_ClearDepthStencilView);
+    g_context_vtbl[110]=PCPS4_MSW(ctx_Flush);
 
     /* Resource vtables. */
     for (size_t i=0;i<PCPS4_COM_RESOURCE_DEVICECHILD_SLOTS;++i)
-        g_devicechild_vtbl[i]=(const void *)com_nyi;
-    g_devicechild_vtbl[0]=(const void *)com_resource_query;
-    g_devicechild_vtbl[1]=(const void *)com_resource_addref;
-    g_devicechild_vtbl[2]=(const void *)com_resource_release;
-    g_devicechild_vtbl[3]=(const void *)com_resource_get_device;
-    g_devicechild_vtbl[4]=(const void *)res_get_private;
-    g_devicechild_vtbl[5]=(const void *)res_set_private;
-    g_devicechild_vtbl[6]=(const void *)res_set_private_i;
+        g_devicechild_vtbl[i]=PCPS4_MSW(com_nyi);
+    g_devicechild_vtbl[0]=PCPS4_MSW(com_resource_query);
+    g_devicechild_vtbl[1]=PCPS4_MSW(com_resource_addref);
+    g_devicechild_vtbl[2]=PCPS4_MSW(com_resource_release);
+    g_devicechild_vtbl[3]=PCPS4_MSW(com_resource_get_device);
+    g_devicechild_vtbl[4]=PCPS4_MSW(res_get_private);
+    g_devicechild_vtbl[5]=PCPS4_MSW(res_set_private);
+    g_devicechild_vtbl[6]=PCPS4_MSW(res_set_private_i);
 
     for (size_t i=0;i<PCPS4_COM_RESOURCE_DESC_SLOTS;++i)
         g_desc_vtbl[i]=g_devicechild_vtbl[i < 7 ? i : 6];
-    g_desc_vtbl[7]=(const void *)res_get_desc;
+    g_desc_vtbl[7]=PCPS4_MSW(res_get_desc);
 
     for (size_t i=0;i<PCPS4_COM_RESOURCE_VIEW_SLOTS;++i)
         g_view_vtbl[i]=g_devicechild_vtbl[i < 7 ? i : 6];
-    g_view_vtbl[7]=(const void *)res_view_get_resource;
-    g_view_vtbl[8]=(const void *)res_get_desc;
+    g_view_vtbl[7]=PCPS4_MSW(res_view_get_resource);
+    g_view_vtbl[8]=PCPS4_MSW(res_get_desc);
 
     for (size_t i=0;i<PCPS4_COM_RESOURCE_DESC_FULL_SLOTS;++i)
         g_resource_full_vtbl[i]=g_desc_vtbl[i < 8 ? i : 7];
-    g_resource_full_vtbl[7]=(const void *)res_get_desc;
-    g_resource_full_vtbl[8]=(const void *)res_set_eviction;
-    g_resource_full_vtbl[9]=(const void *)res_get_eviction;
-    g_resource_full_vtbl[10]=(const void *)res_get_desc;
+    g_resource_full_vtbl[7]=PCPS4_MSW(res_get_desc);
+    g_resource_full_vtbl[8]=PCPS4_MSW(res_set_eviction);
+    g_resource_full_vtbl[9]=PCPS4_MSW(res_get_eviction);
+    g_resource_full_vtbl[10]=PCPS4_MSW(res_get_desc);
 }
 
 static HRESULT com_create_wrappers(
@@ -1390,4 +1391,47 @@ HRESULT pcps4_d3d11_com_create_device(
         com_swap_release((PCPS4ComSwapChain *)unused_swap);
 
     return hr;
+}
+
+/*
+ * MS-x64 entry points for the import table. These receive the Windows caller's
+ * arguments in the Microsoft convention and forward to the System V
+ * implementations above; the compiler emits the translation.
+ */
+HRESULT PCPS4_MS_ABI pcps4_d3d11_com_create_device_and_swap_chain_ms(
+    void *pAdapter,
+    D3D_DRIVER_TYPE DriverType,
+    void *Software,
+    D3D11_CREATE_DEVICE_FLAG Flags,
+    const D3D_FEATURE_LEVEL *pFeatureLevels,
+    UINT FeatureLevels,
+    UINT SDKVersion,
+    const DXGI_SWAP_CHAIN_DESC *pSwapChainDesc,
+    void **ppSwapChain,
+    void **ppDevice,
+    D3D_FEATURE_LEVEL *pFeatureLevel,
+    void **ppImmediateContext)
+{
+    return pcps4_d3d11_com_create_device_and_swap_chain(
+        pAdapter, DriverType, Software, Flags,
+        pFeatureLevels, FeatureLevels, SDKVersion, pSwapChainDesc,
+        ppSwapChain, ppDevice, pFeatureLevel, ppImmediateContext);
+}
+
+HRESULT PCPS4_MS_ABI pcps4_d3d11_com_create_device_ms(
+    void *pAdapter,
+    D3D_DRIVER_TYPE DriverType,
+    void *Software,
+    D3D11_CREATE_DEVICE_FLAG Flags,
+    const D3D_FEATURE_LEVEL *pFeatureLevels,
+    UINT FeatureLevels,
+    UINT SDKVersion,
+    void **ppDevice,
+    D3D_FEATURE_LEVEL *pFeatureLevel,
+    void **ppImmediateContext)
+{
+    return pcps4_d3d11_com_create_device(
+        pAdapter, DriverType, Software, Flags,
+        pFeatureLevels, FeatureLevels, SDKVersion,
+        ppDevice, pFeatureLevel, ppImmediateContext);
 }

@@ -58,6 +58,18 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
  */
 int pcps4_pe_exec_smoke(void);
 
+/*
+ * Return control from a running PE to pcps4_loader_run, as Win32 ExitProcess
+ * does. A native Windows entry point normally never returns - it ends by
+ * calling ExitProcess - and PcPs4's ExitProcess handler must NOT call the
+ * host exit(), or it would tear down the whole PcPs4 app (killing the status
+ * screen before it can report the result). This instead unwinds back to the
+ * pcps4_loader_run that launched the PE, which records `code` as the entry
+ * return value and keeps running. If no PE is currently executing it falls
+ * back to a normal process exit.
+ */
+void pcps4_loader_request_exit(int code);
+
 const char *pcps4_loader_status_str(pcps4_loader_status status);
 
 #ifdef __cplusplus

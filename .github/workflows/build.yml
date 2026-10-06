@@ -46,6 +46,8 @@ jobs:
             -nostdlib \
             -Wl,--entry=WinMainCRTStartup \
             -Wl,--subsystem,windows \
+            -Wl,--section-alignment,0x4000 \
+            -Wl,--file-alignment,0x200 \
             -o build/win_d3d11_smoke.exe \
             tests/win_d3d11_smoke.c \
             -ld3d11 -lkernel32

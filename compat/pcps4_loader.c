@@ -14,7 +14,9 @@
  */
 
 #include "pcps4_loader.h"
+#include "pcps4_msabi.h"
 
+#include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,7 +31,27 @@ extern int32_t sceKernelMmap(void *addr, size_t len, int32_t prot,
 extern int32_t sceKernelMprotect(const void *addr, size_t len, int prot);
 extern int32_t sceKernelMunmap(void *addr, size_t len);
 
-typedef int (*pcps4_entry_fn)(void);
+/*
+ * The PE entry point runs under the Microsoft x64 convention, so it is called
+ * through an MS-ABI pointer: the compiler then reserves the 32-byte shadow
+ * space and preserves the registers a Windows function expects. Calling it as
+ * a plain System V function would let it spill its arguments over our stack.
+ */
+typedef int (PCPS4_MS_ABI *pcps4_entry_fn)(void);
+
+/* Active ExitProcess unwind target (see pcps4_loader_request_exit). */
+static jmp_buf *g_pcps4_exit_jmp = NULL;
+static volatile int g_pcps4_exit_code = 0;
+
+void pcps4_loader_request_exit(int code)
+{
+    if (g_pcps4_exit_jmp != NULL) {
+        g_pcps4_exit_code = code;
+        longjmp(*g_pcps4_exit_jmp, 1);
+    }
+    /* No PE is running: behave like a real process exit. */
+    exit(code);
+}
 
 #define PCPS4_PAGE_SIZE 0x4000u
 
@@ -118,6 +140,21 @@ static int pcps4_apply_image_protections(
             page_prot[p] |= (uint8_t)prot;
     }
 
+    /*
+     * PE sections are 4 KiB-aligned but the PS4 page granule is 16 KiB, so a
+     * writable section and an executable section can land on the same page.
+     * Their union is then RWX, which a W^X console refuses - reported here
+     * explicitly because it is a layout problem (link the PE with
+     * --section-alignment=0x4000), not a generic kernel failure.
+     */
+    for (size_t p = 0; p < page_count; ++p) {
+        if ((page_prot[p] & PROT_WRITE) && (page_prot[p] & PROT_EXEC)) {
+            printf("[pcps4] page %zu needs write+execute (RWX); the PE's "
+                   "sections share a 16 KiB page - relink it with "
+                   "--section-alignment=0x4000\n", p);
+        }
+    }
+
     if (sceKernelMprotect(mem, map_size, PROT_NONE) != 0) {
         free(page_prot);
         return -1;
@@ -172,7 +209,8 @@ static int pcps4_run_tls_callbacks(
 {
     uint32_t tls_rva;
 
-    typedef void (*pcps4_tls_callback_fn)(
+    /* TLS callbacks are Windows code too: call them under the MS x64 ABI. */
+    typedef void (PCPS4_MS_ABI *pcps4_tls_callback_fn)(
         void *module,
         uint32_t reason,
         void *reserved);
@@ -368,10 +406,26 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
 
     printf("[pcps4] entering binary at %p\n", (void *)entry);
     {
-        int ret = entry();
-        if (out_entry_ret)
-            *out_entry_ret = (int32_t)ret;
-        printf("[pcps4] binary returned %d (0x%x)\n", ret, (unsigned)ret);
+        jmp_buf env;
+        jmp_buf *prev = g_pcps4_exit_jmp;
+
+        if (setjmp(env) == 0) {
+            /* Normal path: the PE is now the ExitProcess unwind target. */
+            g_pcps4_exit_jmp = &env;
+            int ret = entry();
+            g_pcps4_exit_jmp = prev;
+            if (out_entry_ret)
+                *out_entry_ret = (int32_t)ret;
+            printf("[pcps4] binary returned %d (0x%x)\n",
+                   ret, (unsigned)ret);
+        } else {
+            /* The PE called ExitProcess: control unwound back to here. */
+            g_pcps4_exit_jmp = prev;
+            if (out_entry_ret)
+                *out_entry_ret = (int32_t)g_pcps4_exit_code;
+            printf("[pcps4] binary called ExitProcess(%d)\n",
+                   g_pcps4_exit_code);
+        }
     }
 
     return PCPS4_LOADER_OK;

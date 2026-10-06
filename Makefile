@@ -107,11 +107,14 @@ LDFLAGS := -m elf_x86_64 -pie \
 
 # Host-compiled unit tests (run on the CI host, not the PS4 target).
 HOST_CC    ?= clang
+HOST_CXX   ?= clang++
 HOST_CFLAGS := -std=c11 -Wall -Wextra -Werror -O2
+HOST_CXXFLAGS := -std=c++17 -Wall -Wextra -Werror -O2
 PE_HOST_TEST := $(INTDIR)/pe_host_test
 PE_MAP_HOST_TEST := $(INTDIR)/pe_map_host_test
 PE_BIND_HOST_TEST := $(INTDIR)/pe_bind_host_test
 DXBC_HOST_TEST := $(INTDIR)/dxbc_host_test
+ABI_THUNK_HOST_TEST := $(INTDIR)/abi_thunk_host_test
 
 all: pkg
 
@@ -277,11 +280,12 @@ pkg: $(PKG) eboot.bin
 test:
 	$(PYTHON) -m unittest discover -s tests -v
 
-test-host: $(PE_HOST_TEST) $(PE_MAP_HOST_TEST) $(PE_BIND_HOST_TEST) $(DXBC_HOST_TEST)
+test-host: $(PE_HOST_TEST) $(PE_MAP_HOST_TEST) $(PE_BIND_HOST_TEST) $(DXBC_HOST_TEST) $(ABI_THUNK_HOST_TEST)
 	"$(PE_HOST_TEST)"
 	"$(PE_MAP_HOST_TEST)"
 	"$(PE_BIND_HOST_TEST)"
 	"$(DXBC_HOST_TEST)"
+	"$(ABI_THUNK_HOST_TEST)"
 
 $(PE_HOST_TEST): compat/pcps4_pe.c compat/pcps4_pe.h tests/pe_host_test.c | $(INTDIR)
 	$(HOST_CC) $(HOST_CFLAGS) -o "$@" compat/pcps4_pe.c tests/pe_host_test.c
@@ -294,6 +298,9 @@ $(PE_BIND_HOST_TEST): compat/pcps4_pe.c compat/pcps4_pe.h tests/pe_bind_host_tes
 
 $(DXBC_HOST_TEST): compat/pcps4_shader.c compat/pcps4_shader.h tests/dxbc_host_test.c | $(INTDIR)
 	$(HOST_CC) $(HOST_CFLAGS) -o "$@" compat/pcps4_shader.c tests/dxbc_host_test.c
+
+$(ABI_THUNK_HOST_TEST): compat/pcps4_msabi.h tests/abi_thunk_host_test.cpp | $(INTDIR)
+	$(HOST_CXX) $(HOST_CXXFLAGS) -o "$@" tests/abi_thunk_host_test.cpp
 
 info:
 	@test -n "$(OO_PS4_TOOLCHAIN)" || (echo "ERROR: OO_PS4_TOOLCHAIN is not set."; exit 1)

@@ -56,6 +56,7 @@ int pcps4_loader_run_tls_callbacks(
     const pcps4_pe_image *image, uint8_t *mem, size_t map_size);
 int pcps4_loader_run_dll_attach(
     const pcps4_pe_image *image, uint8_t *mem, size_t map_size);
+int pcps4_loader_entry_is_executable(const pcps4_pe_image *image);
 
 /*
  * Self-contained hardware smoke test: builds a tiny PE whose entry is

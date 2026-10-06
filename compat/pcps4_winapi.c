@@ -6,7 +6,7 @@
 #include "pcps4_d3d11_com.h"
 #include "pcps4_loader.h"
 #include "pcps4_module.h"
-#include "pcps4_msabi->h"
+#include "pcps4_msabi.h"
 #include "pcps4_winabi->h"
 
 #include <stdio.h>

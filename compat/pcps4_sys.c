@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <time.h>
@@ -37,6 +38,160 @@ struct pcps4_os_handle {
 };
 
 static uint32_t next_thread_id = 1;
+
+/*
+ * Low-level Win32 compatibility primitives used by the API façade.
+ * PS4 mappings use a 16 KiB page granule; keep the actual mapped length so
+ * VirtualFree can release the correct region even when the requested length
+ * was smaller or Windows supplied size == 0 for MEM_RELEASE.
+ */
+#define PCPS4_VM_PAGE_SIZE ((size_t)0x4000u)
+
+typedef struct pcps4_vm_region {
+    void *address;
+    size_t length;
+    struct pcps4_vm_region *next;
+} pcps4_vm_region_t;
+
+static pcps4_vm_region_t *vm_regions;
+static volatile int vm_regions_lock;
+static __thread uint32_t current_thread_id;
+
+extern int32_t sceKernelMmap(void *addr, size_t len, int32_t prot,
+                             int32_t flags, int32_t fd, off_t offset,
+                             void **res);
+extern int32_t sceKernelMunmap(void *addr, size_t len);
+
+static void vm_lock(void)
+{
+    while (__atomic_test_and_set(&vm_regions_lock, __ATOMIC_ACQUIRE)) {
+        (void)sceKernelUsleep(50);
+    }
+}
+
+static void vm_unlock(void)
+{
+    __atomic_clear(&vm_regions_lock, __ATOMIC_RELEASE);
+}
+
+static int vm_round_length(size_t length, size_t *rounded)
+{
+    if (length == 0 || rounded == NULL ||
+        length > SIZE_MAX - (PCPS4_VM_PAGE_SIZE - 1u))
+        return -1;
+    *rounded = (length + PCPS4_VM_PAGE_SIZE - 1u) &
+               ~(PCPS4_VM_PAGE_SIZE - 1u);
+    return *rounded == 0 ? -1 : 0;
+}
+
+uint64_t pcps4_sys_monotonic_ms(void)
+{
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+        return 0;
+    return (uint64_t)now.tv_sec * 1000u +
+           (uint64_t)now.tv_nsec / 1000000u;
+}
+
+uint32_t pcps4_sys_process_id(void)
+{
+    pid_t pid = getpid();
+    return pid > 0 ? (uint32_t)pid : 1u;
+}
+
+uint32_t pcps4_sys_thread_id(void)
+{
+    if (current_thread_id == 0) {
+        uint32_t id = __atomic_fetch_add(
+            &next_thread_id, 1u, __ATOMIC_SEQ_CST);
+        if (id == 0)
+            id = __atomic_fetch_add(&next_thread_id, 1u, __ATOMIC_SEQ_CST);
+        current_thread_id = id;
+    }
+    return current_thread_id;
+}
+
+int pcps4_sys_sleep_ms(uint32_t milliseconds)
+{
+    uint64_t remaining_us = (uint64_t)milliseconds * 1000u;
+
+    while (remaining_us != 0) {
+        uint32_t chunk = remaining_us > 1000000u
+            ? 1000000u : (uint32_t)remaining_us;
+        int rc = sceKernelUsleep(chunk);
+        if (rc != 0)
+            return rc;
+        remaining_us -= chunk;
+    }
+    return 0;
+}
+
+void *pcps4_sys_vm_alloc(void *address, size_t length, uint32_t protection)
+{
+    size_t map_length;
+    void *mapped = NULL;
+    pcps4_vm_region_t *region;
+    int32_t rc;
+
+    if (vm_round_length(length, &map_length) != 0)
+        return NULL;
+
+    region = (pcps4_vm_region_t *)calloc(1, sizeof(*region));
+    if (region == NULL)
+        return NULL;
+
+    rc = sceKernelMmap(address, map_length, (int32_t)protection,
+                       MAP_PRIVATE | MAP_ANON, -1, 0, &mapped);
+    if (rc != 0 || mapped == NULL) {
+        free(region);
+        return NULL;
+    }
+
+    region->address = mapped;
+    region->length = map_length;
+    vm_lock();
+    region->next = vm_regions;
+    vm_regions = region;
+    vm_unlock();
+    return mapped;
+}
+
+int pcps4_sys_vm_free(void *address, size_t length)
+{
+    pcps4_vm_region_t **link;
+    pcps4_vm_region_t *region;
+    int32_t rc;
+
+    (void)length; /* release uses the original mapping size, not caller size */
+    if (address == NULL)
+        return -1;
+
+    vm_lock();
+    link = &vm_regions;
+    while (*link != NULL && (*link)->address != address)
+        link = &(*link)->next;
+
+    region = *link;
+    if (region == NULL) {
+        vm_unlock();
+        return -1;
+    }
+    *link = region->next;
+    vm_unlock();
+
+    rc = sceKernelMunmap(region->address, region->length);
+    if (rc != 0) {
+        /* Keep the bookkeeping consistent if the kernel refuses to unmap. */
+        vm_lock();
+        region->next = vm_regions;
+        vm_regions = region;
+        vm_unlock();
+        return rc;
+    }
+
+    free(region);
+    return 0;
+}
 
 static pcps4_os_handle_t *make_handle(uint32_t kind)
 {

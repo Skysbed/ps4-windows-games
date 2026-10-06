@@ -303,7 +303,8 @@ int pcps4_loader_run_dll_attach(
     if (image->entry_point_rva == 0)
         return 0;
 
-    if ((size_t)image->entry_point_rva >= map_size)
+    if ((size_t)image->entry_point_rva >= map_size ||
+        !pcps4_loader_entry_is_executable(image))
         return -1;
 
     entry = (pcps4_dll_entry_fn)(void *)(
@@ -313,7 +314,7 @@ int pcps4_loader_run_dll_attach(
     return entry(mem, 1u, NULL) ? 0 : -1;
 }
 
-static int pcps4_entry_is_executable(
+int pcps4_loader_entry_is_executable(
     const pcps4_pe_image *image)
 {
     uint16_t i;
@@ -397,7 +398,7 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
         return PCPS4_LOADER_ERR_UNRESOLVED;
     }
 
-        if (!pcps4_entry_is_executable(&image)) {
+        if (!pcps4_loader_entry_is_executable(&image)) {
         printf("[pcps4] refusing to run: PE entry point is not in an "
                "executable section\n");
         sceKernelMunmap(mem, map_size);

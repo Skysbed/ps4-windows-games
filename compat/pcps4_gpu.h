@@ -20,7 +20,8 @@ typedef struct pcps4_gnm_renderer pcps4_gnm_renderer_t;
 
 typedef enum {
     PCPS4_GPU_FORMAT_RGBA8_UNORM = 1,
-    PCPS4_GPU_FORMAT_BGRA8_UNORM = 2
+    PCPS4_GPU_FORMAT_BGRA8_UNORM = 2,
+    PCPS4_GPU_FORMAT_R32_FLOAT = 3
 } pcps4_gpu_format_t;
 
 enum {
@@ -28,7 +29,8 @@ enum {
     PCPS4_GPU_BIND_INDEX_BUFFER     = 1u << 1,
     PCPS4_GPU_BIND_CONSTANT_BUFFER  = 1u << 2,
     PCPS4_GPU_BIND_SHADER_RESOURCE  = 1u << 3,
-    PCPS4_GPU_BIND_RENDER_TARGET    = 1u << 4
+    PCPS4_GPU_BIND_RENDER_TARGET    = 1u << 4,
+    PCPS4_GPU_BIND_DEPTH_STENCIL    = 1u << 5
 };
 
 enum {
@@ -115,6 +117,42 @@ int pcps4_gpu_context_get_input_layout(
 int pcps4_gpu_context_set_primitive_topology(
     pcps4_gpu_context_t *context,
     uint32_t topology);
+int pcps4_gpu_context_set_depth_target(
+    pcps4_gpu_context_t *context,
+    pcps4_gpu_texture_t *texture);
+int pcps4_gpu_context_clear_depth(
+    pcps4_gpu_context_t *context,
+    float depth);
+int pcps4_gpu_context_set_depth_state(
+    pcps4_gpu_context_t *context,
+    uint32_t enabled,
+    uint32_t write_enabled);
+int pcps4_gpu_context_set_blend_state(
+    pcps4_gpu_context_t *context,
+    uint32_t enabled,
+    uint32_t src_blend,
+    uint32_t dst_blend);
+int pcps4_gpu_context_set_cull_mode(
+    pcps4_gpu_context_t *context,
+    uint32_t cull_mode);
+int pcps4_gpu_context_set_constant_buffer(
+    pcps4_gpu_context_t *context,
+    uint32_t stage,
+    uint32_t slot,
+    pcps4_gpu_buffer_t *buffer);
+int pcps4_gpu_context_set_shader_resource(
+    pcps4_gpu_context_t *context,
+    uint32_t stage,
+    uint32_t slot,
+    pcps4_gpu_texture_t *texture);
+int pcps4_gpu_context_set_sampler(
+    pcps4_gpu_context_t *context,
+    uint32_t stage,
+    uint32_t slot,
+    uint32_t filter,
+    uint32_t address_u,
+    uint32_t address_v,
+    uint32_t address_w);
 
 pcps4_gpu_buffer_t *pcps4_gpu_buffer_create(
     pcps4_gpu_device_t *device,

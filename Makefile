@@ -17,6 +17,7 @@ INTDIR        ?= build
 GENERATED     := $(INTDIR)/generated
 GNM_RENDERER_OBJ := $(INTDIR)/pcps4_gnm_renderer.o
 PACKAGE_ROOT  ?= $(INTDIR)/package
+GAME_FILES     = $(shell cd "$(PACKAGE_ROOT)" 2>/dev/null && if [ -d game ]; then find game -type f -print | tr '\n' ' '; fi)
 REPORT        := $(INTDIR)/translation.json
 
 PYTHON        := python3
@@ -263,11 +264,11 @@ $(PACKAGE_ROOT)/sce_sys/icon0.png: $(OO_ICON)
 $(GP4): $(SFO) $(PACKAGE_EBOOT) $(PACKAGE_SUPPORT) package-game
 	@test -x "$(CREATE_GP4)" || (echo "ERROR: $(CREATE_GP4) not found."; exit 1)
 	cd "$(PACKAGE_ROOT)" && \
+	  echo "GP4 files: $(PACKAGE_FILES) $(GAME_FILES)" && \
 	  "$(CREATE_GP4)" \
 	    -out "$(notdir $@)" \
 	    --content-id="$(CONTENT_ID)" \
-	    --files "$(PACKAGE_FILES) `if [ -d game ]; then find game -type f -print | tr '\n' ' '; fi`"
-
+	    --files "$(PACKAGE_FILES) $(GAME_FILES)"
 $(PKG): $(GP4)
 	@test -x "$(PKGTOOL)" || (echo "ERROR: $(PKGTOOL) not found."; exit 1)
 	cd "$(PACKAGE_ROOT)" && "$(PKGTOOL)" pkg_build "$(notdir $<)" .

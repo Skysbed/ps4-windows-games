@@ -7,6 +7,7 @@
 #include "pcps4_abi.h"
 #include "pcps4_loader.h"
 #include "pcps4_dll.h"
+#include "pcps4_status.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,6 +23,11 @@ typedef struct pcps4_module_handle {
 #define PCPS4_MODULE_MAGIC 0x504d4f44u
 
 static pcps4_pe_resolver *g_resolver = NULL;
+
+static int module_name_normalize(
+    const char *input,
+    char *output,
+    size_t output_size);
 
 static void *pcps4_dynamic_resolve(
     void *user,
@@ -214,27 +220,6 @@ static PCPS4_MS_ABI HMODULE win_LoadLibraryW(LPCWSTR name)
 static PCPS4_MS_ABI HMODULE win_GetModuleHandleW(LPCWSTR name)
 {
     return win_LoadLibraryW(name);
-}
-
-static PCPS4_MS_ABI HMODULE win_LoadLibraryA(LPCSTR name)
-{
-    pcps4_module_handle *module;
-    char normalized[128];
-
-    if (module_name_normalize(name, normalized, sizeof(normalized)) != 0) {
-        win_SetLastError(87);
-        return NULL;
-    }
-
-    module = (pcps4_module_handle *)calloc(1, sizeof(*module));
-    if (module == NULL) {
-        win_SetLastError(8);
-        return NULL;
-    }
-
-    module->magic = PCPS4_MODULE_MAGIC;
-    memcpy(module->name, normalized, strlen(normalized) + 1);
-    return (HMODULE)module;
 }
 
 static PCPS4_MS_ABI HMODULE win_GetModuleHandleA(LPCSTR name)

@@ -42,6 +42,8 @@ typedef uint16_t WCHAR;
 typedef char CHAR;
 typedef const char *LPCSTR;
 typedef char *LPSTR;
+typedef const WCHAR *LPCWSTR;
+typedef WCHAR *LPWSTR;
 typedef void *LPVOID;
 typedef void *PVOID;
 typedef size_t SIZE_T;
@@ -352,7 +354,109 @@ static inline BOOL pcps4_DeleteFileA(const char *path)
     return pcps4_sys_file_delete(path) == 0;
 }
 
-static inline BOOL pcps4_CreateDirectoryA(const char *path, void *security)
+static inline int pcps4_wide_to_utf8(
+    LPCWSTR input,
+    LPSTR output,
+    size_t output_size)
+{
+    size_t i = 0;
+    if (input == NULL || output == NULL || output_size == 0)
+        return -1;
+
+    while (input[i] != 0) {
+        uint32_t cp = input[i++];
+        if (cp >= 0xD800u && cp <= 0xDBFFu && input[i] != 0) {
+            uint32_t low = input[i];
+            if (low >= 0xDC00u && low <= 0xDFFFu) {
+                ++i;
+                cp = 0x10000u +
+                     ((cp - 0xD800u) << 10) +
+                     (low - 0xDC00u);
+            }
+        }
+
+        if (cp < 0x80u) {
+            if (output_size <= 1)
+                return -1;
+            output[0] = (char)cp;
+            ++output;
+            --output_size;
+        } else if (cp < 0x800u) {
+            if (output_size <= 2)
+                return -1;
+            output[0] = (char)(0xC0u | (cp >> 6));
+            output[1] = (char)(0x80u | (cp & 0x3Fu));
+            output += 2;
+            output_size -= 2;
+        } else if (cp < 0x10000u) {
+            if (output_size <= 3)
+                return -1;
+            output[0] = (char)(0xE0u | (cp >> 12));
+            output[1] = (char)(0x80u | ((cp >> 6) & 0x3Fu));
+            output[2] = (char)(0x80u | (cp & 0x3Fu));
+            output += 3;
+            output_size -= 3;
+        } else {
+            if (output_size <= 4)
+                return -1;
+            output[0] = (char)(0xF0u | (cp >> 18));
+            output[1] = (char)(0x80u | ((cp >> 12) & 0x3Fu));
+            output[2] = (char)(0x80u | ((cp >> 6) & 0x3Fu));
+            output[3] = (char)(0x80u | (cp & 0x3Fu));
+            output += 4;
+            output_size -= 4;
+        }
+    }
+
+    *output = '\0';
+    return 0;
+}
+
+static inline BOOL pcps4_CreateFileW(
+    LPCWSTR path,
+    uint32_t desired_access,
+    uint32_t share_mode,
+    void *security_attributes,
+    uint32_t creation_disposition,
+    uint32_t attributes,
+    void *template_file)
+{
+    char utf8[1024];
+    if (pcps4_wide_to_utf8(path, utf8, sizeof(utf8)) != 0)
+        return FALSE;
+    return pcps4_CreateFileA(
+        utf8, desired_access, share_mode,
+        security_attributes, creation_disposition,
+        attributes, template_file);
+}
+
+static inline BOOL pcps4_DeleteFileW(LPCWSTR path)
+{
+    char utf8[1024];
+    if (pcps4_wide_to_utf8(path, utf8, sizeof(utf8)) != 0)
+        return FALSE;
+    return pcps4_DeleteFileA(utf8);
+}
+
+static inline BOOL pcps4_CreateDirectoryW(LPCWSTR path, void *security)
+{
+    char utf8[1024];
+    if (pcps4_wide_to_utf8(path, utf8, sizeof(utf8)) != 0)
+        return FALSE;
+    return pcps4_CreateDirectoryA(utf8, security);
+}
+
+static inline BOOL pcps4_ReadFileEx(
+    HANDLE handle,
+    void *buffer,
+    DWORD bytes_to_read,
+    DWORD *bytes_read,
+    void *overlapped)
+{
+    return pcps4_ReadFile(handle, buffer, bytes_to_read, bytes_read, overlapped);
+}
+
+(const char *path, void *security)
 {
     (void)security;
     return pcps4_sys_file_mkdir(path) == 0;

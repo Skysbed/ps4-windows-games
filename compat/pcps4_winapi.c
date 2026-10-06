@@ -747,8 +747,6 @@ static PCPS4_MS_ABI LPVOID win_HeapAlloc(HANDLE heap, DWORD flags, SIZE_T size)
     SIZE_T allocation_size = size ? size : 1u;
     int tracked;
 
-    if (heap != win_GetProcessHeap())
-        return NULL;
     memory = malloc(allocation_size);
     if (memory == NULL)
         return NULL;
@@ -777,7 +775,7 @@ static PCPS4_MS_ABI LPVOID win_HeapReAlloc(
     SIZE_T allocation_size = size ? size : 1u;
     int slot;
 
-    if (heap != win_GetProcessHeap() || memory == NULL || size == 0)
+    if (memory == NULL || size == 0)
         return NULL;
 
     heap_track_lock();
@@ -811,7 +809,7 @@ static PCPS4_MS_ABI BOOL win_HeapFree(HANDLE heap, DWORD flags, LPVOID memory)
     int slot;
     (void)flags;
 
-    if (heap != win_GetProcessHeap() || memory == NULL)
+    if (memory == NULL)
         return FALSE;
     heap_track_lock();
     slot = heap_track_find_locked(memory);
@@ -836,7 +834,7 @@ static PCPS4_MS_ABI SIZE_T win_HeapSize(HANDLE heap, DWORD flags, const void *me
     int slot;
     (void)flags;
 
-    if (heap != win_GetProcessHeap() || memory == NULL)
+    if (memory == NULL)
         return (SIZE_T)-1;
     heap_track_lock();
     slot = heap_track_find_locked(memory);
@@ -852,7 +850,7 @@ static PCPS4_MS_ABI BOOL win_HeapValidate(HANDLE heap, DWORD flags, const void *
     int slot;
     (void)flags;
 
-    if (heap != win_GetProcessHeap() || memory == NULL)
+    if (memory == NULL)
         return FALSE;
     heap_track_lock();
     slot = heap_track_find_locked(memory);

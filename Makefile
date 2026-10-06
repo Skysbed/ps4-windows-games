@@ -253,7 +253,7 @@ $(PACKAGE_ROOT)/sce_sys/icon0.png: $(OO_ICON)
 $(GP4): $(SFO) $(PACKAGE_EBOOT) $(PACKAGE_SUPPORT) package-game
 	@test -x "$(CREATE_GP4)" || (echo "ERROR: $(CREATE_GP4) not found."; exit 1)
 	cd "$(PACKAGE_ROOT)" && \
-	  GAME_FILES="$$(if [ -d game ]; then find game -type f -print | tr '\\n' ' '; fi)" && \
+	  GAME_FILES="$$(if [ -d game ]; then find game -type f -print | tr '\n' ' '; fi)" && \
 	  "$(CREATE_GP4)" \
 	    -out "$(notdir $@)" \
 	    --content-id="$(CONTENT_ID)" \

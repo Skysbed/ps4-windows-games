@@ -8,6 +8,7 @@
 #include "pcps4_loader.h"
 #include "pcps4_dll.h"
 #include "pcps4_status.h"
+#include "pcps4_win32.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -586,6 +587,69 @@ static void register_kernel32(
     KREG("GetProcAddress", win_GetProcAddress);
     KREG("FreeLibrary", win_FreeLibrary);
     KREG("GetEnvironmentVariableW", win_GetEnvironmentVariableW);
+    KREG("TlsAlloc", pcps4_abi_TlsAlloc);
+    KREG("TlsFree", pcps4_abi_TlsFree);
+    KREG("TlsGetValue", pcps4_abi_TlsGetValue);
+    KREG("TlsSetValue", pcps4_abi_TlsSetValue);
+    KREG("InterlockedExchange", pcps4_abi_InterlockedExchange);
+    KREG("InterlockedCompareExchange", pcps4_abi_InterlockedCompareExchange);
+    KREG("InterlockedExchangeAdd", pcps4_abi_InterlockedExchangeAdd);
+    KREG("InitializeCriticalSection", pcps4_abi_InitializeCriticalSection);
+    KREG("InitializeCriticalSectionAndSpinCount", pcps4_abi_InitializeCriticalSectionAndSpinCount);
+    KREG("DeleteCriticalSection", pcps4_abi_DeleteCriticalSection);
+    KREG("EnterCriticalSection", pcps4_abi_EnterCriticalSection);
+    KREG("TryEnterCriticalSection", pcps4_abi_TryEnterCriticalSection);
+    KREG("LeaveCriticalSection", pcps4_abi_LeaveCriticalSection);
+    KREG("VirtualProtect", pcps4_abi_VirtualProtect);
+    KREG("VirtualQuery", pcps4_abi_VirtualQuery);
+    KREG("FlushInstructionCache", pcps4_abi_FlushInstructionCache);
+    KREG("GetCurrentDirectoryA", pcps4_abi_GetCurrentDirectoryA);
+    KREG("GetCurrentDirectoryW", pcps4_abi_GetCurrentDirectoryW);
+    KREG("SetCurrentDirectoryA", pcps4_abi_SetCurrentDirectoryA);
+    KREG("SetCurrentDirectoryW", pcps4_abi_SetCurrentDirectoryW);
+    KREG("GetTempPathA", pcps4_abi_GetTempPathA);
+    KREG("GetTempPathW", pcps4_abi_GetTempPathW);
+    KREG("GetSystemDirectoryA", pcps4_abi_GetSystemDirectoryA);
+    KREG("GetSystemDirectoryW", pcps4_abi_GetSystemDirectoryW);
+    KREG("GetSystemTimeAsFileTime", pcps4_abi_GetSystemTimeAsFileTime);
+    KREG("GetSystemInfo", pcps4_abi_GetSystemInfo);
+    KREG("IsProcessorFeaturePresent", pcps4_abi_IsProcessorFeaturePresent);
+    KREG("IsDebuggerPresent", pcps4_abi_IsDebuggerPresent);
+    KREG("GetFileAttributesA", pcps4_abi_GetFileAttributesA);
+    KREG("GetFileAttributesW", pcps4_abi_GetFileAttributesW);
+    KREG("RegisterClassExA", pcps4_abi_RegisterClassExA);
+    KREG("RegisterClassExW", pcps4_abi_RegisterClassExW);
+    KREG("UnregisterClassA", pcps4_abi_UnregisterClassA);
+    KREG("UnregisterClassW", pcps4_abi_UnregisterClassW);
+    KREG("CreateWindowExA", pcps4_abi_CreateWindowExA);
+    KREG("CreateWindowExW", pcps4_abi_CreateWindowExW);
+    KREG("IsWindow", pcps4_abi_IsWindow);
+    KREG("DestroyWindow", pcps4_abi_DestroyWindow);
+    KREG("ShowWindow", pcps4_abi_ShowWindow);
+    KREG("UpdateWindow", pcps4_abi_UpdateWindow);
+    KREG("DefWindowProcA", pcps4_abi_DefWindowProcA);
+    KREG("DefWindowProcW", pcps4_abi_DefWindowProcW);
+    KREG("PeekMessageA", pcps4_abi_PeekMessageA);
+    KREG("PeekMessageW", pcps4_abi_PeekMessageW);
+    KREG("GetMessageA", pcps4_abi_GetMessageA);
+    KREG("TranslateMessage", pcps4_abi_TranslateMessage);
+    KREG("DispatchMessageA", pcps4_abi_DispatchMessageA);
+    KREG("DispatchMessageW", pcps4_abi_DispatchMessageW);
+    KREG("PostQuitMessage", pcps4_abi_PostQuitMessage);
+    KREG("GetClientRect", pcps4_abi_GetClientRect);
+    KREG("GetWindowRect", pcps4_abi_GetWindowRect);
+    KREG("GetDC", pcps4_abi_GetDC);
+    KREG("ReleaseDC", pcps4_abi_ReleaseDC);
+    KREG("SetForegroundWindow", pcps4_abi_SetForegroundWindow);
+    KREG("GetActiveWindow", pcps4_abi_GetActiveWindow);
+    KREG("GetFocus", pcps4_abi_GetFocus);
+    KREG("SetFocus", pcps4_abi_SetFocus);
+    KREG("SetWindowLongPtrA", pcps4_abi_SetWindowLongPtrA);
+    KREG("SetWindowLongPtrW", pcps4_abi_SetWindowLongPtrW);
+    KREG("GetWindowLongPtrA", pcps4_abi_GetWindowLongPtrA);
+    KREG("GetWindowLongPtrW", pcps4_abi_GetWindowLongPtrW);
+    KREG("SetWindowTextA", pcps4_abi_SetWindowTextA);
+    KREG("SetWindowTextW", pcps4_abi_SetWindowTextW);
 #undef KREG
 }
 

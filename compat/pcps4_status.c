@@ -4,6 +4,7 @@
 
 #include "pcps4_status.h"
 #include "pcps4_gfx.h"
+#include "pcps4_version.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -12,8 +13,8 @@
 extern int sceKernelUsleep(unsigned int microseconds);
 
 #define PCPS4_STATUS_MAX_TESTS 8
-#define PCPS4_STATUS_LOG_PATH "/data/pcps4_runtime_log.txt"
-#define PCPS4_GAME_LOG_PATH "/data/pcps4_windows_game_log.txt"
+#define PCPS4_STATUS_LOG_PATH PCPS4_RUNTIME_LOG_PATH
+#define PCPS4_GAME_LOG_PATH PCPS4_WINDOWS_GAME_LOG_PATH
 
 static FILE *g_log = NULL;
 static pcps4_gfx_context_t g_gfx;
@@ -96,7 +97,8 @@ void pcps4_status_begin(void)
     setvbuf(stdout, NULL, _IONBF, 0);
 
     g_log = fopen(PCPS4_STATUS_LOG_PATH, "w");
-    pcps4_status_log("[pcps4] status: begin (log file %s)",
+    pcps4_status_log("[pcps4 %s] status: begin (log file %s)",
+                     PCPS4_BUILD_VERSION,
                      g_log ? "open" : "unavailable");
 
     memset(&g_gfx, 0, sizeof(g_gfx));

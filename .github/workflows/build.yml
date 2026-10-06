@@ -53,10 +53,34 @@ jobs:
             tests/win_d3d11_smoke.c \
             -ld3d11 -lkernel32 -lws2_32 -lxinput -lmsvcrt
 
+      - name: Build native Windows local DLL smoke binary
+        run: |
+          mkdir -p build
+          x86_64-w64-mingw32-gcc \
+            -std=c11 \
+            -O2 \
+            -ffreestanding \
+            -fno-stack-protector \
+            -fno-asynchronous-unwind-tables \
+            -nostdlib \
+            -fno-builtin \
+            -shared \
+            -Wl,--entry=DllMain \
+            -Wl,--subsystem,windows \
+            -Wl,--section-alignment,0x4000 \
+            -Wl,--file-alignment,0x200 \
+            -o build/pcps4_local_smoke.dll \
+            tests/win_local_dll_smoke.c
+
       - name: Inspect native Windows smoke import surface
         run: |
           x86_64-w64-mingw32-objdump -p build/win_d3d11_smoke.exe |
             sed -n '/The Import Tables/,+140p'
+          x86_64-w64-mingw32-objdump -p build/pcps4_local_smoke.dll |
+            grep -q "PcPs4LocalProbe" || {
+              echo "ERROR: local DLL export is missing"
+              exit 1
+            }
           for dll in KERNEL32.dll d3d11.dll WS2_32.dll XINPUT1_4.dll MSVCRT.dll; do
             x86_64-w64-mingw32-objdump -p build/win_d3d11_smoke.exe |
               grep -qi "$dll" || {
@@ -73,6 +97,15 @@ jobs:
           test -x "$OO_PS4_TOOLCHAIN/bin/linux/create-fself"
           test -x "$OO_PS4_TOOLCHAIN/bin/linux/create-gp4"
           test -x "$OO_PS4_TOOLCHAIN/bin/linux/PkgTool.Core"
+
+      - name: Upload native Windows compatibility smoke binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: PcPs4-Windows-Compatibility-Smoke
+          path: |
+            build/win_d3d11_smoke.exe
+            build/pcps4_local_smoke.dll
+          if-no-files-found: error
 
       - name: Upload native Windows D3D11 smoke binary
         uses: actions/upload-artifact@v4
@@ -102,6 +135,7 @@ jobs:
         run: |
           mkdir -p build/win-game
           cp build/win_d3d11_smoke.exe build/win-game/game.exe
+          cp build/pcps4_local_smoke.dll build/win-game/pcps4_local_smoke.dll
           PCPS4_BUNDLED_GAME=1 \
           PCPS4_GAME_DIR="$GITHUB_WORKSPACE/build/win-game" \
           INTDIR=build/win-smoke \

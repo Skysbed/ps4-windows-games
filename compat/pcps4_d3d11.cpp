@@ -251,6 +251,10 @@ ID3D11RenderTargetView::~ID3D11RenderTargetView()
 
 IDXGISwapChain::~IDXGISwapChain()
 {
+    if (back_texture != NULL) {
+        back_texture->Release();
+        back_texture = NULL;
+    }
     device = NULL;
     context = NULL;
     graphics = NULL;
@@ -266,6 +270,19 @@ HRESULT IDXGISwapChain::Present(UINT SyncInterval, UINT Flags)
         return E_FAIL;
 
     uint64_t current_frame = frame_id++;
+
+    /* Stretch a CPU back buffer onto the display framebuffer first. */
+    if (back_texture != NULL && graphics != NULL) {
+        const uint8_t *pixels = NULL;
+        size_t pitch = 0;
+        uint32_t w = 0, h = 0;
+        if (pcps4_gpu_texture_cpu_data(back_texture->native, &pixels,
+                                       &pitch, &w, &h) != PCPS4_GPU_OK)
+            return E_FAIL;
+        if (pcps4_gfx_blit_rgba8_scaled(graphics, pixels, w, h,
+                                        (uint32_t)pitch) != PCPS4_GFX_OK)
+            return E_FAIL;
+    }
 
     return pcps4_gpu_context_present(
                context,
@@ -298,6 +315,33 @@ HRESULT IDXGISwapChain::GetBuffer(
     } else
 #endif
     {
+        if (graphics != NULL &&
+            (graphics->width != width || graphics->height != height)) {
+            /* Smaller (or different) back buffer than the display: give the
+             * app a CPU render target, scaled to the screen on Present. */
+            if (back_texture == NULL) {
+                pcps4_gpu_texture_desc_t desc;
+                memset(&desc, 0, sizeof(desc));
+                desc.width = width;
+                desc.height = height;
+                desc.mip_levels = 1;
+                desc.format = PCPS4_GPU_FORMAT_RGBA8_UNORM;
+                desc.bind_flags = PCPS4_GPU_BIND_RENDER_TARGET;
+                pcps4_gpu_texture_t *cpu_back =
+                    pcps4_gpu_texture_create(device, &desc, NULL, 0);
+                if (cpu_back == NULL)
+                    return E_OUTOFMEMORY;
+                back_texture = new (std::nothrow) ID3D11Texture2D(cpu_back);
+                if (back_texture == NULL) {
+                    pcps4_gpu_texture_destroy(cpu_back);
+                    return E_OUTOFMEMORY;
+                }
+            }
+            back_texture->AddRef();
+            *Resource = back_texture;
+            return S_OK;
+        }
+
         texture = pcps4_gpu_texture_create_backbuffer(
             device,
             graphics);
@@ -1099,10 +1143,12 @@ HRESULT pcps4_d3d11_create_device_and_swap_chain(
         return E_OUTOFMEMORY;
     }
 
+    /* The display always runs at 1920x1080; a different requested buffer
+     * size is handled by the swap chain's scaled CPU back buffer. */
     int gfx_rc = pcps4_gfx_init(
         graphics,
-        width,
-        height,
+        1920,
+        1080,
         buffers);
 
     if (gfx_rc != PCPS4_GFX_OK) {

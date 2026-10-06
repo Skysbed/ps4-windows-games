@@ -468,3 +468,75 @@ int pcps4_gfx_copy_rgba8(pcps4_gfx_context_t *context,
 
     return PCPS4_GFX_OK;
 }
+
+int pcps4_gfx_blit_rgba8_scaled(pcps4_gfx_context_t *context,
+                                const uint8_t *rgba,
+                                uint32_t src_width,
+                                uint32_t src_height,
+                                uint32_t src_stride)
+{
+    /* Column lookup table: destination x -> source byte offset. */
+    static uint32_t column_offset[4096];
+    uint32_t *pixels;
+    uint32_t dst_w, dst_h, fit_w, fit_h, off_x, off_y;
+    uint32_t x, y;
+
+    if (!valid_context(context) || rgba == NULL ||
+        src_width == 0 || src_height == 0 ||
+        src_stride < src_width * 4u)
+        return PCPS4_GFX_ERR_ARGUMENT;
+
+    dst_w = context->width;
+    dst_h = context->height;
+    if (dst_w == 0 || dst_h == 0 || dst_w > 4096)
+        return PCPS4_GFX_ERR_STATE;
+
+    /* Fit inside the screen, preserving aspect ratio. */
+    if ((uint64_t)src_width * dst_h >= (uint64_t)src_height * dst_w) {
+        fit_w = dst_w;
+        fit_h = (uint32_t)(((uint64_t)src_height * dst_w) / src_width);
+    } else {
+        fit_h = dst_h;
+        fit_w = (uint32_t)(((uint64_t)src_width * dst_h) / src_height);
+    }
+    if (fit_w == 0) fit_w = 1;
+    if (fit_h == 0) fit_h = 1;
+    off_x = (dst_w - fit_w) / 2;
+    off_y = (dst_h - fit_h) / 2;
+
+    for (x = 0; x < fit_w; ++x)
+        column_offset[x] =
+            (uint32_t)(((uint64_t)x * src_width) / fit_w) * 4u;
+
+    pixels = (uint32_t *)context->frame_buffers[context->active_frame];
+
+    for (y = 0; y < dst_h; ++y) {
+        uint32_t *row = pixels + (size_t)y * dst_w;
+
+        if (y < off_y || y >= off_y + fit_h) {
+            for (x = 0; x < dst_w; ++x)
+                row[x] = 0x80000000u;
+            continue;
+        }
+
+        {
+            uint32_t sy = (uint32_t)(((uint64_t)(y - off_y) * src_height) /
+                                     fit_h);
+            const uint8_t *src_row = rgba + (size_t)sy * src_stride;
+
+            for (x = 0; x < off_x; ++x)
+                row[x] = 0x80000000u;
+            for (x = 0; x < fit_w; ++x) {
+                const uint8_t *p = src_row + column_offset[x];
+                row[off_x + x] = 0x80000000u |
+                                 ((uint32_t)p[0] << 16) |
+                                 ((uint32_t)p[1] << 8) |
+                                 (uint32_t)p[2];
+            }
+            for (x = off_x + fit_w; x < dst_w; ++x)
+                row[x] = 0x80000000u;
+        }
+    }
+
+    return PCPS4_GFX_OK;
+}

@@ -278,6 +278,9 @@ public:
     uint64_t frame_id;
     uint32_t width;
     uint32_t height;
+    /* CPU back buffer used when the requested buffer size differs from the
+     * display; stretched to the screen on Present (DXGI scaling). */
+    ID3D11Texture2D *back_texture;
 
     IDXGISwapChain(pcps4_gpu_device_t *device_value,
                    pcps4_gpu_context_t *context_value,
@@ -290,7 +293,8 @@ public:
           refs(1),
           frame_id(1),
           width(0),
-          height(0) {}
+          height(0),
+          back_texture(NULL) {}
 
     HRESULT Present(UINT SyncInterval, UINT Flags);
     HRESULT GetBuffer(UINT Buffer, ID3D11Texture2D **Resource);

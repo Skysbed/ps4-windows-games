@@ -429,6 +429,21 @@ int pcps4_gpu_texture_update_rgba8(pcps4_gpu_texture_t *texture,
     const uint8_t *src;
     size_t tight_pitch;
 
+    /* Uploading into the VideoOut back buffer: blit straight to the
+     * framebuffer (scaled to fit if the source is smaller). */
+    if (valid_texture(texture) && texture->external_graphics != NULL &&
+        data != NULL && width != 0 && height != 0) {
+        if (row_pitch < (size_t)width * 4u)
+            return PCPS4_GPU_ERR_ARGUMENT;
+        return pcps4_gfx_blit_rgba8_scaled(texture->external_graphics,
+                                           (const uint8_t *)data,
+                                           width, height,
+                                           (uint32_t)row_pitch) ==
+               PCPS4_GFX_OK
+                   ? PCPS4_GPU_OK
+                   : PCPS4_GPU_ERR_BACKEND;
+    }
+
     if (!valid_texture(texture) ||
         texture->external_graphics != NULL ||
         texture->data == NULL ||
@@ -635,19 +650,16 @@ int pcps4_gpu_context_clear(
     if (texture->data == NULL)
         return PCPS4_GPU_ERR_STATE;
 
-    uint32_t packed =
-        ((uint32_t)color.r << 24) |
-        ((uint32_t)color.g << 16) |
-        ((uint32_t)color.b << 8) |
-        (uint32_t)color.a;
-
+    /* RGBA8 textures store bytes r,g,b,a (D3D DXGI_FORMAT_R8G8B8A8). */
     for (uint32_t y = 0; y < texture->desc.height; ++y) {
-        uint32_t *row =
-            (uint32_t *)(texture->data +
-                         (size_t)y * texture->row_pitch);
+        uint8_t *row = texture->data + (size_t)y * texture->row_pitch;
 
-        for (uint32_t x = 0; x < texture->desc.width; ++x)
-            row[x] = packed;
+        for (uint32_t x = 0; x < texture->desc.width; ++x) {
+            row[x * 4u + 0] = color.r;
+            row[x * 4u + 1] = color.g;
+            row[x * 4u + 2] = color.b;
+            row[x * 4u + 3] = color.a;
+        }
     }
 
     return PCPS4_GPU_OK;
@@ -849,5 +861,23 @@ int pcps4_gpu_set_pixel_shader(
         return PCPS4_GPU_ERR_ARGUMENT;
 
     context->pixel_shader = shader;
+    return PCPS4_GPU_OK;
+}
+
+int pcps4_gpu_texture_cpu_data(const pcps4_gpu_texture_t *texture,
+                               const uint8_t **data,
+                               size_t *row_pitch,
+                               uint32_t *width,
+                               uint32_t *height)
+{
+    if (!valid_texture(texture) || texture->data == NULL ||
+        data == NULL || row_pitch == NULL ||
+        width == NULL || height == NULL)
+        return PCPS4_GPU_ERR_ARGUMENT;
+
+    *data = texture->data;
+    *row_pitch = texture->row_pitch;
+    *width = texture->desc.width;
+    *height = texture->desc.height;
     return PCPS4_GPU_OK;
 }

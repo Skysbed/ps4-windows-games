@@ -70,6 +70,19 @@ int pcps4_gfx_copy_rgba8(pcps4_gfx_context_t *context,
                          uint32_t src_height,
                          uint32_t src_stride);
 
+/*
+ * Copy an RGBA8 image (bytes r,g,b,a) to the current framebuffer, scaled to
+ * fit the screen with its aspect ratio preserved (nearest-neighbour) and
+ * black bars on the unused edges. Equivalent to DXGI_SCALING_ASPECT_RATIO_
+ * STRETCH. Writes the framebuffer directly; this is the fast path used to
+ * present a CPU-rendered back buffer.
+ */
+int pcps4_gfx_blit_rgba8_scaled(pcps4_gfx_context_t *context,
+                                const uint8_t *rgba,
+                                uint32_t src_width,
+                                uint32_t src_height,
+                                uint32_t src_stride);
+
 #ifdef __cplusplus
 }
 #endif

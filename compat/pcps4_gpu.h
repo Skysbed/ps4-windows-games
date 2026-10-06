@@ -130,6 +130,13 @@ pcps4_gpu_texture_t *pcps4_gpu_texture_create_gnm_backbuffer(
     uint32_t width,
     uint32_t height);
 void pcps4_gpu_texture_destroy(pcps4_gpu_texture_t *texture);
+/* CPU-side pixel storage of a non-backbuffer texture (bytes r,g,b,a). */
+int pcps4_gpu_texture_cpu_data(const pcps4_gpu_texture_t *texture,
+                               const uint8_t **data,
+                               size_t *row_pitch,
+                               uint32_t *width,
+                               uint32_t *height);
+
 int pcps4_gpu_texture_update_rgba8(pcps4_gpu_texture_t *texture,
                                    const void *data,
                                    size_t row_pitch,

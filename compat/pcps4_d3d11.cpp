@@ -1506,12 +1506,14 @@ HRESULT pcps4_d3d11_create_device_and_swap_chain(
     if (buffers > 3)
         buffers = 3;
 
+    pcps4_fault_stage("create: gpu_device_create");
     pcps4_gpu_device_t *gpu =
         pcps4_gpu_device_create();
 
     if (gpu == NULL)
         return E_OUTOFMEMORY;
 
+    pcps4_fault_stage("create: gpu_context_create");
     pcps4_gpu_context_t *gpu_context =
         pcps4_gpu_context_create(gpu);
 
@@ -1542,6 +1544,7 @@ HRESULT pcps4_d3d11_create_device_and_swap_chain(
         return E_FAIL;
     }
 #else
+    pcps4_fault_stage("create: new gfx_context");
     graphics =
         new (std::nothrow) pcps4_gfx_context_t();
 
@@ -1553,6 +1556,7 @@ HRESULT pcps4_d3d11_create_device_and_swap_chain(
 
     /* The display always runs at 1920x1080; a different requested buffer
      * size is handled by the swap chain's scaled CPU back buffer. */
+    pcps4_fault_stage("create: pcps4_gfx_init");
     int gfx_rc = pcps4_gfx_init(
         graphics,
         1920,
@@ -1566,6 +1570,7 @@ HRESULT pcps4_d3d11_create_device_and_swap_chain(
         return E_FAIL;
     }
 
+    pcps4_fault_stage("create: attach_graphics");
     if (pcps4_gpu_context_attach_graphics(
             gpu_context,
             graphics) != PCPS4_GPU_OK) {
@@ -1577,6 +1582,7 @@ HRESULT pcps4_d3d11_create_device_and_swap_chain(
     }
 #endif
 
+    pcps4_fault_stage("create: new ID3D11Device");
     ID3D11Device *d3d_device =
         new (std::nothrow) ID3D11Device(
             gpu,
@@ -1599,6 +1605,7 @@ HRESULT pcps4_d3d11_create_device_and_swap_chain(
     d3d_device->gnm_renderer = gnm_renderer;
 #endif
 
+    pcps4_fault_stage("create: new IDXGISwapChain");
     IDXGISwapChain *d3d_swap =
         new (std::nothrow) IDXGISwapChain(
             gpu,
@@ -1620,6 +1627,7 @@ HRESULT pcps4_d3d11_create_device_and_swap_chain(
     /* D3D11CreateDeviceAndSwapChain returns the immediate context. The
      * device keeps its own native-context reference, while the wrapper gets
      * a second reference so both lifetimes are independent. */
+    pcps4_fault_stage("create: new immediate context");
     pcps4_gpu_context_add_ref(gpu_context);
     ID3D11DeviceContext *immediate =
         new (std::nothrow) ID3D11DeviceContext(gpu_context);

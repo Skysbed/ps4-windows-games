@@ -1,4 +1,5 @@
 #include "pcps4_gfx.h"
+#include "pcps4_fault.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -99,6 +100,7 @@ int pcps4_gfx_init(pcps4_gfx_context_t *context,
 
     context->direct_memory_size = allocation_size;
 
+    pcps4_fault_stage("gfx_init: sceVideoOutOpen");
     rc = sceVideoOutOpen(
         ORBIS_VIDEO_USER_MAIN,
         ORBIS_VIDEO_OUT_BUS_MAIN,
@@ -113,6 +115,7 @@ int pcps4_gfx_init(pcps4_gfx_context_t *context,
 
     context->video_handle = rc;
 
+    pcps4_fault_stage("gfx_init: sceKernelAllocateDirectMemory");
     rc = sceKernelAllocateDirectMemory(
         0,
         sceKernelGetDirectMemorySize(),
@@ -129,6 +132,7 @@ int pcps4_gfx_init(pcps4_gfx_context_t *context,
         return PCPS4_GFX_ERR_MEMORY;
     }
 
+    pcps4_fault_stage("gfx_init: sceKernelMapDirectMemory");
     rc = sceKernelMapDirectMemory(
         &context->direct_memory,
         allocation_size,
@@ -150,6 +154,7 @@ int pcps4_gfx_init(pcps4_gfx_context_t *context,
             (void *)(framebuffer_start + bytes * i);
     }
 
+    pcps4_fault_stage("gfx_init: SetBufferAttribute");
     memset(&attribute, 0, sizeof(attribute));
 
     /*
@@ -164,6 +169,7 @@ int pcps4_gfx_init(pcps4_gfx_context_t *context,
         height,
         width);
 
+    pcps4_fault_stage("gfx_init: sceVideoOutRegisterBuffers");
     rc = sceVideoOutRegisterBuffers(
         context->video_handle,
         0,
@@ -178,6 +184,7 @@ int pcps4_gfx_init(pcps4_gfx_context_t *context,
         return PCPS4_GFX_ERR_PLATFORM;
     }
 
+    pcps4_fault_stage("gfx_init: calloc flip queue");
     context->flip_queue_storage =
         __builtin_calloc(1, sizeof(OrbisKernelEqueue));
 
@@ -193,6 +200,7 @@ int pcps4_gfx_init(pcps4_gfx_context_t *context,
 
     queue = (OrbisKernelEqueue *)context->flip_queue_storage;
 
+    pcps4_fault_stage("gfx_init: sceKernelCreateEqueue");
     rc = sceKernelCreateEqueue(queue, "pcps4-gfx-flip");
     if (rc < 0) {
         __builtin_free(context->flip_queue_storage);
@@ -206,6 +214,7 @@ int pcps4_gfx_init(pcps4_gfx_context_t *context,
         return PCPS4_GFX_ERR_PLATFORM;
     }
 
+    pcps4_fault_stage("gfx_init: sceVideoOutAddFlipEvent");
     rc = sceVideoOutAddFlipEvent(
         *queue,
         context->video_handle,
@@ -224,9 +233,11 @@ int pcps4_gfx_init(pcps4_gfx_context_t *context,
         return PCPS4_GFX_ERR_PLATFORM;
     }
 
+    pcps4_fault_stage("gfx_init: sceVideoOutSetFlipRate");
     (void)sceVideoOutSetFlipRate(context->video_handle, 0);
     context->active_frame = 0;
 
+    pcps4_fault_stage("gfx_init: done ok");
     return PCPS4_GFX_OK;
 }
 

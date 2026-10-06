@@ -482,7 +482,7 @@ int pcps4_sys_file_delete(const char *path)
     char translated_path[1024];
 
     if (path == NULL ||
-        pcps4_translate_path(
+        pcps4_sys_translate_path(
             path, 1, translated_path, sizeof(translated_path)) != 0)
         return -1;
 
@@ -494,7 +494,7 @@ int pcps4_sys_file_mkdir(const char *path)
     char translated_path[1024];
 
     if (path == NULL ||
-        pcps4_translate_path(
+        pcps4_sys_translate_path(
             path, 1, translated_path, sizeof(translated_path)) != 0)
         return -1;
 

@@ -132,7 +132,8 @@ void WINAPI WinMainCRTStartup(void)
 
     /* Pulse dark navy -> bright cyan forever so you can see a native
      * Windows .exe presenting on the PS4. Close it from the PS button. */
-    for (i = 0; ; ++i) {
+    /* Run long enough to exercise repeated Present calls, then exit cleanly. */
+    for (i = 0; i < 240; ++i) {
         unsigned phase = i % 120;
         unsigned pulse = phase < 60 ? phase : (120 - phase);
 
@@ -154,4 +155,8 @@ void WINAPI WinMainCRTStartup(void)
         if (FAILED(hr))
             ExitProcess(4);
     }
+
+    /* ExitProcess(0) is caught by the PcPs4 PE runner and returns control to
+     * the on-console status screen with a successful diagnostic result. */
+    ExitProcess(0);
 }

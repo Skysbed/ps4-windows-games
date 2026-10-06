@@ -150,6 +150,15 @@ jobs:
           CONTENT_ID=IV0000-PCPS00002_00-WIND3D11SMOKE001 \
           make pkg
 
+      - name: Verify bundled Windows files are present in GP4
+        run: |
+          test -f build/win-smoke/package/IV0000-PCPS00002_00-WIND3D11SMOKE001.gp4
+          grep -F 'targ_path="game/game.exe"' \
+            build/win-smoke/package/IV0000-PCPS00002_00-WIND3D11SMOKE001.gp4
+          grep -F 'targ_path="game/pcps4_local_smoke.dll"' \
+            build/win-smoke/package/IV0000-PCPS00002_00-WIND3D11SMOKE001.gp4
+          test -s build/win-smoke/package/IV0000-PCPS00002_00-WIND3D11SMOKE001.pkg
+
       - name: Upload PS4 package containing native Windows D3D11 smoke binary
         uses: actions/upload-artifact@v4
         with:

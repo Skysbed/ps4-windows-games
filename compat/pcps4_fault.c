@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <ucontext.h>
 
 #define PCPS4_CRASH_PATH "/data/pcps4_crash.txt"
 #define PCPS4_TRACE_PATH "/data/pcps4_trace.txt"
@@ -68,29 +69,59 @@ static void fd_write_uint(int fd, unsigned long value)
     fd_write_str(fd, &buf[i]);
 }
 
-static void emit_report(int fd, int signal_number)
+static void fd_write_hex(int fd, uintptr_t value)
+{
+    static const char digits[] = "0123456789abcdef";
+    char buf[2 + sizeof(uintptr_t) * 2 + 1];
+    size_t pos = sizeof(buf);
+
+    buf[--pos] = '\0';
+    do {
+        buf[--pos] = digits[value & 0xfu];
+        value >>= 4;
+    } while (value != 0 && pos > 2);
+
+    buf[--pos] = 'x';
+    buf[--pos] = '0';
+    fd_write_str(fd, &buf[pos]);
+}
+
+static void emit_report(
+    int fd,
+    int signal_number,
+    uintptr_t fault_address)
 {
     fd_write_str(fd, "PcPs4: fatal fault signal=");
     fd_write_uint(fd, (unsigned long)signal_number);
+    fd_write_str(fd, " address=");
+    fd_write_hex(fd, fault_address);
     fd_write_str(fd, " stage=");
     fd_write_str(fd, pcps4_stage);
     fd_write_str(fd, "\n");
 }
 
-static void pcps4_fault_handler(int signal_number)
+static void pcps4_fault_handler(
+    int signal_number,
+    siginfo_t *info,
+    void *context)
 {
     int fd;
+    uintptr_t fault_address = info != NULL
+        ? (uintptr_t)info->si_addr
+        : 0;
+
+    (void)context;
 
     if (pcps4_fault_seen)
         _exit(128 + signal_number);
     pcps4_fault_seen = 1;
 
     /* klog (captured over a PC) and a file on the console (captured over FTP). */
-    emit_report(STDERR_FILENO, signal_number);
+    emit_report(STDERR_FILENO, signal_number, fault_address);
 
     fd = open(PCPS4_CRASH_PATH, O_WRONLY | O_CREAT | O_TRUNC, 0666);
     if (fd >= 0) {
-        emit_report(fd, signal_number);
+        emit_report(fd, signal_number, fault_address);
         (void)close(fd);
     }
 
@@ -113,9 +144,9 @@ int pcps4_fault_install(void)
     struct sigaction action;
     size_t i;
 
-    action.sa_handler = pcps4_fault_handler;
+    action.sa_sigaction = pcps4_fault_handler;
     sigemptyset(&action.sa_mask);
-    action.sa_flags = 0;
+    action.sa_flags = SA_SIGINFO;
 
     for (i = 0; i < sizeof(signals) / sizeof(signals[0]); ++i) {
         if (sigaction(signals[i], &action, NULL) != 0) {

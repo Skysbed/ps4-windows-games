@@ -5,71 +5,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void draw_rect(
-    uint8_t *pixels,
-    uint32_t width,
-    uint32_t height,
-    int32_t x,
-    int32_t y,
-    int32_t w,
-    int32_t h,
-    uint8_t r,
-    uint8_t g,
-    uint8_t b)
-{
-    if (pixels == NULL || w <= 0 || h <= 0)
-        return;
-
-    int32_t x0 = x < 0 ? 0 : x;
-    int32_t y0 = y < 0 ? 0 : y;
-    int32_t x1 = x + w > (int32_t)width ? (int32_t)width : x + w;
-    int32_t y1 = y + h > (int32_t)height ? (int32_t)height : y + h;
-
-    for (int32_t py = y0; py < y1; ++py) {
-        uint8_t *row = pixels + (size_t)py * width * 4u;
-        for (int32_t px = x0; px < x1; ++px) {
-            row[(size_t)px * 4u + 0] = r;
-            row[(size_t)px * 4u + 1] = g;
-            row[(size_t)px * 4u + 2] = b;
-            row[(size_t)px * 4u + 3] = 255;
-        }
-    }
-}
-
-static void draw_background(
-    uint8_t *pixels,
-    uint32_t width,
-    uint32_t height,
-    uint32_t frame)
-{
-    if (pixels == NULL)
-        return;
-
-    for (uint32_t y = 0; y < height; ++y) {
-        uint8_t *row = pixels + (size_t)y * width * 4u;
-        for (uint32_t x = 0; x < width; ++x) {
-            uint8_t shade = (uint8_t)(12u + ((x + y + frame) & 15u));
-            row[x * 4u + 0] = shade;
-            row[x * 4u + 1] = (uint8_t)(24u + ((y + frame) & 15u));
-            row[x * 4u + 2] = (uint8_t)(40u + ((x + frame * 2u) & 15u));
-            row[x * 4u + 3] = 255;
-        }
-    }
-}
-
-static void draw_crosshair(
-    uint8_t *pixels,
-    uint32_t width,
-    uint32_t height,
-    int32_t x,
-    int32_t y)
-{
-    (void)width;
-    (void)height;
-    draw_rect(pixels, width, height, x - 2, y - 14, 4, 28, 255, 255, 255);
-    draw_rect(pixels, width, height, x - 14, y - 2, 28, 4, 255, 255, 255);
-}
-
 extern "C" int pcps4_d3d11_game_run(void)
 {
     const uint32_t width = 640;
@@ -126,14 +61,65 @@ extern "C" int pcps4_d3d11_game_run(void)
     }
 
     context->OMSetRenderTargets(1, &rtv, NULL);
+    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-    uint8_t *pixels = (uint8_t *)malloc(bytes);
-    if (pixels == NULL) {
+    D3D11_INPUT_ELEMENT_DESC layout[] = {
+        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0,
+         D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12,
+         D3D11_INPUT_PER_VERTEX_DATA, 0}
+    };
+
+    uint32_t shader_signature = 0x12345678u;
+    ID3D11InputLayout *input_layout = NULL;
+    hr = device->CreateInputLayout(
+        layout, 2,
+        &shader_signature, sizeof(shader_signature),
+        &input_layout);
+    if (FAILED(hr) || input_layout == NULL) {
         rtv->Release();
         back_buffer->Release();
         swap_chain->Release();
         device->Release();
         return -4;
+    }
+    context->IASetInputLayout(input_layout);
+
+    struct Vertex {
+        float position[3];
+        float color[4];
+    };
+
+    D3D11_BUFFER_DESC buffer_desc = {};
+    buffer_desc.ByteWidth = (UINT)(sizeof(struct Vertex) * 3u);
+    buffer_desc.Usage = D3D11_USAGE_DYNAMIC;
+    buffer_desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+    buffer_desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+
+    ID3D11Buffer *vertex_buffer = NULL;
+    hr = device->CreateBuffer(&buffer_desc, NULL, &vertex_buffer);
+    if (FAILED(hr) || vertex_buffer == NULL) {
+        input_layout->Release();
+        rtv->Release();
+        back_buffer->Release();
+        swap_chain->Release();
+        device->Release();
+        return -5;
+    }
+
+    ID3D11Buffer *vertex_buffers[] = {vertex_buffer};
+    const UINT stride = (UINT)sizeof(struct Vertex);
+    const UINT offset = 0;
+    context->IASetVertexBuffers(0, 1, vertex_buffers, &stride, &offset);
+
+    if (pixels == NULL) {
+        vertex_buffer->Release();
+        input_layout->Release();
+        rtv->Release();
+        back_buffer->Release();
+        swap_chain->Release();
+        device->Release();
+        return -6;
     }
 
     int32_t player_x = (int32_t)width / 2;
@@ -191,19 +177,36 @@ extern "C" int pcps4_d3d11_game_run(void)
         if (player_y > (int32_t)height - 24) player_y = (int32_t)height - 24;
 
         draw_background(pixels, width, height, frame);
-        draw_rect(
-            pixels, width, height,
-            player_x - 12, player_y - 12, 24, 24,
-            70, 210, 255);
-        draw_crosshair(pixels, width, height, player_x, player_y);
+        memset(pixels, 0, bytes);
 
-        context->UpdateSubresource(
-            back_buffer,
-            0,
-            NULL,
-            pixels,
-            pitch,
-            (UINT)bytes);
+        struct Vertex {
+            float position[3];
+            float color[4];
+        } vertices[3];
+
+        float cx = ((float)player_x / (float)width) * 2.0f - 1.0f;
+        float cy = 1.0f - ((float)player_y / (float)height) * 2.0f;
+        float sx = 0.10f;
+        float sy = 0.14f;
+
+        vertices[0] = {{cx,        cy - sy, 0.0f},
+                       {0.25f, 0.85f, 1.0f, 1.0f}};
+        vertices[1] = {{cx + sx,   cy + sy, 0.0f},
+                       {0.15f, 0.45f, 1.0f, 1.0f}};
+        vertices[2] = {{cx - sx,   cy + sy, 0.0f},
+                       {0.75f, 0.95f, 1.0f, 1.0f}};
+
+        D3D11_MAPPED_SUBRESOURCE mapped = {};
+        hr = context->Map(
+            vertex_buffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+        if (FAILED(hr) || mapped.pData == NULL)
+            break;
+
+        memcpy(mapped.pData, vertices, sizeof(vertices));
+        context->Unmap(vertex_buffer, 0);
+
+        context->ClearRenderTargetView(rtv, (const float[4]){0.03f, 0.06f, 0.10f, 1.0f});
+        context->Draw(3, 0);
 
         hr = swap_chain->Present(1, 0);
         if (FAILED(hr))
@@ -217,6 +220,8 @@ extern "C" int pcps4_d3d11_game_run(void)
     (void)XInputSetState(0, &vibration);
 
     free(pixels);
+    vertex_buffer->Release();
+    input_layout->Release();
     rtv->Release();
     back_buffer->Release();
     context->Release();

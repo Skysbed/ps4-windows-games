@@ -359,7 +359,8 @@ static void PCPS4_MS_ABI win_RtlMoveMemory(PVOID dst, const void *src, SIZE_T le
 
 static void register_kernel32(
     pcps4_pe_resolver *resolver,
-    const char *dll)
+    const char *dll,
+    const pcps4_winabi_exports *abi)
 {
 #define KREG(name, fn) (void)pcps4_pe_resolver_register(resolver, dll, name, (void *)(fn))
     KREG("GetLastError", win_GetLastError);
@@ -432,7 +433,8 @@ static void register_d3d11(
 
 static void register_winsock(
     pcps4_pe_resolver *resolver,
-    const char *dll)
+    const char *dll,
+    const pcps4_winabi_exports *abi)
 {
 #define WREG(name, fn) (void)pcps4_pe_resolver_register(resolver, dll, name, (void *)(fn))
     WREG("WSAStartup", abi.wsa_startup);
@@ -458,7 +460,8 @@ static void register_winsock(
 
 static void register_xinput(
     pcps4_pe_resolver *resolver,
-    const char *dll)
+    const char *dll,
+    const pcps4_winabi_exports *abi)
 {
 #define XREG(name, fn) (void)pcps4_pe_resolver_register(resolver, dll, name, (void *)(fn))
     XREG("XInputGetState", abi.xinput_get_state);
@@ -470,7 +473,8 @@ static void register_xinput(
 
 static void register_ucrt(
     pcps4_pe_resolver *resolver,
-    const char *dll)
+    const char *dll,
+    const pcps4_winabi_exports *abi)
 {
 #define UREG(name, fn) (void)pcps4_pe_resolver_register(resolver, dll, name, (void *)(fn))
     UREG("malloc", abi.malloc_fn);
@@ -524,15 +528,15 @@ void pcps4_winapi_build_resolver(pcps4_pe_resolver *resolver)
      * The special win_* helpers in this file are themselves declared
      * PCPS4_MS_ABI because they are import entry points directly.
      */
-    register_kernel32(resolver, "KERNEL32.dll");
-    register_kernel32(resolver, "KERNELBASE.dll");
-    register_winsock(resolver, "WS2_32.dll");
+    register_kernel32(resolver, "KERNEL32.dll", &abi);
+    register_kernel32(resolver, "KERNELBASE.dll", &abi);
+    register_winsock(resolver, "WS2_32.dll", &abi);
     register_d3d11(resolver, "d3d11.dll");
-    register_xinput(resolver, "XINPUT1_4.dll");
-    register_xinput(resolver, "XINPUT1_3.dll");
-    register_ucrt(resolver, "ucrtbase.dll");
-    register_ucrt(resolver, "VCRUNTIME140.dll");
-    register_ucrt(resolver, "MSVCRT.dll");
+    register_xinput(resolver, "XINPUT1_4.dll", &abi);
+    register_xinput(resolver, "XINPUT1_3.dll", &abi);
+    register_ucrt(resolver, "ucrtbase.dll", &abi);
+    register_ucrt(resolver, "VCRUNTIME140.dll", &abi);
+    register_ucrt(resolver, "MSVCRT.dll", &abi);
 
 
     /*
@@ -540,7 +544,7 @@ void pcps4_winapi_build_resolver(pcps4_pe_resolver *resolver)
      * names. They are intentionally added explicitly rather than making the
      * PE resolver guess based on prefixes.
      */
-    register_ucrt(resolver, "api-ms-win-crt-runtime-l1-1-0.dll");
-    register_ucrt(resolver, "api-ms-win-crt-string-l1-1-0.dll");
-    register_ucrt(resolver, "api-ms-win-crt-heap-l1-1-0.dll");
+    register_ucrt(resolver, "api-ms-win-crt-runtime-l1-1-0.dll", &abi);
+    register_ucrt(resolver, "api-ms-win-crt-string-l1-1-0.dll", &abi);
+    register_ucrt(resolver, "api-ms-win-crt-heap-l1-1-0.dll", &abi);
 }

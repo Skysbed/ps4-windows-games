@@ -53,6 +53,11 @@ struct PCPS4ComSwapChain {
     PCPS4ComContext *context;
 };
 
+/* Forward declarations used by proxy release paths. */
+static UINT com_device_release(PCPS4ComDevice *self);
+static UINT com_context_release(PCPS4ComContext *self);
+static UINT com_resource_release(PCPS4ComResource *self);
+
 #define PCPS4_COM_DEVICE_SLOTS 43
 #define PCPS4_COM_CONTEXT_SLOTS 114
 #define PCPS4_COM_SWAP_SLOTS 18
@@ -468,14 +473,14 @@ static HRESULT swap_get_buffer(
 }
 
 static HRESULT swap_set_fullscreen(
-    PCPS4ComSwapChain *self, BOOL fullscreen, void *target)
+    PCPS4ComSwapChain *self, int fullscreen, void *target)
 {
     (void)self; (void)fullscreen; (void)target; return S_OK;
 }
 static HRESULT swap_get_fullscreen(
-    PCPS4ComSwapChain *self, BOOL *fullscreen, void **target)
+    PCPS4ComSwapChain *self, int *fullscreen, void **target)
 {
-    if (fullscreen) *fullscreen = FALSE;
+    if (fullscreen) *fullscreen = 0;
     if (target) *target = NULL;
     (void)self;
     return S_OK;
@@ -491,7 +496,7 @@ static HRESULT swap_get_desc(
     desc->BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     desc->SampleDesc.Count = 1;
     desc->BufferCount = 2;
-    desc->Windowed = TRUE;
+    desc->Windowed = 1;
     desc->SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
     return S_OK;
 }
@@ -1302,7 +1307,7 @@ HRESULT pcps4_d3d11_com_create_device(
     desc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     desc.SampleDesc.Count = 1;
     desc.BufferCount = 2;
-    desc.Windowed = TRUE;
+    desc.Windowed = 1;
     desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 
     HRESULT hr = pcps4_d3d11_com_create_device_and_swap_chain(
@@ -1311,8 +1316,7 @@ HRESULT pcps4_d3d11_com_create_device(
         (void **)&unused_swap, ppDevice, pFeatureLevel, ppImmediateContext);
 
     if (unused_swap)
-        ((PCPS4ComSwapChain *)unused_swap)->lpVtbl[2] &&
-            ((void (*)(PCPS4ComSwapChain *))((PCPS4ComSwapChain *)unused_swap)->lpVtbl[2])( (PCPS4ComSwapChain *)unused_swap);
+        com_swap_release((PCPS4ComSwapChain *)unused_swap);
 
     return hr;
 }

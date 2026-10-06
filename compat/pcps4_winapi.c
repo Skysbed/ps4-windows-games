@@ -58,6 +58,23 @@ static int module_name_normalize(
     return 0;
 }
 
+static HMODULE win_LoadLibraryW(LPCWSTR name)
+{
+    char utf8[1024];
+
+    if (pcps4_wide_to_utf8(name, utf8, sizeof(utf8)) != 0) {
+        win_SetLastError(87);
+        return NULL;
+    }
+
+    return win_LoadLibraryA(utf8);
+}
+
+static HMODULE win_GetModuleHandleW(LPCWSTR name)
+{
+    return win_LoadLibraryW(name);
+}
+
 static HMODULE win_LoadLibraryA(LPCSTR name)
 {
     pcps4_module_handle *module;
@@ -112,6 +129,40 @@ static FARPROC win_GetProcAddress(
         win_SetLastError(127);
 
     return (FARPROC)fn;
+}
+
+static DWORD win_GetEnvironmentVariableW(
+    LPCWSTR name,
+    LPWSTR buffer,
+    DWORD size)
+{
+    char utf8_name[512];
+    char utf8_value[1024];
+    DWORD result;
+    size_t i;
+
+    if (pcps4_wide_to_utf8(
+            name, utf8_name, sizeof(utf8_name)) != 0)
+        return 0;
+
+    result = win_GetEnvironmentVariableA(
+        utf8_name, utf8_value, sizeof(utf8_value));
+
+    if (result == 0 || buffer == NULL || size == 0)
+        return result;
+
+    if (result >= size) {
+        size_t limit = size > 0 ? (size_t)size - 1 : 0;
+        for (i = 0; i < limit && utf8_value[i] != '\0'; ++i)
+            buffer[i] = (WCHAR)(unsigned char)utf8_value[i];
+        buffer[i] = 0;
+        return result;
+    }
+
+    for (i = 0; i < (size_t)result; ++i)
+        buffer[i] = (WCHAR)(unsigned char)utf8_value[i];
+    buffer[result] = 0;
+    return result;
 }
 
 static BOOL win_FreeLibrary(HMODULE module)
@@ -328,9 +379,12 @@ static void register_kernel32(
     KREG("RtlMoveMemory", win_RtlMoveMemory);
     KREG("ExitProcess", win_ExitProcess);
     KREG("LoadLibraryA", win_LoadLibraryA);
+    KREG("LoadLibraryW", win_LoadLibraryW);
     KREG("GetModuleHandleA", win_GetModuleHandleA);
+    KREG("GetModuleHandleW", win_GetModuleHandleW);
     KREG("GetProcAddress", win_GetProcAddress);
     KREG("FreeLibrary", win_FreeLibrary);
+    KREG("GetEnvironmentVariableW", win_GetEnvironmentVariableW);
 #undef KREG
 }
 

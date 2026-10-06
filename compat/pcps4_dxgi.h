@@ -3,6 +3,31 @@
 
 #include "pcps4_compat.h"
 
+#if defined(__x86_64__) && (defined(__clang__) || defined(__GNUC__))
+#define PCPS4_MS_ABI __attribute__((ms_abi))
+#else
+#define PCPS4_MS_ABI
+#endif
+
+#ifndef S_OK
+#define S_OK ((HRESULT)0)
+#endif
+#ifndef E_FAIL
+#define E_FAIL ((HRESULT)0x80004005L)
+#endif
+#ifndef E_NOINTERFACE
+#define E_NOINTERFACE ((HRESULT)0x80004002L)
+#endif
+#ifndef E_NOTIMPL
+#define E_NOTIMPL ((HRESULT)0x80004001L)
+#endif
+#ifndef E_OUTOFMEMORY
+#define E_OUTOFMEMORY ((HRESULT)0x8007000EL)
+#endif
+#ifndef E_INVALIDARG
+#define E_INVALIDARG ((HRESULT)0x80070057L)
+#endif
+
 typedef struct PCPS4_DXGI_GUID {
     uint32_t data1;
     uint16_t data2;

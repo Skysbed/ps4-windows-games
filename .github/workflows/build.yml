@@ -21,7 +21,7 @@ jobs:
         run: |
           set -euxo pipefail
           sudo apt-get update
-          sudo apt-get install -y clang lld make python3 mingw-w64
+          sudo apt-get install -y clang lld make python3 mingw-w64 binutils-mingw-w64-x86-64
 
       - name: Download OpenOrbis LLVM 18 toolchain
         run: |

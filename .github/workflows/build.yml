@@ -152,8 +152,7 @@ jobs:
           grep -Eq 'game/game\\.exe|game/game.exe' "$GP4"
 
           # Versioned filename keeps downloads unmistakable.
-          cp "$(find build/win-smoke/package -maxdepth 1 -name '*.pkg' -type f -print -quit)" \\
-            build/win-smoke/PcPs4-v3-Windows-Game-Diagnostic.pkg
+          cp "$(find build/win-smoke/package -maxdepth 1 -name '*.pkg' -type f -print -quit)" "build/win-smoke/PcPs4-v3-Windows-Game-Diagnostic.pkg"
 
       - name: Upload PS4 package containing native Windows D3D11 smoke binary
         uses: actions/upload-artifact@v4

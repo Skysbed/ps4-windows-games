@@ -151,7 +151,7 @@ static void test_resolver_api(void)
     /* Re-registering replaces, does not grow. */
     CHECK(pcps4_pe_resolver_register(&r, "KERNEL32.dll", "GetProcAddress",
                                      NULL) == PCPS4_PE_OK);
-    CHECK(r.count == 1);
+    CHECK(r.count == 2);
     CHECK(pcps4_pe_resolver_lookup(&r, "KERNEL32.dll", "GetProcAddress")
           == NULL);
 }

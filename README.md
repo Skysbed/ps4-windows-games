@@ -1,162 +1,113 @@
 # PcPs4
 
-PcPs4 is a source-level translation layer for moving PC-oriented C/C++ projects toward PS4 homebrew builds.
+PcPs4 is a compatibility layer for bringing PC (Windows) software to PS4
+homebrew. It has two halves:
 
-It takes source written against a supported subset of Windows/MSVC APIs, rewrites that source into PcPs4 compatibility calls, and then sends the translated sources through the OpenOrbis PS4 Toolchain.
+- **Source translation** — C/C++ written against Win32/MSVC/D3D11 is rewritten
+  onto PcPs4 compatibility calls and built with the OpenOrbis PS4 toolchain into
+  an installable `.pkg`.
+- **Binary loading** — a PE (Windows `.exe`) loader that parses a 64-bit
+  Windows binary, maps it into memory, binds its imports to PcPs4-provided
+  handlers, and executes it on the console.
 
-## Pipeline
+## Verified on real hardware
 
-    PC / Windows-style C or C++
-                |
-                v
-       pcps4_translate.py
-                |
-                v
-       PcPs4 compatibility layer
-                |
-                v
-       OpenOrbis Clang / Clang++
-                |
-                v
-           ld.lld + ELF
-                |
-                v
-             create-fself
-                |
-                v
-             eboot.bin
-                |
-                v
-             create-gp4
-                |
-                v
-           PkgTool.Core
-                |
-                v
-              .pkg
+On a jailbroken PS4 (GoldHEN), the current package:
 
-The default `make` target builds the .pkg. The package is generated from eboot.bin and sce_sys/param.sfo using OpenOrbis's GP4/package tooling.
+| Test | Result |
+|------|--------|
+| App launches (package contents correct) | ✅ |
+| Translated Win32 source runs (timing, atomics, memory, process info) | ✅ |
+| A PE binary is loaded into executable memory and run, returning the expected value | ✅ |
 
-This is source translation, not binary conversion. An arbitrary Windows .exe is not magically portable to PS4 because its executable format, imports, graphics APIs, filesystem APIs, ABI and runtime may all depend on Windows.
+## Status screen and log
 
-## What translates now
+When launched, PcPs4 shows its own results on the TV:
 
-Headers:
-- windows.h -> pcps4_compat.h
-- synchapi.h -> pcps4_compat.h
+- one bar per test — **yellow** while running, **green** pass, **red** fail;
+- a top banner that turns fully green or red when all tests finish;
+- the app stays on the result screen (close it from the PS button menu).
 
-Timing/process:
-- Sleep(ms) -> pcps4_sleep_ms(ms)
-- GetTickCount64() -> pcps4_monotonic_ms()
-- GetTickCount() -> 32-bit cast of pcps4_monotonic_ms()
-- GetCurrentProcessId() -> pcps4_get_current_process_id()
+Each step is also written, flushed line by line, to `/data/pcps4_log.txt`
+(retrievable over FTP). If the app ever crashes, the last line shows which step
+it reached.
 
-Atomics:
-- InterlockedIncrement/Decrement -> compiler atomic wrappers
+## Components
 
-Common Win32/MSVC types:
-- DWORD, WORD, BYTE
-- UINT, UINT64, ULONG
-- LONG, LONGLONG, ULONGLONG
-- HRESULT, BOOL, INT
-- CHAR, WCHAR
-- LPCSTR, LPSTR, LPVOID, PVOID, SIZE_T
-- __int64
+| Path | What it does |
+|------|--------------|
+| `tools/pcps4_translate.py` | Source translator: rewrites Win32/MSVC/D3D11 usage, reports unsupported subsystems |
+| `compat/pcps4_sys.[ch]` | Win32 OS façade on OpenOrbis libkernel (files, threads, mutexes, virtual memory, timing) |
+| `compat/pcps4_compat.h` | Win32/MSVC types and API surface used by translated code |
+| `compat/pcps4_pe.[ch]` | PE32+ loader: parse, map + base relocations, import resolver and IAT binding |
+| `compat/pcps4_loader.[ch]` | Executes a loaded PE in executable memory on the console; refuses if any import is unresolved |
+| `compat/pcps4_shader.[ch]` | DXBC (D3D shader bytecode) reader: container validation, shader model, input/output signatures, resource bindings (RDEF) |
+| `compat/pcps4_d3d11.[h/cpp]` | D3D11-style façade: device, context, buffers, textures, render targets, swap chain, input layouts |
+| `compat/pcps4_gpu.[ch]` | GPU resource layer behind the D3D11 façade |
+| `compat/pcps4_gfx.[ch]` | VideoOut framebuffer backend (clear, rects, present) |
+| `compat/pcps4_gnm*.[ch]` | GNM submission boundary and optional OpenGNM renderer |
+| `compat/pcps4_fault.[ch]` | Fatal-signal handler: terminates the app cleanly instead of continuing on corrupted state |
+| `compat/pcps4_status.[ch]` | On-console status screen and log file |
 
-MSVC annotations:
-- WINAPI, __stdcall, __cdecl, __fastcall
-- supported __declspec(dllimport/dllexport/nothrow)
+## What the translator handles
 
-String/memory compatibility:
-- _stricmp/_strnicmp/stricmp/strnicmp -> strcasecmp/strncasecmp
-- ZeroMemory/RtlZeroMemory -> memset
-- CopyMemory -> memcpy
-- MoveMemory -> memmove
+Headers: `windows.h`, `synchapi.h`, `winsock2.h`, `ws2tcpip.h` →
+`pcps4_compat.h`; `d3d11.h`, `dxgi.h`, `d3dcommon.h` → `pcps4_d3d11.h`.
 
-The scanner masks comments and string/character literals before matching, so text such as "Sleep(GetTickCount64())" is not rewritten.
+APIs: `Sleep`, `GetTickCount[64]`, `GetCurrentProcessId`,
+`GetCurrentThreadId`, `InterlockedIncrement/Decrement`, `CreateFileA`,
+`ReadFile`, `WriteFile`, `CloseHandle`, `CreateThread`, `CreateMutexA`,
+`WaitForSingleObject`, `ReleaseMutex`, `VirtualAlloc`, `VirtualFree`,
+`WSAStartup`, `WSACleanup`, `WSAGetLastError`, `closesocket`, plus MSVC string
+helpers (`_stricmp` etc.), common Win32 types and calling-convention
+annotations.
 
-## Blockers
+The scanner masks comments and string literals before matching, so text inside
+them is never rewritten.
 
-Strict translation reports unsupported Windows subsystems before the compiler runs:
+### Reported as unsupported (strict mode stops the build)
 
-- DirectX headers/APIs
-- Winsock
-- Win32 GUI/message APIs
-- Windows DLL loading
-- Windows registry
-- Win32 file APIs
-- Win32 synchronization APIs
+DirectX 12, D3DCompile/D3DReflect, DXGI factory/adapter APIs, advanced Winsock
+(`WSARecv`, `WSASend`, …), `LoadLibrary`/`GetProcAddress`, the registry, extra
+Win32 file APIs (`GetFileSize`, `FindFirstFile`, …), events/semaphores, wide
+(`…W`) file/mutex APIs, and `D3D11CreateDevice`. A blocker means that subsystem
+needs a real port rather than an unsafe rewrite.
 
-That is intentional. A blocker means the project needs a subsystem-level port rather than an unsafe regex rewrite.
+## Package contents
 
-## Multi-file projects
+The `.pkg` contains, matching the OpenOrbis samples:
 
-Put PC source in pc_source/:
+    eboot.bin
+    sce_sys/param.sfo
+    sce_sys/icon0.png
+    sce_sys/about/right.sprx
+    sce_module/libc.prx
+    sce_module/libSceFios2.prx
 
-    pc_source/main.c
-    pc_source/runtime.c
-    pc_source/game.cpp
-
-The Makefile discovers C and C++ files automatically, translates each one into build/generated/, and links all generated object files.
-
-Translate without linking:
-
-    make translate
-
-Run the translator directly:
-
-    python3 tools/pcps4_translate.py pc_source/main.c \
-      --out build/generated/main.c \
-      --report build/translation.json \
-      --strict
-
-## Shader pipeline
-
-For D3D Shader Model 5.x bytecode, use:
-
-    python3 tools/pcps4_shader_pipeline.py \
-      --kind dxbc --stage vertex \
-      --input game.vert.dxbc \
-      --output build/game.vert.sb \
-      --dxbc-compiler /path/to/dxbc_compiler \
-      --psbc /path/to/opengnm-psbc
-
-The pipeline is intentionally explicit: `dxbc-spirv` handles the D3D shader front-end, then `opengnm-psbc` targets the PS4 base/GFX7 profile. Neither step pretends that a DXBC blob can be executed directly by the PS4 GPU.
+`sce_module/libc.prx` is required: without it the app cannot start and the PS4
+reports it as corrupted.
 
 ## Build
 
-Install OpenOrbis and set its root:
-
     export OO_PS4_TOOLCHAIN=/path/to/OpenOrbis-PS4-Toolchain
+    make test        # translator tests (Python)
+    make test-host   # PE loader + DXBC reader tests (host C, -Werror)
+    make             # build the .pkg (same as: make pkg)
 
-Then:
+Output: `build/package/IV0000-PCPS00001_00-PCPS4TRANSLATE01.pkg`.
 
-    make test
-    make translate
-    make
-    # same as: make pkg
+GitHub Actions runs both test suites and uploads the package as the
+`PcPs4-PKG` artifact on every push.
 
-Outputs:
+## Open work
 
-    build/generated/*.c
-    build/generated/*.cpp
-    build/translation.json
-    build/PcPs4.elf
-    build/PcPs4.oelf
-    eboot.bin
-    build/package/IV0000-PCPS00001_00-PCPS4TRANSLATE01.pkg
-
-GitHub Actions uploads the .pkg as the `PcPs4-PKG` artifact on a successful build.
-
-The OpenOrbis integration follows the upstream sample build model: PS4-compatible x86-64 compilation, the OpenOrbis linker script/libraries, and create-fself for eboot generation.
-
-## Next translation work
-
-The architecture is ready for deeper adapters. The next substantial layer is filesystem/path handling, threading/synchronization, socket translation, and eventually a graphics abstraction for PC projects that currently talk directly to DirectX.
+- **Graphics:** the D3D11 `Draw` path returns a controlled "unsupported"
+  error; the optional OpenGNM renderer build (`PCPS4_ENABLE_OPENGNM=1`) has
+  not yet passed in CI.
+- **Shaders:** DXBC is read and validated, but not yet compiled to PS4 GPU
+  code; `tools/pcps4_shader_pipeline.py` drives external compilers for that.
+- **Win32 runtime coverage:** real programs import far more APIs than are
+  implemented; the loader's unresolved-import count lists exactly what a given
+  binary still needs. Imports by ordinal are not resolved yet.
 
 OpenOrbis: https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain
-
-
-## CI
-
-The normal build workflow intentionally uses the stable VideoOut fallback so optional GPU dependencies do not make ordinary commits unbuildable. The separate graphics workflow exercises the real OpenGNM renderer and shader compiler.

@@ -49,6 +49,9 @@ jobs:
 
           cd "$GITHUB_WORKSPACE/external/ps4-graphics/opengnm-psbc"
           cp config.orbis.mak config.mak
+          python3 src/util/format/u_format_table.py --enums src/util/format/u_format.yaml > src/util/format/u_format_gen.h
+          python3 src/util/format/u_format_table.py --header src/util/format/u_format.yaml > src/util/format/u_format_pack.h
+          python3 src/util/format/u_format_table.py src/util/format/u_format.yaml > src/util/format/u_format_table.c
           make -j2
           make -f Makefile.orbis -j2
 

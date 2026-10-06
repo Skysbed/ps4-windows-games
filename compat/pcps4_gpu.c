@@ -1491,7 +1491,8 @@ static int pcps4_cpu_draw_indexed(
         }
 
         int rc = pcps4_raster_triangle(
-            context, p[0], c[0], p[1], c[1], p[2], c[2]);
+            context, p[0], c[0], p[1], c[1], p[2], c[2],
+            NULL, NULL, NULL);
         if (rc != PCPS4_GPU_OK)
             return rc;
     }

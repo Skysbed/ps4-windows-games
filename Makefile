@@ -63,6 +63,7 @@ WINAPI_OBJ := $(INTDIR)/pcps4_winapi.o
 GAME_OBJ  := $(INTDIR)/pcps4_game.o
 DLL_OBJ   := $(INTDIR)/pcps4_dll.o
 D3D11_COM_OBJ := $(INTDIR)/pcps4_d3d11_com.o
+VM_OBJ := $(INTDIR)/pcps4_dxbc_vm.o
 ABI_OBJ := $(INTDIR)/pcps4_abi.o
 WIN32_OBJ := $(INTDIR)/pcps4_win32.o
 DXGI_OBJ := $(INTDIR)/pcps4_dxgi.o
@@ -117,6 +118,7 @@ PE_HOST_TEST := $(INTDIR)/pe_host_test
 PE_MAP_HOST_TEST := $(INTDIR)/pe_map_host_test
 PE_BIND_HOST_TEST := $(INTDIR)/pe_bind_host_test
 DXBC_HOST_TEST := $(INTDIR)/dxbc_host_test
+DXBC_VM_HOST_TEST := $(INTDIR)/dxbc_vm_host_test
 PE_EXPORT_HOST_TEST := $(INTDIR)/pe_export_host_test
 
 all: pkg
@@ -233,10 +235,10 @@ $(STATUS_OBJ): compat/pcps4_status.c compat/pcps4_status.h compat/pcps4_gfx.h co
 $(INTDIR):
 	@mkdir -p "$(INTDIR)"
 
-$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(DLL_OBJ) $(D3D11_COM_OBJ) $(ABI_OBJ) $(WIN32_OBJ) $(DXGI_OBJ)
+$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(DLL_OBJ) $(D3D11_COM_OBJ) $(VM_OBJ) $(ABI_OBJ) $(WIN32_OBJ) $(DXGI_OBJ)
 	@test -n "$(OBJS)" || (echo "ERROR: no PC source files found in pc_source/."; exit 1)
 	$(LD) $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) \
-	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(GNM_RENDERER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(DLL_OBJ) $(D3D11_COM_OBJ) $(ABI_OBJ) $(WIN32_OBJ) $(DXGI_OBJ) -o "$@" $(LDFLAGS)
+	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(GNM_RENDERER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(DLL_OBJ) $(D3D11_COM_OBJ) $(VM_OBJ) $(ABI_OBJ) $(WIN32_OBJ) $(DXGI_OBJ) -o "$@" $(LDFLAGS)
 
 $(EBOOT): $(ELF)
 	@test -n "$(OO_PS4_TOOLCHAIN)" || (echo "ERROR: OO_PS4_TOOLCHAIN is not set."; exit 1)
@@ -302,12 +304,13 @@ pkg: $(PKG) eboot.bin
 test:
 	$(PYTHON) -m unittest discover -s tests -v
 
-test-host: $(PE_HOST_TEST) $(PE_MAP_HOST_TEST) $(PE_BIND_HOST_TEST) $(PE_EXPORT_HOST_TEST) $(DXBC_HOST_TEST)
+test-host: $(PE_HOST_TEST) $(PE_MAP_HOST_TEST) $(PE_BIND_HOST_TEST) $(PE_EXPORT_HOST_TEST) $(DXBC_HOST_TEST) $(DXBC_VM_HOST_TEST)
 	"$(PE_HOST_TEST)"
 	"$(PE_MAP_HOST_TEST)"
 	"$(PE_BIND_HOST_TEST)"
 	"$(PE_EXPORT_HOST_TEST)"
 	"$(DXBC_HOST_TEST)"
+	"$(DXBC_VM_HOST_TEST)"
 
 $(PE_HOST_TEST): compat/pcps4_pe.c compat/pcps4_pe.h tests/pe_host_test.c | $(INTDIR)
 	$(HOST_CC) $(HOST_CFLAGS) -o "$@" compat/pcps4_pe.c tests/pe_host_test.c
@@ -317,6 +320,13 @@ $(PE_MAP_HOST_TEST): compat/pcps4_pe.c compat/pcps4_pe.h tests/pe_map_host_test.
 
 $(PE_BIND_HOST_TEST): compat/pcps4_pe.c compat/pcps4_pe.h tests/pe_bind_host_test.c | $(INTDIR)
 	$(HOST_CC) $(HOST_CFLAGS) -o "$@" compat/pcps4_pe.c tests/pe_bind_host_test.c
+
+$(DXBC_VM_HOST_TEST): compat/pcps4_dxbc_vm.c compat/pcps4_dxbc_vm.h tests/dxbc_vm_host_test.c | $(INTDIR)
+	$(HOST_CC) $(HOST_CFLAGS) -o "$@" compat/pcps4_dxbc_vm.c tests/dxbc_vm_host_test.c -lm
+
+$(VM_OBJ): compat/pcps4_dxbc_vm.c compat/pcps4_dxbc_vm.h
+	@mkdir -p "$(dir $@)"
+	$(CC) $(CFLAGS) -o "$@" "$<"
 
 $(DXBC_HOST_TEST): compat/pcps4_shader.c compat/pcps4_shader.h tests/dxbc_host_test.c | $(INTDIR)
 	$(HOST_CC) $(HOST_CFLAGS) -o "$@" compat/pcps4_shader.c tests/dxbc_host_test.c

@@ -687,4 +687,24 @@ void pcps4_dxvk_register_win32(pcps4_pe_resolver *resolver) {
     R("ADVAPI32.dll", "RegNotifyChangeKeyValue", a_RegNotifyChangeKeyValue);
     R("ADVAPI32.dll", "RegOpenKeyExA", a_RegOpenKeyExA);
     R("ADVAPI32.dll", "RegQueryValueExA", a_RegQueryValueExA);
+
+    /*
+     * The base runtime registers many window/GDI/registry helpers under
+     * KERNEL32.dll, but Windows code imports them from USER32/GDI32/ADVAPI32.
+     * Resolution is per (DLL, name), so make each KERNEL32 name resolvable
+     * under those DLLs too (never overriding an existing entry).
+     */
+    {
+        static const char *const alias_dlls[] = {"USER32.dll", "GDI32.dll", "ADVAPI32.dll"};
+        const uint32_t n = resolver->count;
+        for (uint32_t i = 0; i < n; i += 1) {
+            const pcps4_pe_symbol *sym = &resolver->symbols[i];
+            if (sym->by_ordinal || sym->fn == NULL) continue;
+            if (strcmp(sym->dll, "KERNEL32.dll") != 0) continue;
+            for (unsigned a = 0; a < 3; a += 1) {
+                if (pcps4_pe_resolver_lookup(resolver, alias_dlls[a], sym->name) == NULL)
+                    (void)pcps4_pe_resolver_register(resolver, alias_dlls[a], sym->name, sym->fn);
+            }
+        }
+    }
 }

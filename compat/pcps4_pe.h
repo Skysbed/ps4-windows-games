@@ -135,7 +135,7 @@ pcps4_pe_status pcps4_pe_map_image(const pcps4_pe_image *image,
 
 /* --- import resolution ------------------------------------------------- */
 
-#define PCPS4_PE_MAX_RESOLVER_SYMBOLS 512
+#define PCPS4_PE_MAX_RESOLVER_SYMBOLS 2048
 
 typedef struct pcps4_pe_symbol {
     char     dll[32];
@@ -162,6 +162,7 @@ typedef void *(*pcps4_pe_resolver_fallback_fn)(
 typedef struct pcps4_pe_resolver {
     pcps4_pe_symbol symbols[PCPS4_PE_MAX_RESOLVER_SYMBOLS];
     uint32_t        count;
+    uint32_t        overflowed; /* registrations dropped because the table was full */
     pcps4_pe_resolver_fallback_fn fallback;
     void            *fallback_user;
 } pcps4_pe_resolver;

@@ -509,8 +509,10 @@ pcps4_pe_status pcps4_pe_resolver_register(pcps4_pe_resolver *resolver,
         }
     }
 
-    if (resolver->count >= PCPS4_PE_MAX_RESOLVER_SYMBOLS)
+    if (resolver->count >= PCPS4_PE_MAX_RESOLVER_SYMBOLS) {
+        resolver->overflowed += 1; /* reported by the loader; never silent */
         return PCPS4_PE_ERR_NO_SPACE;
+    }
 
     pe_copy_bounded(resolver->symbols[resolver->count].dll,
                     sizeof(resolver->symbols[0].dll), dll);

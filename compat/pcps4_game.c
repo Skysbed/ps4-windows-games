@@ -69,7 +69,8 @@ static int read_file(
 
 int pcps4_game_run_file(const char *path, int32_t *out_entry_ret)
 {
-    pcps4_pe_resolver resolver;
+    /* ~230 KB: keep it off the stack, and valid for GetProcAddress later. */
+    static pcps4_pe_resolver resolver;
     uint8_t *exe = NULL;
     size_t exe_size = 0;
     pcps4_loader_status rc;

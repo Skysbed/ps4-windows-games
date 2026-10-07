@@ -9,6 +9,18 @@
 
 #include <sys/mman.h>
 
+/* Name every import a DLL needs that the runtime cannot provide. */
+static int pcps4_dll_report_unresolved(void *user, const char *dll, int by_name,
+                                       const char *name, uint16_t ordinal)
+{
+    if (by_name)
+        pcps4_status_log("[pcps4] %s needs %s!%s (unresolved)", (const char *)user, dll, name);
+    else
+        pcps4_status_log("[pcps4] %s needs %s!#%u (unresolved)", (const char *)user, dll, (unsigned)ordinal);
+    return 0;
+}
+
+
 extern int sceKernelUsleep(unsigned int microseconds);
 extern int32_t sceKernelMmap(void *addr, size_t len, int32_t prot,
                              int32_t flags, int32_t fd, off_t offset,
@@ -370,8 +382,6 @@ void *pcps4_dll_load(
         &resolved,
         &unresolved);
 
-    free(file_data);
-
     if (rc != PCPS4_PE_OK || unresolved != 0) {
         pcps4_status_log(
             "[pcps4] DLL %s load failed: %s resolved=%u unresolved=%u",
@@ -380,12 +390,16 @@ void *pcps4_dll_load(
                 pcps4_pe_status_str(rc),
             (unsigned)resolved,
             (unsigned)unresolved);
+        if (rc == PCPS4_PE_OK)
+            (void)pcps4_pe_report_unresolved_imports(&image, resolver, pcps4_dll_report_unresolved, (void *)name);
+        free(file_data);
         lock();
         memset(module, 0, sizeof(*module));
         unlock();
         (void)sceKernelMunmap(mem, map_size);
         return NULL;
     }
+    free(file_data);
 
     if (image.entry_point_rva != 0 &&
         !pcps4_loader_entry_is_executable(&image)) {

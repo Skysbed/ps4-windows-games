@@ -1195,4 +1195,8 @@ void pcps4_winapi_build_resolver(pcps4_pe_resolver *resolver)
         pcps4_dxvk_register_vulkan(resolver);
     }
 #endif
+
+    pcps4_status_log("[pcps4] import table: %u entries registered, %u dropped (capacity %u)",
+                     (unsigned)resolver->count, (unsigned)resolver->overflowed,
+                     (unsigned)PCPS4_PE_MAX_RESOLVER_SYMBOLS);
 }

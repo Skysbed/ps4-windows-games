@@ -11,6 +11,11 @@ PCPS4_ENABLE_OPENGNM ?= 0
 PCPS4_RUN_GAME ?= 1
 PCPS4_BUNDLED_GAME ?= 0
 PCPS4_GAME_DIR ?=
+# DXVK mode: run DXVK's real d3d11/dxgi DLLs on the PS4 GPU through vulkan-ps4.
+# Needs the prebuilt GPU stack libraries (PCPS4_VK_LIBS) and Vulkan headers.
+PCPS4_DXVK ?= 0
+PCPS4_VK_LIBS ?=
+PCPS4_VK_HEADERS ?=
 PCPS4_GRAPHICS_ROOT ?= external/ps4-graphics
 PCPS4_OPENGNM_DIR := $(PCPS4_GRAPHICS_ROOT)/opengnm
 INTDIR        ?= build
@@ -40,6 +45,7 @@ CFLAGS   := $(COMMONFLAGS) -std=c11 \
             -DPCPS4_ENABLE_OPENGNM=$(PCPS4_ENABLE_OPENGNM) \
             -DPCPS4_RUN_GAME=$(PCPS4_RUN_GAME) \
             -DPCPS4_BUNDLED_GAME=$(PCPS4_BUNDLED_GAME) \
+            -DPCPS4_DXVK=$(PCPS4_DXVK) \
             $(if $(PCPS4_ENABLE_GNM),-DPCPS4_ENABLE_GNM=1,) -c
 CXXFLAGS := $(COMMONFLAGS) \
             -isystem $(TOOLCHAIN)/include/c++/v1 -c
@@ -66,6 +72,15 @@ D3D11_COM_OBJ := $(INTDIR)/pcps4_d3d11_com.o
 ABI_OBJ := $(INTDIR)/pcps4_abi.o
 WIN32_OBJ := $(INTDIR)/pcps4_win32.o
 DXGI_OBJ := $(INTDIR)/pcps4_dxgi.o
+DXVK_OBJS :=
+DXVK_LDLIBS :=
+ifeq ($(PCPS4_DXVK),1)
+DXVK_OBJS := $(INTDIR)/pcps4_dxvk_support.o $(INTDIR)/pcps4_vulkan_shim.cpp.o \
+             $(INTDIR)/pcps4_psbc_link_stubs.o
+DXVK_LDLIBS := -z muldefs -lSceGnmDriver \
+               $(PCPS4_VK_LIBS)/libvulkan_ps4.a $(PCPS4_VK_LIBS)/libpsbc.orbis.a \
+               $(PCPS4_VK_LIBS)/libopengnm.a
+endif
 
 ELF := $(INTDIR)/$(PROJECT).elf
 OELF := $(INTDIR)/$(PROJECT).oelf
@@ -233,10 +248,25 @@ $(STATUS_OBJ): compat/pcps4_status.c compat/pcps4_status.h compat/pcps4_gfx.h co
 $(INTDIR):
 	@mkdir -p "$(INTDIR)"
 
-$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(DLL_OBJ) $(D3D11_COM_OBJ) $(ABI_OBJ) $(WIN32_OBJ) $(DXGI_OBJ)
+
+ifeq ($(PCPS4_DXVK),1)
+$(INTDIR)/pcps4_dxvk_support.o: compat/pcps4_dxvk_support.c compat/pcps4_dxvk_support.h compat/pcps4_loader.h
+	@mkdir -p "$(dir $@)"
+	$(CC) $(CFLAGS) -o "$@" "$<"
+
+$(INTDIR)/pcps4_psbc_link_stubs.o: compat/pcps4_psbc_link_stubs.c
+	@mkdir -p "$(dir $@)"
+	$(CC) $(CFLAGS) -o "$@" "$<"
+
+$(INTDIR)/pcps4_vulkan_shim.cpp.o: compat/pcps4_vulkan_shim.cpp compat/pcps4_vulkan_shim_table.inc compat/pcps4_dxvk_support.h
+	@mkdir -p "$(dir $@)"
+	$(CXX) $(CXXFLAGS) -std=c++17 -I$(PCPS4_VK_HEADERS)/include -o "$@" "$<"
+endif
+
+$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(DLL_OBJ) $(D3D11_COM_OBJ) $(ABI_OBJ) $(WIN32_OBJ) $(DXGI_OBJ) $(DXVK_OBJS)
 	@test -n "$(OBJS)" || (echo "ERROR: no PC source files found in pc_source/."; exit 1)
 	$(LD) $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) \
-	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(GNM_RENDERER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(DLL_OBJ) $(D3D11_COM_OBJ) $(ABI_OBJ) $(WIN32_OBJ) $(DXGI_OBJ) -o "$@" $(LDFLAGS)
+	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(GNM_RENDERER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(DLL_OBJ) $(D3D11_COM_OBJ) $(ABI_OBJ) $(WIN32_OBJ) $(DXGI_OBJ) $(DXVK_OBJS) -o "$@" $(DXVK_LDLIBS) $(LDFLAGS)
 
 $(EBOOT): $(ELF)
 	@test -n "$(OO_PS4_TOOLCHAIN)" || (echo "ERROR: OO_PS4_TOOLCHAIN is not set."; exit 1)

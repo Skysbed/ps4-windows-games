@@ -5,6 +5,9 @@
 #include "pcps4_xinput.h"
 #include "pcps4_d3d11_com.h"
 #include "pcps4_abi.h"
+#if PCPS4_DXVK
+#include "pcps4_dxvk_support.h"
+#endif
 #include "pcps4_loader.h"
 #include "pcps4_dll.h"
 #include "pcps4_status.h"
@@ -1148,8 +1151,28 @@ void pcps4_winapi_build_resolver(pcps4_pe_resolver *resolver)
     register_kernel32(resolver, "KERNEL32.dll");
     register_kernel32(resolver, "KERNELBASE.dll");
     register_winsock(resolver, "WS2_32.dll");
+#if PCPS4_DXVK
+    /*
+     * DXVK mode: if the game directory ships DXVK's d3d11.dll, leave d3d11/dxgi
+     * unregistered so the runtime DLL loader maps the real DLLs, and provide the
+     * Windows functions and the "vulkan-1.dll" they need.
+     */
+    int use_dxvk = 0;
+    {
+        FILE *probe = fopen("/app0/game/d3d11.dll", "rb");
+        if (probe) {
+            use_dxvk = 1;
+            fclose(probe);
+        }
+    }
+    if (!use_dxvk) {
+        register_d3d11(resolver, "d3d11.dll");
+        register_dxgi(resolver, "dxgi.dll");
+    }
+#else
     register_d3d11(resolver, "d3d11.dll");
     register_dxgi(resolver, "dxgi.dll");
+#endif
     register_xinput(resolver, "XINPUT1_4.dll");
     register_xinput(resolver, "XINPUT1_3.dll");
     register_ucrt(resolver, "ucrtbase.dll");
@@ -1165,4 +1188,11 @@ void pcps4_winapi_build_resolver(pcps4_pe_resolver *resolver)
     register_ucrt(resolver, "api-ms-win-crt-runtime-l1-1-0.dll");
     register_ucrt(resolver, "api-ms-win-crt-string-l1-1-0.dll");
     register_ucrt(resolver, "api-ms-win-crt-heap-l1-1-0.dll");
+
+#if PCPS4_DXVK
+    if (use_dxvk) {
+        pcps4_dxvk_register_win32(resolver);
+        pcps4_dxvk_register_vulkan(resolver);
+    }
+#endif
 }

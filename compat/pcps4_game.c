@@ -1,4 +1,9 @@
 #include "pcps4_game.h"
+
+#if PCPS4_DXVK
+/* vulkan-ps4 driver breadcrumbs -> /data/vk_ps4_breadcrumb.log (weak: absent without the GPU stack) */
+extern void vk_ps4_log_open(const char *path) __attribute__((weak));
+#endif
 #include "pcps4_status.h"
 
 #include "pcps4_loader.h"
@@ -83,6 +88,10 @@ int pcps4_game_run_file(const char *path, int32_t *out_entry_ret)
     }
 
     pcps4_winapi_build_resolver(&resolver);
+
+#if PCPS4_DXVK
+    if (vk_ps4_log_open) vk_ps4_log_open(NULL);
+#endif
 
     pcps4_status_log("[pcps4] game load: %s (%u bytes)",
            path, (unsigned)exe_size);

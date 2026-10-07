@@ -52,7 +52,18 @@ jobs:
       - name: Build psbc (host shader compiler)
         run: |
           set -euxo pipefail
-          make -C "$STACK/opengnm-psbc" -j"$(nproc)"
+          cd "$STACK/opengnm-psbc"
+          # The repo ships only a PS4 config; derive a host config from it by
+          # dropping the OpenOrbis requirement and the cross-compile flags.
+          python3 - <<'PY'
+          import re
+          s = open("config.orbis.mak").read()
+          s = re.sub(r"ifeq \(\$\(strip \$\(OO_PS4_TOOLCHAIN\)\),\).*?endif\n", "", s, flags=re.S)
+          s = re.sub(r"ARCHFLAGS=.*?openorbis-compat/include\n", "ARCHFLAGS=-fPIC\n", s, flags=re.S)
+          open("config.mak", "w").write(s)
+          PY
+          grep -n "ARCHFLAGS" config.mak
+          make -j"$(nproc)"
           ls -la "$STACK/opengnm-psbc/opengnm-psbc"
 
       - name: Build opengnm (PS4 backend)

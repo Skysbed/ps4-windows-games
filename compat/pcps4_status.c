@@ -4,6 +4,7 @@
 
 #include "pcps4_status.h"
 #include "pcps4_gfx.h"
+#include "pcps4_version.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -12,7 +13,8 @@
 extern int sceKernelUsleep(unsigned int microseconds);
 
 #define PCPS4_STATUS_MAX_TESTS 8
-#define PCPS4_STATUS_LOG_PATH "/data/pcps4_log.txt"
+#define PCPS4_STATUS_LOG_PATH PCPS4_RUNTIME_LOG_PATH
+#define PCPS4_GAME_LOG_PATH PCPS4_WINDOWS_GAME_LOG_PATH
 
 static FILE *g_log = NULL;
 static pcps4_gfx_context_t g_gfx;
@@ -95,7 +97,8 @@ void pcps4_status_begin(void)
     setvbuf(stdout, NULL, _IONBF, 0);
 
     g_log = fopen(PCPS4_STATUS_LOG_PATH, "w");
-    pcps4_status_log("[pcps4] status: begin (log file %s)",
+    pcps4_status_log("[pcps4 %s] status: begin (log file %s)",
+                     PCPS4_BUILD_VERSION,
                      g_log ? "open" : "unavailable");
 
     memset(&g_gfx, 0, sizeof(g_gfx));
@@ -107,6 +110,38 @@ void pcps4_status_begin(void)
         pcps4_status_log("[pcps4] status: screen unavailable, log only");
     }
     pcps4_status_redraw(0);
+}
+
+void pcps4_status_game_log_begin(void)
+{
+    if (g_log != NULL) {
+        fclose(g_log);
+        g_log = NULL;
+    }
+
+    g_log = fopen(PCPS4_GAME_LOG_PATH, "w");
+    if (g_log != NULL) {
+        fputs("[pcps4] ===== WINDOWS GAME RUN LOG =====\n", g_log);
+        fflush(g_log);
+    }
+}
+
+void pcps4_status_game_log_end(void)
+{
+    if (g_log != NULL) {
+        fputs("[pcps4] ===== WINDOWS GAME RUN END =====\n", g_log);
+        fflush(g_log);
+        fclose(g_log);
+        g_log = NULL;
+    }
+
+    /* Re-open the wrapper log in append mode so the final result is recorded
+     * separately from the Windows game execution trace. */
+    g_log = fopen(PCPS4_STATUS_LOG_PATH, "a");
+    if (g_log != NULL) {
+        fputs("[pcps4] ===== RETURNED FROM WINDOWS GAME =====\n", g_log);
+        fflush(g_log);
+    }
 }
 
 void pcps4_status_step(const char *name)

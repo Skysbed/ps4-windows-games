@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "pcps4_fault.h"
+#include "pcps4_version.h"
 
 #include <fcntl.h>
 #include <signal.h>
@@ -9,8 +10,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-#define PCPS4_CRASH_PATH "/data/pcps4_crash.txt"
-#define PCPS4_TRACE_PATH "/data/pcps4_trace.txt"
+
 
 static volatile sig_atomic_t pcps4_fault_seen = 0;
 
@@ -68,10 +68,32 @@ static void fd_write_uint(int fd, unsigned long value)
     fd_write_str(fd, &buf[i]);
 }
 
-static void emit_report(int fd, int signal_number)
+static void fd_write_hex(int fd, uintptr_t value)
+{
+    static const char digits[] = "0123456789abcdef";
+    char buf[2 + sizeof(uintptr_t) * 2 + 1];
+    size_t pos = sizeof(buf);
+
+    buf[--pos] = '\0';
+    do {
+        buf[--pos] = digits[value & 0xfu];
+        value >>= 4;
+    } while (value != 0 && pos > 2);
+
+    buf[--pos] = 'x';
+    buf[--pos] = '0';
+    fd_write_str(fd, &buf[pos]);
+}
+
+static void emit_report(
+    int fd,
+    int signal_number,
+    uintptr_t fault_address)
 {
     fd_write_str(fd, "PcPs4: fatal fault signal=");
     fd_write_uint(fd, (unsigned long)signal_number);
+    fd_write_str(fd, " address=");
+    fd_write_hex(fd, fault_address);
     fd_write_str(fd, " stage=");
     fd_write_str(fd, pcps4_stage);
     fd_write_str(fd, "\n");
@@ -85,19 +107,15 @@ static void pcps4_fault_handler(int signal_number)
         _exit(128 + signal_number);
     pcps4_fault_seen = 1;
 
-    /* klog (captured over a PC) and a file on the console (captured over FTP). */
-    emit_report(STDERR_FILENO, signal_number);
+    /* Toolchain signal handlers use the legacy one-argument ABI. */
+    emit_report(STDERR_FILENO, signal_number, 0);
 
     fd = open(PCPS4_CRASH_PATH, O_WRONLY | O_CREAT | O_TRUNC, 0666);
     if (fd >= 0) {
-        emit_report(fd, signal_number);
+        emit_report(fd, signal_number, 0);
         (void)close(fd);
     }
 
-    /*
-     * Do not attempt to resume execution after SIGSEGV/SIGBUS/SIGILL etc.
-     * The damaged state is not trustworthy.
-     */
     _exit(128 + signal_number);
 }
 

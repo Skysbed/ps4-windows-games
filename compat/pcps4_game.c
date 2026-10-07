@@ -72,8 +72,13 @@ int pcps4_game_run_file(const char *path, int32_t *out_entry_ret)
     if (path == NULL)
         return -1;
 
+    /* Route PE loading, import resolution, and execution messages to the
+     * package-versioned Windows-game log, separate from runtime status. */
+    pcps4_status_game_log_begin();
+
     if (read_file(path, &exe, &exe_size) != 0) {
         pcps4_status_log("[pcps4] game load: could not read %s", path);
+        pcps4_status_game_log_end();
         return -2;
     }
 
@@ -93,9 +98,12 @@ int pcps4_game_run_file(const char *path, int32_t *out_entry_ret)
     if (rc != PCPS4_LOADER_OK) {
         pcps4_status_log("[pcps4] game load failed: %s",
                pcps4_loader_status_str(rc));
+        pcps4_status_game_log_end();
         return (int)rc;
     }
 
+    pcps4_status_log("[pcps4] Windows game execution returned successfully");
+    pcps4_status_game_log_end();
     return 0;
 }
 

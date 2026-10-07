@@ -1,4 +1,4 @@
-name: PcPs4 OpenOrbis build
+name: PcPs4 v6 OpenOrbis build
 
 on:
   push:
@@ -56,21 +56,31 @@ jobs:
           make test
           make test-host
 
-      - name: Build native Windows D3D11 smoke binary
+      - name: Build native Windows D3D11 smoke + DLL probe
         run: |
           set -euxo pipefail
-          rm -rf build/win_d3d11_smoke.exe
+          rm -rf build/win_d3d11_smoke.exe build/winprobe.dll
           mkdir -p build
-          x86_64-w64-mingw32-gcc             -std=c11             -O2             -ffreestanding             -fno-stack-protector             -fno-asynchronous-unwind-tables             -nostdlib             -Wl,--entry=WinMainCRTStartup             -Wl,--subsystem,windows -Wl,--section-alignment,0x4000 -Wl,--file-alignment,0x200             -o build/win_d3d11_smoke.exe             tests/win_d3d11_smoke.c             -ld3d11 -lkernel32
+          x86_64-w64-mingw32-gcc             -std=c11 -O2 -ffreestanding             -fno-stack-protector -fno-asynchronous-unwind-tables             -nostdlib             -Wl,--entry=WinMainCRTStartup             -Wl,--subsystem,windows             -Wl,--section-alignment,0x4000             -Wl,--file-alignment,0x200             -o build/win_d3d11_smoke.exe             tests/win_d3d11_smoke.c -ld3d11 -ldxgi -lkernel32
+
+          x86_64-w64-mingw32-gcc             -std=c11 -O2 -ffreestanding             -fno-stack-protector -fno-asynchronous-unwind-tables             -nostdlib -shared             -Wl,--entry=DllMain             -Wl,--section-alignment,0x4000             -Wl,--file-alignment,0x200             -o build/winprobe.dll             tests/winprobe.c
+
           test -s build/win_d3d11_smoke.exe
-          file build/win_d3d11_smoke.exe
+          test -s build/winprobe.dll
+          file build/win_d3d11_smoke.exe build/winprobe.dll
+
+          echo '--- smoke imports ---'
           x86_64-w64-mingw32-objdump -p build/win_d3d11_smoke.exe |
-            sed -n '/The Import Tables/,$p' | head -n 100
+            sed -n '/The Import Tables/,$p' | head -n 120
+
+          echo '--- probe exports ---'
+          x86_64-w64-mingw32-objdump -p build/winprobe.dll |
+            sed -n '/The Export Tables/,$p' | head -n 120
 
       - name: Upload native Windows D3D11 smoke binary
         uses: actions/upload-artifact@v4
         with:
-          name: PcPs4-Windows-D3D11-Smoke
+          name: PcPs4-v6-Windows-D3D11-Smoke-EXE
           path: build/win_d3d11_smoke.exe
           if-no-files-found: error
 
@@ -118,7 +128,9 @@ jobs:
           rm -rf build/win-game build/win-smoke
           mkdir -p build/win-game
           cp build/win_d3d11_smoke.exe build/win-game/game.exe
+          cp build/winprobe.dll build/win-game/winprobe.dll
           test -s build/win-game/game.exe
+          test -s build/win-game/winprobe.dll
 
           PCPS4_ENABLE_OPENGNM=0           PCPS4_RUN_GAME=1           PCPS4_BUNDLED_GAME=1           PCPS4_GAME_DIR="$GITHUB_WORKSPACE/build/win-game"           INTDIR=build/win-smoke           PACKAGE_ROOT=build/win-smoke/package           TITLE="PcPs4 Windows D3D11 Smoke"           TITLE_ID=PCPS00002           CONTENT_ID=IV0000-PCPS00002_00-WIND3D11SMOKE001           make -B pkg
 
@@ -129,6 +141,8 @@ jobs:
           find build/win-smoke/package -maxdepth 6 -type f -printf '%P %s bytes\n' | sort
           test -f build/win-smoke/package/game/game.exe
           test -s build/win-smoke/package/game/game.exe
+          test -f build/win-smoke/package/game/winprobe.dll
+          test -s build/win-smoke/package/game/winprobe.dll
           test -s build/win-smoke/package/*.gp4
           test -s build/win-smoke/package/*.pkg
 
@@ -137,11 +151,21 @@ jobs:
           sed -n '1,220p' "$GP4"
           grep -Eq 'game/game\\.exe|game/game.exe' "$GP4"
 
+          # Versioned filename keeps downloads unmistakable.
+          cp "$(find build/win-smoke/package -maxdepth 1 -name '*.pkg' -type f -print -quit)" "build/win-smoke/PcPs4-v6-Windows-Game-Diagnostic.pkg"
+
       - name: Upload PS4 package containing native Windows D3D11 smoke binary
         uses: actions/upload-artifact@v4
         with:
-          name: PcPs4-PKG-Windows-D3D11-Smoke
-          path: build/win-smoke/package/*.pkg
+          name: PcPs4-v6-Windows-D3D11-Smoke-PKG
+          path: build/win-smoke/PcPs4-v6-Windows-Game-Diagnostic.pkg
+          if-no-files-found: error
+
+      - name: Upload FINAL one-package PS4 Windows smoke
+        uses: actions/upload-artifact@v4
+        with:
+          name: PcPs4-v6-FINAL-Windows-Game-Diagnostic-PKG
+          path: build/win-smoke/PcPs4-v6-Windows-Game-Diagnostic.pkg
           if-no-files-found: error
 
       - name: Upload bundled GP4 diagnostics

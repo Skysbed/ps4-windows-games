@@ -61,8 +61,11 @@ STATUS_OBJ := $(INTDIR)/pcps4_status.o
 XINPUT_OBJ := $(INTDIR)/pcps4_xinput.o
 WINAPI_OBJ := $(INTDIR)/pcps4_winapi.o
 GAME_OBJ  := $(INTDIR)/pcps4_game.o
+DLL_OBJ   := $(INTDIR)/pcps4_dll.o
 D3D11_COM_OBJ := $(INTDIR)/pcps4_d3d11_com.o
 ABI_OBJ := $(INTDIR)/pcps4_abi.o
+WIN32_OBJ := $(INTDIR)/pcps4_win32.o
+DXGI_OBJ := $(INTDIR)/pcps4_dxgi.o
 
 ELF := $(INTDIR)/$(PROJECT).elf
 OELF := $(INTDIR)/$(PROJECT).oelf
@@ -114,6 +117,7 @@ PE_HOST_TEST := $(INTDIR)/pe_host_test
 PE_MAP_HOST_TEST := $(INTDIR)/pe_map_host_test
 PE_BIND_HOST_TEST := $(INTDIR)/pe_bind_host_test
 DXBC_HOST_TEST := $(INTDIR)/dxbc_host_test
+PE_EXPORT_HOST_TEST := $(INTDIR)/pe_export_host_test
 
 all: pkg
 
@@ -151,7 +155,7 @@ $(SYS_OBJ): compat/pcps4_sys.c compat/pcps4_sys.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
 
-$(FAULT_OBJ): compat/pcps4_fault.c compat/pcps4_fault.h
+$(FAULT_OBJ): compat/pcps4_fault.c compat/pcps4_fault.h compat/pcps4_version.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
 
@@ -180,11 +184,15 @@ $(INTDIR)/pcps4_xinput.o: compat/pcps4_xinput.c compat/pcps4_xinput.h compat/pcp
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
 
-$(WINAPI_OBJ): compat/pcps4_winapi.c compat/pcps4_winapi.h compat/pcps4_compat.h compat/pcps4_xinput.h compat/pcps4_pe.h
+$(WINAPI_OBJ): compat/pcps4_winapi.c compat/pcps4_winapi.h compat/pcps4_compat.h compat/pcps4_xinput.h compat/pcps4_pe.h compat/pcps4_win32.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
 
-$(GAME_OBJ): compat/pcps4_game.c compat/pcps4_game.h compat/pcps4_loader.h compat/pcps4_winapi.h
+$(DLL_OBJ): compat/pcps4_dll.c compat/pcps4_dll.h compat/pcps4_pe.h compat/pcps4_loader.h
+	@mkdir -p "$(dir $@)"
+	$(CC) $(CFLAGS) -o "$@" "$<"
+
+$(GAME_OBJ): compat/pcps4_game.c compat/pcps4_game.h compat/pcps4_loader.h compat/pcps4_winapi.h compat/pcps4_status.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
 
@@ -193,6 +201,16 @@ $(D3D11_COM_OBJ): compat/pcps4_d3d11_com.cpp compat/pcps4_d3d11_com.h compat/pcp
 	$(CXX) $(CXXFLAGS) -o "$@" "$<"
 
 $(ABI_OBJ): compat/pcps4_abi.c compat/pcps4_abi.h compat/pcps4_compat.h compat/pcps4_d3d11_com.h compat/pcps4_xinput.h
+	@mkdir -p "$(dir $@)"
+	$(CC) $(CFLAGS) -o "$@" "$<"
+
+
+$(WIN32_OBJ): compat/pcps4_win32.c compat/pcps4_win32.h compat/pcps4_compat.h
+	@mkdir -p "$(dir $@)"
+	$(CC) $(CFLAGS) -o "$@" "$<"
+
+
+$(DXGI_OBJ): compat/pcps4_dxgi.c compat/pcps4_dxgi.h compat/pcps4_d3d11_com.h compat/pcps4_compat.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
 
@@ -208,17 +226,17 @@ $(LOADER_OBJ): compat/pcps4_loader.c compat/pcps4_loader.h compat/pcps4_pe.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
 
-$(STATUS_OBJ): compat/pcps4_status.c compat/pcps4_status.h compat/pcps4_gfx.h
+$(STATUS_OBJ): compat/pcps4_status.c compat/pcps4_status.h compat/pcps4_gfx.h compat/pcps4_version.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
 
 $(INTDIR):
 	@mkdir -p "$(INTDIR)"
 
-$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(D3D11_COM_OBJ) $(ABI_OBJ)
+$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(DLL_OBJ) $(D3D11_COM_OBJ) $(ABI_OBJ) $(WIN32_OBJ) $(DXGI_OBJ)
 	@test -n "$(OBJS)" || (echo "ERROR: no PC source files found in pc_source/."; exit 1)
 	$(LD) $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) \
-	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(GNM_RENDERER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(D3D11_COM_OBJ) $(ABI_OBJ) -o "$@" $(LDFLAGS)
+	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(GNM_RENDERER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(DLL_OBJ) $(D3D11_COM_OBJ) $(ABI_OBJ) $(WIN32_OBJ) $(DXGI_OBJ) -o "$@" $(LDFLAGS)
 
 $(EBOOT): $(ELF)
 	@test -n "$(OO_PS4_TOOLCHAIN)" || (echo "ERROR: OO_PS4_TOOLCHAIN is not set."; exit 1)
@@ -284,10 +302,11 @@ pkg: $(PKG) eboot.bin
 test:
 	$(PYTHON) -m unittest discover -s tests -v
 
-test-host: $(PE_HOST_TEST) $(PE_MAP_HOST_TEST) $(PE_BIND_HOST_TEST) $(DXBC_HOST_TEST)
+test-host: $(PE_HOST_TEST) $(PE_MAP_HOST_TEST) $(PE_BIND_HOST_TEST) $(PE_EXPORT_HOST_TEST) $(DXBC_HOST_TEST)
 	"$(PE_HOST_TEST)"
 	"$(PE_MAP_HOST_TEST)"
 	"$(PE_BIND_HOST_TEST)"
+	"$(PE_EXPORT_HOST_TEST)"
 	"$(DXBC_HOST_TEST)"
 
 $(PE_HOST_TEST): compat/pcps4_pe.c compat/pcps4_pe.h tests/pe_host_test.c | $(INTDIR)
@@ -302,12 +321,16 @@ $(PE_BIND_HOST_TEST): compat/pcps4_pe.c compat/pcps4_pe.h tests/pe_bind_host_tes
 $(DXBC_HOST_TEST): compat/pcps4_shader.c compat/pcps4_shader.h tests/dxbc_host_test.c | $(INTDIR)
 	$(HOST_CC) $(HOST_CFLAGS) -o "$@" compat/pcps4_shader.c tests/dxbc_host_test.c
 
+$(PE_EXPORT_HOST_TEST): compat/pcps4_pe.c compat/pcps4_pe.h tests/pe_export_host_test.c | $(INTDIR)
+	$(HOST_CC) $(HOST_CFLAGS) -o "$@" compat/pcps4_pe.c tests/pe_export_host_test.c
+
 info:
 	@test -n "$(OO_PS4_TOOLCHAIN)" || (echo "ERROR: OO_PS4_TOOLCHAIN is not set."; exit 1)
 	@echo "OpenOrbis toolchain: $(TOOLCHAIN)"
 	@echo "Target: x86_64-pc-freebsd12-elf"
 	@echo "Translator: $(TRANSLATOR)"
 	@echo "OS adapter: compat/pcps4_sys.[ch]"
+	@echo "Windows PE DLL loader: compat/pcps4_dll.[ch]"
 	@echo "Graphics backend: compat/pcps4_gfx.[ch]"
 	@echo "GPU resources: compat/pcps4_gpu.[ch]"
 	@echo "D3D11 façade: compat/pcps4_d3d11.[h/cpp]"

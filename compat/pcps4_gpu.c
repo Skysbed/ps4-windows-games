@@ -29,6 +29,7 @@ struct pcps4_gpu_context {
     float viewport_height;
     float viewport_min_depth;
     float viewport_max_depth;
+    int viewport_explicit; /* set by RSSetViewports; else follow the render target */
     pcps4_gpu_buffer_t *vs_constant_buffers[16];
     pcps4_gpu_buffer_t *ps_constant_buffers[16];
     pcps4_gpu_texture_t *vs_shader_resources[16];
@@ -769,6 +770,7 @@ int pcps4_gpu_context_set_viewport(
     context->viewport_height = height;
     context->viewport_min_depth = min_depth;
     context->viewport_max_depth = max_depth;
+    context->viewport_explicit = 1;
     return PCPS4_GPU_OK;
 }
 
@@ -1178,6 +1180,19 @@ static int pcps4_raster_triangle(
     float vy = context->viewport_y;
     float vw = context->viewport_width;
     float vh = context->viewport_height;
+
+    /*
+     * Until the app calls RSSetViewports, map NDC across the bound render
+     * target. The built-in 1280x720 default only matches a 720p target; for
+     * the 640x360 back buffer it placed the NDC origin at the bottom-right
+     * corner and clipped most of the triangle.
+     */
+    if (!context->viewport_explicit) {
+        vx = 0.0f;
+        vy = 0.0f;
+        vw = (float)texture->desc.width;
+        vh = (float)texture->desc.height;
+    }
 
     int32_t x0 = (int32_t)(vx + (min_x * 0.5f + 0.5f) * vw);
     int32_t x1 = (int32_t)(vx + (max_x * 0.5f + 0.5f) * vw);

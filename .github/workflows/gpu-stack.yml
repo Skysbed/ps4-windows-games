@@ -13,9 +13,6 @@ jobs:
       OPENORBIS_VERSION: v0.5.4
       OO_PS4_TOOLCHAIN: ${{ github.workspace }}/toolchain
       STACK: ${{ github.workspace }}/stack
-      # Host runners often pre-set CC=cc (gcc). config.orbis.mak uses CC?=clang,
-      # which would never win. Force the OpenOrbis-capable toolchain for every
-      # PS4 cross-compile step.
       CC: clang
       CXX: clang++
       LD: ld.lld
@@ -48,7 +45,6 @@ jobs:
           test -f "$OO_PS4_TOOLCHAIN/lib/crt1.o"
           test -d "$OO_PS4_TOOLCHAIN/include"
           { ls "$OO_PS4_TOOLCHAIN/lib" | grep -E 'Gnm|VideoOut|crt' || true; } | cat
-          # Prefer toolchain modules path; fall back to bin/data/modules if present
           if [ -d "$OO_PS4_TOOLCHAIN/src/modules" ]; then
             echo "RUNTIME_MODULE_DIR=$OO_PS4_TOOLCHAIN/src/modules"
           elif [ -d "$OO_PS4_TOOLCHAIN/bin/data/modules" ]; then
@@ -73,8 +69,6 @@ jobs:
         run: |
           set -euxo pipefail
           cd "$STACK/opengnm-psbc"
-          # Host build: do NOT inherit the PS4 CC/CFLAGS from the job env.
-          # Derive a host config from the orbis one.
           python3 - <<'PY'
           import re
           s = open("config.orbis.mak").read()
@@ -99,7 +93,6 @@ jobs:
           test -n "$OO_PS4_TOOLCHAIN"
           test -d "$OO_PS4_TOOLCHAIN/include"
           cp "$STACK/opengnm/config.orbis.mak" "$STACK/opengnm/config.mak"
-          # Explicit CC=clang so the job-level env cannot fall back to gcc/cc.
           make -C "$STACK/opengnm" lib -j"$(nproc)" \
             CC=clang CXX=clang++ LD=ld.lld AR=llvm-ar \
             OO_PS4_TOOLCHAIN="$OO_PS4_TOOLCHAIN"
@@ -115,7 +108,9 @@ jobs:
           ls -la "$STACK/opengnm-psbc/libpsbc.orbis.a"
           test -s "$STACK/opengnm-psbc/libpsbc.orbis.a"
 
-      - name: Build vulkan-ps4
+      # Round 1 triangle uses OpenGNM + psbc only. Vulkan ICD is Round 2.
+      - name: Build vulkan-ps4 (best-effort for Round 2)
+        continue-on-error: true
         run: |
           set -euxo pipefail
           make -C "$STACK/vulkan-ps4" -f Makefile.orbis -j"$(nproc)" \
@@ -139,6 +134,7 @@ jobs:
             RUNTIME_MODULE_DIR="$MODULE_DIR" \
             all
           ls -la ./*.pkg
+          test -s ./*.pkg
 
       - name: Upload vendor triangle sample package
         uses: actions/upload-artifact@v4

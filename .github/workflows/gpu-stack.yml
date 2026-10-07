@@ -1,0 +1,104 @@
+name: GPU stack (OpenGNM) build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['gpu/**']
+
+jobs:
+  gpu-stack:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      OPENORBIS_VERSION: v0.5.4
+      OO_PS4_TOOLCHAIN: ${{ github.workspace }}/toolchain
+      STACK: ${{ github.workspace }}/stack
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang lld llvm make cmake python3 python3-mako \
+            glslc glslang-tools flex bison zlib1g-dev pkg-config git
+
+      - name: Download OpenOrbis LLVM 18 toolchain
+        run: |
+          set -euxo pipefail
+          mkdir -p "$OO_PS4_TOOLCHAIN"
+          curl -fL --retry 4 --retry-all-errors --retry-delay 2 \
+            "https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain/releases/download/$OPENORBIS_VERSION/toolchain-llvm-18.tar.gz" \
+            -o toolchain.tar.gz
+          tar -xzf toolchain.tar.gz --strip-components=2 -C "$OO_PS4_TOOLCHAIN"
+          rm -f toolchain.tar.gz
+          test -f "$OO_PS4_TOOLCHAIN/link.x"
+          ls "$OO_PS4_TOOLCHAIN/lib" | head -50
+          ls "$OO_PS4_TOOLCHAIN/src/modules" || true
+
+      - name: Fetch the OpenGNM stack
+        run: |
+          set -euxo pipefail
+          git clone --recursive --depth 1 --shallow-submodules \
+            https://github.com/PS4-OpenGNM/opengnm-stack.git "$STACK"
+          git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git "$STACK/Vulkan-Headers"
+          git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git "$STACK/SPIRV-Headers"
+          for r in opengnm opengnm-psbc vulkan-ps4 freegnm-examples; do
+            echo "$r @ $(git -C "$STACK/$r" rev-parse HEAD)"
+          done
+
+      - name: Build psbc (host shader compiler)
+        run: |
+          set -euxo pipefail
+          make -C "$STACK/opengnm-psbc" -j"$(nproc)"
+          ls -la "$STACK/opengnm-psbc/opengnm-psbc"
+
+      - name: Build opengnm (PS4 backend)
+        run: |
+          set -euxo pipefail
+          cp "$STACK/opengnm/config.orbis.mak" "$STACK/opengnm/config.mak"
+          make -C "$STACK/opengnm" lib -j"$(nproc)"
+          ls -la "$STACK/opengnm/libopengnm.a"
+
+      - name: Build libpsbc (PS4 target, runtime shader compiler)
+        run: |
+          set -euxo pipefail
+          make -C "$STACK/opengnm-psbc" -f Makefile.orbis -j"$(nproc)"
+          ls -la "$STACK/opengnm-psbc/libpsbc.orbis.a"
+
+      - name: Build vulkan-ps4
+        run: |
+          set -euxo pipefail
+          make -C "$STACK/vulkan-ps4" -f Makefile.orbis -j"$(nproc)"
+          ls -la "$STACK/vulkan-ps4"/libvulkan_ps4.*
+
+      - name: Build vendor triangle sample package
+        run: |
+          set -euxo pipefail
+          cd "$STACK/freegnm-examples/triangle"
+          make USE_OPENGNM=1 \
+            GLSLC=glslc \
+            PSBC="$STACK/opengnm-psbc/opengnm-psbc" \
+            RUNTIME_MODULE_DIR="$OO_PS4_TOOLCHAIN/src/modules" \
+            all
+          ls -la ./*.pkg
+
+      - name: Upload vendor triangle sample package
+        uses: actions/upload-artifact@v4
+        with:
+          name: GPU-Triangle-Sample-PKG
+          path: stack/freegnm-examples/triangle/*.pkg
+          if-no-files-found: error
+
+      - name: Upload built stack libraries
+        uses: actions/upload-artifact@v4
+        with:
+          name: GPU-Stack-Libraries
+          path: |
+            stack/opengnm/libopengnm.a
+            stack/opengnm-psbc/libpsbc.orbis.a
+            stack/opengnm-psbc/opengnm-psbc
+            stack/vulkan-ps4/libvulkan_ps4.*
+          if-no-files-found: warn

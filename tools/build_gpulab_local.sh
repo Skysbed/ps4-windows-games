@@ -16,6 +16,7 @@ export VENDOR="${VENDOR:-$STACK/freegnm-examples}"
 export OGNM="${OGNM:-$STACK/opengnm}"
 export PSBC_INC="${PSBC_INC:-$STACK/opengnm-psbc/libpsbc}"
 export VKHDR="${VKHDR:-$STACK/Vulkan-Headers}"
+export VKPS4="${VKPS4:-$STACK/vulkan-ps4}"
 export LIBS="${LIBS:?set LIBS to the dir with libopengnm.a libpsbc.orbis.a libvulkan_ps4.a}"
 PSBC="${PSBC:-$STACK/opengnm-psbc/opengnm-psbc}"
 

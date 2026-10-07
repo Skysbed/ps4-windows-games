@@ -6,13 +6,14 @@
 #   OGNM               opengnm checkout (headers)
 #   PSBC_INC           opengnm-psbc/libpsbc (psbc_compile.h)
 #   VKHDR              Vulkan-Headers checkout
+#   VKPS4              vulkan-ps4 checkout (vk_ps4_log.h)
 #   LIBS               directory holding libopengnm.a, libpsbc.orbis.a, libvulkan_ps4.a
 #   PSBC               the host shader compiler binary (opengnm-psbc)
 
 TITLE ?= PcPs4 GPU Lab
 VERSION = 1.00
-TITLE_ID ?= PCPS00004
-CONTENT_ID ?= IV0000-PCPS00004_00-GPULABROUNDTHREE
+TITLE_ID ?= PCPS00005
+CONTENT_ID ?= IV0000-PCPS00005_00-GPULABROUNDFINAL
 
 TOOLCHAIN = $(OO_PS4_TOOLCHAIN)
 SHARED = $(VENDOR)/shared
@@ -31,7 +32,7 @@ EXE = lab
 
 CFLAGS = -std=c11 -Wall -Wextra -D_BSD_SOURCE -DUSE_OPENGNM -DCGLM_ALL_UNALIGNED \
          -DCGLM_FORCE_LEFT_HANDED -DCGLM_FORCE_DEPTH_ZERO_TO_ONE \
-         -I$(SHARED)/src -I$(OGNM)/include -I$(PSBC_INC) -I$(VKHDR)/include
+         -I$(SHARED)/src -I$(OGNM)/include -I$(PSBC_INC) -I$(VKHDR)/include -I$(VKPS4)/include
 LDLIBS = -lc -lc++ -lkernel -lSceGnmDriver -lSceVideoOut \
          $(LIBS)/libvulkan_ps4.a $(LIBS)/libpsbc.orbis.a $(LIBS)/libopengnm.a
 

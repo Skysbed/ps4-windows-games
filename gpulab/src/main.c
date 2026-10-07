@@ -43,8 +43,9 @@
 
 #include "psbc_compile.h"
 #include <vulkan/vulkan.h>
+#include "vk_ps4_log.h" /* driver-internal breadcrumbs -> /data/vk_ps4_breadcrumb.log */
 
-#define LAB_VERSION "v2"
+#define LAB_VERSION "v3"
 #define LOG_PATH "/data/gpulab_" LAB_VERSION "_log.txt"
 #define PROGRESS_PATH "/data/gpulab_" LAB_VERSION "_progress.txt"
 
@@ -585,6 +586,7 @@ static void test_vulkan(void) {
 	/* The driver's swapchain opens the screen itself. */
 	gpu_release_display();
 
+	vk_ps4_log_open(NULL); /* the driver logs every internal step, flushed, to /data/vk_ps4_breadcrumb.log */
 	VKSTEP("vkCreateInstance");
 	VkApplicationInfo app = {
 		.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,

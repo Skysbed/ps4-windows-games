@@ -1,24 +1,22 @@
 diff --git a/src/vk_ps4_entry.c b/src/vk_ps4_entry.c
-index 97187ae..2c89e97 100644
+index 24ef0d4..e813f6c 100644
 --- a/src/vk_ps4_entry.c
 +++ b/src/vk_ps4_entry.c
-@@ -101,6 +101,107 @@ vk_icdEnumerateInstanceLayerProperties(
+@@ -152,6 +152,101 @@ vk_icdEnumerateInstanceLayerProperties(
+ /* These are implemented in vk_ps4_dispatch.c, which has the full name → function map. */
  
  /* === Allocator helpers === */
- 
 +/* === PcPs4 hardware patch: GPU-visible allocator ==========================
 + *
-+ * On a real PS4 the GPU can only read memory that has been mapped for GPU
-+ * use. This driver was written and tested on a host with an ordinary heap, so
-+ * command buffers, shader code and fetch shaders ended up in memory the GPU
-+ * cannot see. Serve every default (no user callback) driver allocation from one
-+ * GPU-mapped arena instead. Power-of-two size classes with per-class free
-+ * lists; blocks are carved from the arena by a bump pointer.
-+ */
++ * On a real PS4 the GPU can only read memory mapped for GPU use. Command
++ * buffers, compiled shader code and fetch shaders were allocated from the
++ * ordinary heap. Serve every default (no user callback) driver allocation from
++ * one GPU-mapped arena: power-of-two size classes, per-class free lists, bump
++ * carving. */
 +#if defined(__ORBIS__) || defined(__PS4__)
 +#define PCPS4_ARENA_SIZE (160u * 1024u * 1024u)
 +#define PCPS4_ARENA_HDR 32u
-+#define PCPS4_ARENA_MAGIC 0x50433441524E4131ull /* "PC4ARNA1" */
++#define PCPS4_ARENA_MAGIC 0x50433441524E4131ull
 +typedef struct {
 +    uint64_t magic;
 +    uint32_t cls;
@@ -30,7 +28,7 @@ index 97187ae..2c89e97 100644
 +static GnmDirectMemory g_arena_mem;
 +static uint8_t *g_arena_base = NULL;
 +static size_t g_arena_top = 0;
-+static int g_arena_state = 0; /* 0 = untried, 1 = ready, -1 = unavailable */
++static int g_arena_state = 0; /* 0 untried, 1 ready, -1 unavailable */
 +static void *g_arena_free[40];
 +static volatile int g_arena_lock = 0;
 +
@@ -45,8 +43,7 @@ index 97187ae..2c89e97 100644
 +        memset(&g_arena_mem, 0, sizeof(g_arena_mem));
 +        GnmError e = sceGnmDirectMemoryAllocate(
 +            &g_arena_mem, PCPS4_ARENA_SIZE, 2u * 1024u * 1024u,
-+            GNM_DIRECT_MEMORY_TYPE_WC_GARLIC, GNM_PROT_CPU_GPU_RW
-+        );
++            GNM_DIRECT_MEMORY_TYPE_WC_GARLIC, GNM_PROT_CPU_GPU_RW);
 +        if (e == GNM_ERROR_OK && g_arena_mem.mapped) {
 +            g_arena_base = (uint8_t *)g_arena_mem.mapped;
 +            g_arena_state = 1;
@@ -65,10 +62,9 @@ index 97187ae..2c89e97 100644
 +static void *arena_alloc(size_t size, size_t alignment) {
 +    if (alignment < 16) alignment = 16;
 +    size_t need = size + alignment + PCPS4_ARENA_HDR;
-+    uint32_t cls = 7; /* 128 bytes minimum */
++    uint32_t cls = 7;
 +    while (((size_t)1 << cls) < need) cls++;
 +    if (cls >= 40) return NULL;
-+
 +    arena_lock();
 +    uint8_t *raw = NULL;
 +    if (g_arena_free[cls]) {
@@ -84,7 +80,6 @@ index 97187ae..2c89e97 100644
 +    }
 +    arena_unlock();
 +    if (!raw) return NULL;
-+
 +    uintptr_t user = ((uintptr_t)raw + PCPS4_ARENA_HDR + alignment - 1) & ~(uintptr_t)(alignment - 1);
 +    Pcps4ArenaHdr *h = (Pcps4ArenaHdr *)(user - PCPS4_ARENA_HDR);
 +    h->magic = PCPS4_ARENA_MAGIC;
@@ -95,7 +90,7 @@ index 97187ae..2c89e97 100644
 +
 +static void arena_release(void *ptr) {
 +    Pcps4ArenaHdr *h = (Pcps4ArenaHdr *)((uint8_t *)ptr - PCPS4_ARENA_HDR);
-+    if (h->magic != PCPS4_ARENA_MAGIC) return; /* not ours: ignore rather than corrupt */
++    if (h->magic != PCPS4_ARENA_MAGIC) return;
 +    uint32_t cls = h->cls;
 +    void *raw = h->raw;
 +    h->magic = 0;
@@ -106,11 +101,10 @@ index 97187ae..2c89e97 100644
 +}
 +#endif
 +
-+
+ 
  void *vk_ps4_alloc(const VkAllocationCallbacks *alloc, size_t size, size_t alignment) {
      if (alloc && alloc->pfnAllocation) {
-         return alloc->pfnAllocation(alloc->pUserData, size, alignment, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
-@@ -112,6 +213,10 @@ void *vk_ps4_alloc(const VkAllocationCallbacks *alloc, size_t size, size_t align
+@@ -164,6 +259,10 @@ void *vk_ps4_alloc(const VkAllocationCallbacks *alloc, size_t size, size_t align
      }
      return _aligned_malloc(size, alignment);
  #elif defined(__ORBIS__) || defined(__PS4__)
@@ -121,7 +115,7 @@ index 97187ae..2c89e97 100644
      /* PS4 FreeBSD-based kernel doesn't expose posix_memalign.
       * Always over-allocate and align manually, storing the raw
       * pointer immediately before the aligned address so vk_ps4_free
-@@ -156,6 +261,10 @@ void vk_ps4_free(const VkAllocationCallbacks *alloc, void *ptr) {
+@@ -208,6 +307,10 @@ void vk_ps4_free(const VkAllocationCallbacks *alloc, void *ptr) {
  #if defined(_MSC_VER)
      _aligned_free(ptr);
  #elif defined(__ORBIS__) || defined(__PS4__)
@@ -133,23 +127,21 @@ index 97187ae..2c89e97 100644
      free(((void **)ptr)[-1]);
  #else
 diff --git a/src/vk_ps4_pipeline.c b/src/vk_ps4_pipeline.c
-index 5656632..615cdb5 100644
+index b621e66..03f0c4d 100644
 --- a/src/vk_ps4_pipeline.c
 +++ b/src/vk_ps4_pipeline.c
-@@ -95,6 +95,20 @@ GnmPrimitiveType vk_topology_to_gnm(VkPrimitiveTopology topology) {
+@@ -95,6 +95,18 @@ GnmPrimitiveType vk_topology_to_gnm(VkPrimitiveTopology topology) {
      }
  }
  
-+
-+/* PcPs4 hardware patch: the compiled shader file stores code unrelocated. The
-+ * GPU fetches instructions from the address in the stage registers, so copy the
-+ * code into GPU-visible memory and point the registers at it (the same step the
-+ * vendor's loadvshader/loadpshader performs). */
-+static void *pcps4_place_shader_code(const VkAllocationCallbacks *alloc,
-+                                     const GnmShaderMetadata *md) {
-+    if (!md || !md->shadercode || md->shadercodesize == 0) return NULL;
++/* PcPs4 hardware patch: compiled shader code sits at an arbitrary offset inside
++ * a heap buffer, but the GPU fetches instructions from the address in the stage
++ * registers and needs it 256-byte aligned in GPU-visible memory (the vendor
++ * loaders copy it for the same reason). Copy before pointing the registers at it. */
++static void *pcps4_gpu_code(const VkAllocationCallbacks *alloc, const GnmShaderMetadata *md) {
++    if (!md || !md->shadercode || md->shadercodesize == 0) return (void *)md->shadercode;
 +    void *dst = vk_ps4_alloc(alloc, md->shadercodesize, 256);
-+    if (!dst) return NULL;
++    if (!dst) return (void *)md->shadercode;
 +    memcpy(dst, md->shadercode, md->shadercodesize);
 +    return dst;
 +}
@@ -157,96 +149,159 @@ index 5656632..615cdb5 100644
  VKAPI_ATTR VkResult VKAPI_CALL
  vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
                                  uint32_t createInfoCount,
-@@ -340,6 +354,10 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
+@@ -369,7 +381,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
+                          * to actual GPU address in the compiled binary. */
+                         if (metadata.shadercode) {
+                             sceGnmLsRegsSetAddress(&pipe->ls_regs,
+-                                (void *)metadata.shadercode);
++                                pcps4_gpu_code(alloc, &metadata));
+                         }
+                         /* LS doesn't have vertex input semantics in the same
+                          * format — skip semantic extraction for LS */
+@@ -381,7 +393,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
+                         pipe->has_es = true;
+                         if (metadata.shadercode) {
+                             sceGnmEsRegsSetAddress(&pipe->es_regs,
+-                                (void *)metadata.shadercode);
++                                pcps4_gpu_code(alloc, &metadata));
+                         }
+                     } else {
                          /* Standard VS: GnmVsShader (common + regs + semantics) */
-                         const GnmVsShader *vs = (const GnmVsShader *)metadata.stage;
+@@ -389,7 +401,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
                          pipe->vs_regs = vs->registers;
-+                        {
-+                            void *gpu_code = pcps4_place_shader_code(alloc, &metadata);
-+                            if (gpu_code) sceGnmVsRegsSetAddress(&pipe->vs_regs, gpu_code);
-+                        }
+                         if (metadata.shadercode) {
+                             sceGnmVsRegsSetAddress(&pipe->vs_regs,
+-                                (void *)metadata.shadercode);
++                                pcps4_gpu_code(alloc, &metadata));
+                         }
                          /* Extract vertex input semantics */
                          uint32_t nsemantics = vs->numinputsemantics;
-                         if (nsemantics > VK_PS4_MAX_INPUT_USAGE_SLOTS) nsemantics = VK_PS4_MAX_INPUT_USAGE_SLOTS;
-@@ -360,6 +378,10 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
-                 case VK_SHADER_STAGE_FRAGMENT_BIT: {
-                     const GnmPsShader *ps = (const GnmPsShader *)metadata.stage;
+@@ -413,7 +425,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
                      pipe->ps_regs = ps->registers;
-+                    {
-+                        void *gpu_code = pcps4_place_shader_code(alloc, &metadata);
-+                        if (gpu_code) sceGnmPsRegsSetAddress(&pipe->ps_regs, gpu_code);
-+                    }
+                     if (metadata.shadercode) {
+                         sceGnmPsRegsSetAddress(&pipe->ps_regs,
+-                            (void *)metadata.shadercode);
++                            pcps4_gpu_code(alloc, &metadata));
+                     }
                      pipe->fs_module = mod;
                      ps_found = true;
-                     pipe->has_ps = true;
+@@ -437,7 +449,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
+                         pipe->has_gs = true;
+                         if (metadata.shadercode) {
+                             sceGnmGsRegsSetAddress(&pipe->gs_regs,
+-                                (void *)metadata.shadercode);
++                                pcps4_gpu_code(alloc, &metadata));
+                         }
+                     }
+                     /* Store the module regardless — it may be used later
+@@ -458,7 +470,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
+                         pipe->has_hs = true;
+                         if (metadata.shadercode) {
+                             sceGnmHsRegsSetAddress(&pipe->hs_regs,
+-                                (void *)metadata.shadercode);
++                                pcps4_gpu_code(alloc, &metadata));
+                         }
+                     }
+                     pipe->tcs_module = mod;
+@@ -477,7 +489,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
+                         pipe->has_es = true;
+                         if (metadata.shadercode) {
+                             sceGnmEsRegsSetAddress(&pipe->es_regs,
+-                                (void *)metadata.shadercode);
++                                pcps4_gpu_code(alloc, &metadata));
+                         }
+                     } else {
+                         /* DS_VS or compiler fallback: treat as vertex shader.
+@@ -487,7 +499,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
+                         pipe->has_ds_vs = true;
+                         if (metadata.shadercode) {
+                             sceGnmVsRegsSetAddress(&pipe->vs_regs,
+-                                (void *)metadata.shadercode);
++                                pcps4_gpu_code(alloc, &metadata));
+                         }
+                     }
+                     pipe->tes_module = mod;
 diff --git a/src/vk_ps4_queue.c b/src/vk_ps4_queue.c
-index 9e0ba2c..7fb67e1 100644
+index 683667b..9ae954a 100644
 --- a/src/vk_ps4_queue.c
 +++ b/src/vk_ps4_queue.c
-@@ -10,6 +10,9 @@
+@@ -57,6 +57,12 @@ static uint32_t vk_ps4_queue_emit_waitmem(
+     return (uint32_t)(cmd.cmdptr - cmd.beginptr) * sizeof(uint32_t);
+ }
  
- #include <string.h>
- 
-+/* PcPs4 hardware patch: kernel timer used for the GPU completion wait. */
-+extern uint64_t sceKernelGetProcessTime(void);
++
++/* PcPs4 hardware patch: the firmware reads the constant-command-buffer arrays
++ * unconditionally, so they must be real one-element arrays, not NULL. */
++static void *pcps4_ccb_addr = NULL;
++static uint32_t pcps4_ccb_size = 0;
 +
  VKAPI_ATTR VkResult VKAPI_CALL
  vk_ps4_QueueSubmit(VkQueue queue, uint32_t submitCount, const VkSubmitInfo *pSubmits, VkFence fence) {
      if (!queue) {
-@@ -35,11 +38,41 @@ vk_ps4_QueueSubmit(VkQueue queue, uint32_t submitCount, const VkSubmitInfo *pSub
- 
-             void *dcb_addr = cmd->pm4_buffer;
- 
--            /* Submit to GNM — pass NULL for ccb_addrs and ccb_sizes
--             * since we don't use a separate constant command buffer. */
-+            /* PcPs4 hardware patch. The firmware reads the constant-command-buffer
-+             * arrays unconditionally, so they must be real one-element arrays
-+             * (as in the vendor sample), not NULL. A second tiny command buffer
-+             * writes a label when the GPU reaches it, so the CPU can wait for
-+             * the frame instead of flipping a buffer still being drawn. */
-+            void *ccb_addr = NULL;
-+            uint32_t ccb_size = 0;
-             int32_t result = sceGnmSubmitCommandBuffers(
+@@ -89,9 +95,7 @@ vk_ps4_QueueSubmit(VkQueue queue, uint32_t submitCount, const VkSubmitInfo *pSub
+                     dev, label_addr, sem->signal_value
+                 );
+                 void *wait_addr = dev->gnm_epilogue_cmd;
+-                int32_t wait_result = sceGnmSubmitCommandBuffers(
+-                    1, &wait_addr, &wait_bytes, NULL, NULL
+-                );
++                int32_t wait_result = sceGnmSubmitCommandBuffers(1, &wait_addr, &wait_bytes, &pcps4_ccb_addr, &pcps4_ccb_size);
+                 if (wait_result != 0) {
+                     /* WaitMem submit failed — fall back to CPU check. */
+                     if (!sem->signaled) {
+@@ -124,9 +128,7 @@ vk_ps4_QueueSubmit(VkQueue queue, uint32_t submitCount, const VkSubmitInfo *pSub
+              * since we don't use a separate constant command buffer. */
+             vk_ps4_log("QueueSubmit: sceGnmSubmitCommandBuffers dwords=%u",
+                        cmd->pm4_used);
+-            int32_t result = sceGnmSubmitCommandBuffers(
 -                1, &dcb_addr, &cmd_size_bytes, NULL, NULL
-+                1, &dcb_addr, &cmd_size_bytes, &ccb_addr, &ccb_size
-             );
-+            if (result == 0) {
-+                static volatile uint64_t *label = NULL;
-+                static uint32_t *eop_buf = NULL;
-+                if (!label) {
-+                    label = (volatile uint64_t *)vk_ps4_alloc_zero(&((VkPs4Device *)q->device)->allocator, 64, 64);
-+                    eop_buf = (uint32_t *)vk_ps4_alloc_zero(&((VkPs4Device *)q->device)->allocator, 256, 256);
-+                }
-+                if (label && eop_buf) {
-+                    *label = 9;
-+                    GnmCommandBuffer ec = sceGnmCmdInit(eop_buf, 256, NULL, NULL);
-+                    sceGnmDrawCmdEventWriteEop(&ec, GNM_CACHE_FLUSH_TS, (uint64_t)label,
-+                                               GNM_DATA_SEL_SEND_DATA64, 1);
-+                    void *eop_addr = eop_buf;
-+                    uint32_t eop_size = (uint32_t)((ec.cmdptr - ec.beginptr) * sizeof(uint32_t));
-+                    int32_t r2 = sceGnmSubmitCommandBuffers(1, &eop_addr, &eop_size, &ccb_addr, &ccb_size);
-+                    if (r2 == 0) {
-+                        uint64_t t0 = sceKernelGetProcessTime();
-+                        while (*label != 1) {
-+                            if (sceKernelGetProcessTime() - t0 > 3000000ull) {
-+                                return VK_ERROR_DEVICE_LOST; /* GPU stopped answering */
-+                            }
-+                        }
-+                    }
-+                }
-+            }
+-            );
++            int32_t result = sceGnmSubmitCommandBuffers(1, &dcb_addr, &cmd_size_bytes, &pcps4_ccb_addr, &pcps4_ccb_size);
  
              if (result != 0) {
-                 /* Submission failed — signal fence to avoid deadlock */
+                 vk_ps4_log("QueueSubmit: sceGnmSubmitCommandBuffers FAILED: %d",
+@@ -157,9 +159,7 @@ vk_ps4_QueueSubmit(VkQueue queue, uint32_t submitCount, const VkSubmitInfo *pSub
+                     dev, label_addr, sem->signal_value
+                 );
+                 void *eop_addr = dev->gnm_epilogue_cmd;
+-                int32_t result = sceGnmSubmitCommandBuffers(
+-                    1, &eop_addr, &eop_bytes, NULL, NULL
+-                );
++                int32_t result = sceGnmSubmitCommandBuffers(1, &eop_addr, &eop_bytes, &pcps4_ccb_addr, &pcps4_ccb_size);
+                 if (result != 0) {
+                     /* EOP submit failed — fall back to CPU signaling so
+                      * the semaphore doesn't deadlock waiters. */
+@@ -193,9 +193,7 @@ vk_ps4_QueueSubmit(VkQueue queue, uint32_t submitCount, const VkSubmitInfo *pSub
+                 dev, label_addr, f->signal_value
+             );
+             void *eop_addr = dev->gnm_epilogue_cmd;
+-            int32_t result = sceGnmSubmitCommandBuffers(
+-                1, &eop_addr, &eop_bytes, NULL, NULL
+-            );
++            int32_t result = sceGnmSubmitCommandBuffers(1, &eop_addr, &eop_bytes, &pcps4_ccb_addr, &pcps4_ccb_size);
+             if (result != 0) {
+                 /* EOP submit failed — fall back to CPU signaling. */
+                 f->signaled = true;
+@@ -242,9 +240,7 @@ vk_ps4_QueueWaitIdle(VkQueue queue) {
+         uint64_t label_addr = (uint64_t)(uintptr_t)idle_label;
+         uint32_t eop_bytes = vk_ps4_queue_emit_eop(dev, label_addr, 1);
+         void *eop_addr = dev->gnm_epilogue_cmd;
+-        int32_t result = sceGnmSubmitCommandBuffers(
+-            1, &eop_addr, &eop_bytes, NULL, NULL
+-        );
++        int32_t result = sceGnmSubmitCommandBuffers(1, &eop_addr, &eop_bytes, &pcps4_ccb_addr, &pcps4_ccb_size);
+ #ifdef VK_USE_PLATFORM_PS4
+         if (result == 0) {
+             /* Poll until the GPU writes the label. */
 diff --git a/src/vk_ps4_swapchain.c b/src/vk_ps4_swapchain.c
-index 2f4ed83..77f9374 100644
+index bc36c63..9a7aafa 100644
 --- a/src/vk_ps4_swapchain.c
 +++ b/src/vk_ps4_swapchain.c
-@@ -233,6 +233,7 @@ vk_ps4_QueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *pPresentInfo) {
+@@ -346,6 +346,7 @@ vk_ps4_QueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *pPresentInfo) {
+                 &sc->video_out, image_index, (int64_t)sc->video_out.frame,
                  GNM_VIDEO_OUT_FLIP_VSYNC
              );
++            sceGnmSubmitDone(); /* PcPs4: vendor loops call this after every flip */
              sc->video_out.frame++;
-+            sceGnmSubmitDone(); /* PcPs4: the vendor loop calls this after every flip */
-         }
-     }
- 
+             vk_ps4_log_raw("QueuePresent: flip done");
+             /* The flip is complete — the display engine is done

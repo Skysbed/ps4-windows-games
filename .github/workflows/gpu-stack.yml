@@ -13,6 +13,13 @@ jobs:
       OPENORBIS_VERSION: v0.5.4
       OO_PS4_TOOLCHAIN: ${{ github.workspace }}/toolchain
       STACK: ${{ github.workspace }}/stack
+      # Host runners often pre-set CC=cc (gcc). config.orbis.mak uses CC?=clang,
+      # which would never win. Force the OpenOrbis-capable toolchain for every
+      # PS4 cross-compile step.
+      CC: clang
+      CXX: clang++
+      LD: ld.lld
+      AR: llvm-ar
 
     steps:
       - name: Checkout
@@ -24,6 +31,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang lld llvm make cmake python3 python3-mako python3-yaml python3-lxml \
             glslc glslang-tools flex bison zlib1g-dev pkg-config git
+          clang --version
+          ld.lld --version
+          llvm-ar --version | head -n1
 
       - name: Download OpenOrbis LLVM 18 toolchain
         run: |
@@ -35,8 +45,18 @@ jobs:
           tar -xzf toolchain.tar.gz --strip-components=2 -C "$OO_PS4_TOOLCHAIN"
           rm -f toolchain.tar.gz
           test -f "$OO_PS4_TOOLCHAIN/link.x"
+          test -f "$OO_PS4_TOOLCHAIN/lib/crt1.o"
+          test -d "$OO_PS4_TOOLCHAIN/include"
           { ls "$OO_PS4_TOOLCHAIN/lib" | grep -E 'Gnm|VideoOut|crt' || true; } | cat
-          test -d "$OO_PS4_TOOLCHAIN/src/modules"
+          # Prefer toolchain modules path; fall back to bin/data/modules if present
+          if [ -d "$OO_PS4_TOOLCHAIN/src/modules" ]; then
+            echo "RUNTIME_MODULE_DIR=$OO_PS4_TOOLCHAIN/src/modules"
+          elif [ -d "$OO_PS4_TOOLCHAIN/bin/data/modules" ]; then
+            echo "RUNTIME_MODULE_DIR=$OO_PS4_TOOLCHAIN/bin/data/modules"
+          else
+            echo "WARN: no runtime modules dir found" >&2
+            ls -la "$OO_PS4_TOOLCHAIN" || true
+          fi
 
       - name: Fetch the OpenGNM stack
         run: |
@@ -53,8 +73,8 @@ jobs:
         run: |
           set -euxo pipefail
           cd "$STACK/opengnm-psbc"
-          # The repo ships only a PS4 config; derive a host config from it by
-          # dropping the OpenOrbis requirement and the cross-compile flags.
+          # Host build: do NOT inherit the PS4 CC/CFLAGS from the job env.
+          # Derive a host config from the orbis one.
           python3 - <<'PY'
           import re
           s = open("config.orbis.mak").read()
@@ -62,51 +82,61 @@ jobs:
           s = re.sub(r"ARCHFLAGS=.*?openorbis-compat/include\n", "ARCHFLAGS=-fPIC\n", s, flags=re.S)
           open("config.mak", "w").write(s)
           PY
-          # _XOPEN_SOURCE=500 targets the PS4's FreeBSD libc; on Linux it hides
-          # O_CLOEXEC, flock() and friends that Mesa's util code needs.
           sed -i 's/-D_XOPEN_SOURCE=500/-D_GNU_SOURCE/' config.mak
           grep -n "ARCHFLAGS\|_GNU_SOURCE" config.mak
-          # The Makefile builds its source lists with $(wildcard), evaluated when
-          # make starts. Generated .c files must therefore exist BEFORE the real
-          # build, or they are silently left out (link then fails on symbols such
-          # as nir_intrinsic_infos). So: generate first, then build in a new make.
-          make generated
-          # Mesa sources/headers the repo's Makefile does not generate itself.
+          make generated CC=clang CXX=clang++
           "$GITHUB_WORKSPACE/tools/gen_psbc_extra.sh" "$PWD" python3
-          # blake3_neon.c is ARM-only (the repo was developed on Apple Silicon);
-          # on an x86 host use only the portable BLAKE3 implementation.
           echo 'CFLAGS += -DBLAKE3_NO_SSE2 -DBLAKE3_NO_SSE41 -DBLAKE3_NO_AVX2 -DBLAKE3_NO_AVX512' >> config.mak
           make -j"$(nproc)" \
+            CC=clang CXX=clang++ \
             BLAKE3_SRCS="src/util/blake3/blake3.c src/util/blake3/blake3_dispatch.c src/util/blake3/blake3_portable.c"
           ls -la "$STACK/opengnm-psbc/opengnm-psbc"
+          test -x "$STACK/opengnm-psbc/opengnm-psbc"
 
       - name: Build opengnm (PS4 backend)
         run: |
           set -euxo pipefail
+          test -n "$OO_PS4_TOOLCHAIN"
+          test -d "$OO_PS4_TOOLCHAIN/include"
           cp "$STACK/opengnm/config.orbis.mak" "$STACK/opengnm/config.mak"
-          make -C "$STACK/opengnm" lib -j"$(nproc)"
+          # Explicit CC=clang so the job-level env cannot fall back to gcc/cc.
+          make -C "$STACK/opengnm" lib -j"$(nproc)" \
+            CC=clang CXX=clang++ LD=ld.lld AR=llvm-ar \
+            OO_PS4_TOOLCHAIN="$OO_PS4_TOOLCHAIN"
           ls -la "$STACK/opengnm/libopengnm.a"
+          test -s "$STACK/opengnm/libopengnm.a"
 
       - name: Build libpsbc (PS4 target, runtime shader compiler)
         run: |
           set -euxo pipefail
-          make -C "$STACK/opengnm-psbc" -f Makefile.orbis -j"$(nproc)"
+          make -C "$STACK/opengnm-psbc" -f Makefile.orbis -j"$(nproc)" \
+            CC=clang CXX=clang++ LD=ld.lld AR=llvm-ar \
+            OO_PS4_TOOLCHAIN="$OO_PS4_TOOLCHAIN"
           ls -la "$STACK/opengnm-psbc/libpsbc.orbis.a"
+          test -s "$STACK/opengnm-psbc/libpsbc.orbis.a"
 
       - name: Build vulkan-ps4
         run: |
           set -euxo pipefail
-          make -C "$STACK/vulkan-ps4" -f Makefile.orbis -j"$(nproc)"
+          make -C "$STACK/vulkan-ps4" -f Makefile.orbis -j"$(nproc)" \
+            CC=clang CXX=clang++ LD=ld.lld AR=llvm-ar \
+            OO_PS4_TOOLCHAIN="$OO_PS4_TOOLCHAIN"
           ls -la "$STACK/vulkan-ps4"/libvulkan_ps4.*
 
       - name: Build vendor triangle sample package
         run: |
           set -euxo pipefail
           cd "$STACK/freegnm-examples/triangle"
+          MODULE_DIR="$OO_PS4_TOOLCHAIN/src/modules"
+          if [ ! -d "$MODULE_DIR" ]; then
+            MODULE_DIR="$OO_PS4_TOOLCHAIN/bin/data/modules"
+          fi
           make USE_OPENGNM=1 \
+            CC=clang CXX=clang++ LD=ld.lld AR=llvm-ar \
+            OO_PS4_TOOLCHAIN="$OO_PS4_TOOLCHAIN" \
             GLSLC=glslc \
             PSBC="$STACK/opengnm-psbc/opengnm-psbc" \
-            RUNTIME_MODULE_DIR="$OO_PS4_TOOLCHAIN/src/modules" \
+            RUNTIME_MODULE_DIR="$MODULE_DIR" \
             all
           ls -la ./*.pkg
 

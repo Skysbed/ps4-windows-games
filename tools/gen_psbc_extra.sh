@@ -25,6 +25,14 @@ cd "$PSBC_DIR"
 "$PY" src/util/format/u_format_table.py src/util/format/u_format.yaml --header \
     > src/util/format/u_format_pack.h
 
+"$PY" src/util/format/u_format_table.py src/util/format/u_format.yaml \
+    > src/util/format/u_format_table.c
+
+# AMD GFX10/11 vertex format tables (src/amd/common/meson.build)
+"$PY" src/amd/common/gfx10_format_table.py \
+    src/util/format/u_format.yaml src/amd/registers/gfx10-rsrc.json \
+    src/amd/registers/gfx11-rsrc.json > src/amd/common/gfx10_format_table.c
+
 # AMD CP packet definitions (src/amd/common/meson.build)
 for gen in gfx11 gfx12; do
     "$PY" src/amd/packets/parse_cp_pm4_table_data_json.py \

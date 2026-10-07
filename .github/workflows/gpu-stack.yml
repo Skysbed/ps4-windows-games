@@ -66,7 +66,12 @@ jobs:
           # O_CLOEXEC, flock() and friends that Mesa's util code needs.
           sed -i 's/-D_XOPEN_SOURCE=500/-D_GNU_SOURCE/' config.mak
           grep -n "ARCHFLAGS\|_GNU_SOURCE" config.mak
-          # Mesa headers the repo's Makefile does not generate itself.
+          # The Makefile builds its source lists with $(wildcard), evaluated when
+          # make starts. Generated .c files must therefore exist BEFORE the real
+          # build, or they are silently left out (link then fails on symbols such
+          # as nir_intrinsic_infos). So: generate first, then build in a new make.
+          make generated
+          # Mesa sources/headers the repo's Makefile does not generate itself.
           "$GITHUB_WORKSPACE/tools/gen_psbc_extra.sh" "$PWD" python3
           # blake3_neon.c is ARM-only (the repo was developed on Apple Silicon);
           # on an x86 host use only the portable BLAKE3 implementation.

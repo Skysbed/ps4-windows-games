@@ -30,7 +30,7 @@ When launched, PcPs4 shows its own results on the TV:
 - a top banner that turns fully green or red when all tests finish;
 - the app stays on the result screen (close it from the PS button menu).
 
-Each diagnostic package uses package-versioned logs. v4 uses /data/pcps4_v5_runtime_log.txt for PcPs4 status and results, /data/pcps4_v5_windows_game_log.txt for PE loading/import resolution/game execution, /data/pcps4_v5_trace.txt for detailed execution-stage breadcrumbs, and /data/pcps4_v5_crash.txt for fatal faults. v3 and v4 files are left separate so evidence from the two packages cannot be mistaken for each other.
+Each diagnostic package uses package-versioned logs. v4 uses /data/pcps4_v6_runtime_log.txt for PcPs4 status and results, /data/pcps4_v6_windows_game_log.txt for PE loading/import resolution/game execution, /data/pcps4_v6_trace.txt for detailed execution-stage breadcrumbs, and /data/pcps4_v6_crash.txt for fatal faults. v3 and v4 files are left separate so evidence from the two packages cannot be mistaken for each other.
 
 ## Components
 
@@ -116,9 +116,9 @@ the existing startup tests:
 
 Set `PCPS4_RUN_GAME=0` to return to the old status-screen-only behaviour.
 
-## Current v5 diagnostic scope
+## Current v6 diagnostic scope
 
-The v5 Windows PE diagnostic checks process-heap allocation, zero-memory initialization, reallocation, HeapSize, HeapValidate, and HeapFree; loads a bundled PE DLL and resolves its export; enumerates the DXGI adapter; creates a D3D11 swap chain; sets up a vertex buffer and input layout; issues a triangle-list Draw; presents 240 frames; releases graphics objects; and returns to the PcPs4 result screen. The CPU draw path currently consumes POSITION/COLOR data directly; it does not execute arbitrary DXBC shader programs.
+The v6 Windows PE diagnostic checks process-heap allocation, zero-memory initialization, reallocation, HeapSize, HeapValidate, and HeapFree; loads a bundled PE DLL and resolves its export; enumerates the DXGI adapter; creates a D3D11 swap chain; sets up a vertex buffer and input layout; issues a triangle-list Draw; presents 240 frames; releases graphics objects; and returns to the PcPs4 result screen. The CPU draw path currently consumes POSITION/COLOR data directly; it does not execute arbitrary DXBC shader programs.
 
 ## Open work
 

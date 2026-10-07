@@ -68,7 +68,11 @@ jobs:
           grep -n "ARCHFLAGS\|_GNU_SOURCE" config.mak
           # Mesa headers the repo's Makefile does not generate itself.
           "$GITHUB_WORKSPACE/tools/gen_psbc_extra.sh" "$PWD" python3
-          make -j"$(nproc)"
+          # blake3_neon.c is ARM-only (the repo was developed on Apple Silicon);
+          # on an x86 host use only the portable BLAKE3 implementation.
+          echo 'CFLAGS += -DBLAKE3_NO_SSE2 -DBLAKE3_NO_SSE41 -DBLAKE3_NO_AVX2 -DBLAKE3_NO_AVX512' >> config.mak
+          make -j"$(nproc)" \
+            BLAKE3_SRCS="src/util/blake3/blake3.c src/util/blake3/blake3_dispatch.c src/util/blake3/blake3_portable.c"
           ls -la "$STACK/opengnm-psbc/opengnm-psbc"
 
       - name: Build opengnm (PS4 backend)

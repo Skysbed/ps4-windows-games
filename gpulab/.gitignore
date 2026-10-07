@@ -1,0 +1,10 @@
+*.o
+*.pkg
+*.sb
+*.spv
+*.bin
+*.oelf
+lab
+pkg.gp4
+sce_sys/
+sce_module/

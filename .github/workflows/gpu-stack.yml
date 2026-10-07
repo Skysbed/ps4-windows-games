@@ -22,7 +22,7 @@ jobs:
         run: |
           set -euxo pipefail
           sudo apt-get update
-          sudo apt-get install -y clang lld llvm make cmake python3 python3-mako \
+          sudo apt-get install -y clang lld llvm make cmake python3 python3-mako python3-yaml python3-lxml \
             glslc glslang-tools flex bison zlib1g-dev pkg-config git
 
       - name: Download OpenOrbis LLVM 18 toolchain
@@ -62,7 +62,12 @@ jobs:
           s = re.sub(r"ARCHFLAGS=.*?openorbis-compat/include\n", "ARCHFLAGS=-fPIC\n", s, flags=re.S)
           open("config.mak", "w").write(s)
           PY
-          grep -n "ARCHFLAGS" config.mak
+          # _XOPEN_SOURCE=500 targets the PS4's FreeBSD libc; on Linux it hides
+          # O_CLOEXEC, flock() and friends that Mesa's util code needs.
+          sed -i 's/-D_XOPEN_SOURCE=500/-D_GNU_SOURCE/' config.mak
+          grep -n "ARCHFLAGS\|_GNU_SOURCE" config.mak
+          # Mesa headers the repo's Makefile does not generate itself.
+          "$GITHUB_WORKSPACE/tools/gen_psbc_extra.sh" "$PWD" python3
           make -j"$(nproc)"
           ls -la "$STACK/opengnm-psbc/opengnm-psbc"
 

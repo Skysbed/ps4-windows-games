@@ -121,6 +121,9 @@ jobs:
         run: |
           set -euxo pipefail
           cd "$STACK/freegnm-examples/triangle"
+          # psbc defaults to the PS5 GPU (RDNA2/GFX10.3). The PS4 needs -4 (GFX7);
+          # PS5 machine code makes the PS4 GPU hang. The vendor Makefile passes no
+          # target flag, so it is supplied through the PSBC command below.
           MODULE_DIR="$OO_PS4_TOOLCHAIN/src/modules"
           if [ ! -d "$MODULE_DIR" ]; then
             MODULE_DIR="$OO_PS4_TOOLCHAIN/bin/data/modules"
@@ -129,7 +132,7 @@ jobs:
             CC=clang CXX=clang++ LD=ld.lld AR=llvm-ar \
             OO_PS4_TOOLCHAIN="$OO_PS4_TOOLCHAIN" \
             GLSLC=glslc \
-            PSBC="$STACK/opengnm-psbc/opengnm-psbc" \
+            PSBC="$STACK/opengnm-psbc/opengnm-psbc -4" \
             RUNTIME_MODULE_DIR="$MODULE_DIR" \
             all
           ls -la ./*.pkg
@@ -163,8 +166,8 @@ jobs:
           printf '%s\n' '#version 450' 'layout(location=0) in vec3 vColor;' 'layout(location=0) out vec4 outColor;' 'void main() { outColor = vec4(vColor, 1.0); }' > "$TMPDIR/tri.frag.glsl"
           glslc -fshader-stage=vertex "$TMPDIR/tri.vert.glsl" -o "$TMPDIR/tri.vert.spv"
           glslc -fshader-stage=fragment "$TMPDIR/tri.frag.glsl" -o "$TMPDIR/tri.frag.spv"
-          "$STACK/opengnm-psbc/opengnm-psbc" -s vertex -f "$TMPDIR/tri.vert.spv" -o "$TMPDIR/tri.vert.sb" >> "$REPORT" 2>&1 || true
-          "$STACK/opengnm-psbc/opengnm-psbc" -s fragment -f "$TMPDIR/tri.frag.spv" -o "$TMPDIR/tri.frag.sb" >> "$REPORT" 2>&1 || true
+          "$STACK/opengnm-psbc/opengnm-psbc" -4 -s vertex -f "$TMPDIR/tri.vert.spv" -o "$TMPDIR/tri.vert.sb" >> "$REPORT" 2>&1 || true
+          "$STACK/opengnm-psbc/opengnm-psbc" -4 -s fragment -f "$TMPDIR/tri.frag.spv" -o "$TMPDIR/tri.frag.sb" >> "$REPORT" 2>&1 || true
           ls -la "$TMPDIR"/*.sb "$TMPDIR"/*.spv >> "$REPORT" 2>&1 || true
           echo "vert.sb bytes: $(wc -c < "$TMPDIR/tri.vert.sb" 2>/dev/null || echo 0)" >> "$REPORT"
           echo "frag.sb bytes: $(wc -c < "$TMPDIR/tri.frag.sb" 2>/dev/null || echo 0)" >> "$REPORT"

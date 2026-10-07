@@ -28,6 +28,9 @@ cd "$PSBC_DIR"
 "$PY" src/util/format/u_format_table.py src/util/format/u_format.yaml \
     > src/util/format/u_format_table.c
 
+# sRGB lookup tables (src/util/meson.build)
+"$PY" src/util/format_srgb.py > src/util/format_srgb.c
+
 # AMD GFX10/11 vertex format tables (src/amd/common/meson.build)
 "$PY" src/amd/common/gfx10_format_table.py \
     src/util/format/u_format.yaml src/amd/registers/gfx10-rsrc.json \

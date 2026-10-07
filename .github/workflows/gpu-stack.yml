@@ -35,8 +35,8 @@ jobs:
           tar -xzf toolchain.tar.gz --strip-components=2 -C "$OO_PS4_TOOLCHAIN"
           rm -f toolchain.tar.gz
           test -f "$OO_PS4_TOOLCHAIN/link.x"
-          ls "$OO_PS4_TOOLCHAIN/lib" | head -50
-          ls "$OO_PS4_TOOLCHAIN/src/modules" || true
+          { ls "$OO_PS4_TOOLCHAIN/lib" | grep -E 'Gnm|VideoOut|crt' || true; } | cat
+          test -d "$OO_PS4_TOOLCHAIN/src/modules"
 
       - name: Fetch the OpenGNM stack
         run: |

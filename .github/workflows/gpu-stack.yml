@@ -67,6 +67,10 @@ jobs:
             https://github.com/PS4-OpenGNM/opengnm-stack.git "$STACK"
           git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git "$STACK/Vulkan-Headers"
           git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git "$STACK/SPIRV-Headers"
+          # opengnm-stack pins an older vulkan-ps4 with broken STUB_NOT_IMPL
+          # macros. Reset to upstream main which has real implementations.
+          git -C "$STACK/vulkan-ps4" fetch --depth 1 origin main
+          git -C "$STACK/vulkan-ps4" checkout -f FETCH_HEAD
           for r in opengnm opengnm-psbc vulkan-ps4 freegnm-examples; do
             echo "$r @ $(git -C "$STACK/$r" rev-parse HEAD)"
           done
@@ -114,15 +118,17 @@ jobs:
           ls -la "$STACK/opengnm-psbc/libpsbc.orbis.a"
           test -s "$STACK/opengnm-psbc/libpsbc.orbis.a"
 
-      # Round 1 triangle uses OpenGNM + psbc only. Vulkan ICD is Round 2.
-      - name: Build vulkan-ps4 (best-effort for Round 2)
-        continue-on-error: true
+      - name: Build vulkan-ps4 ICD
         run: |
           set -euxo pipefail
+          # Ensure Vulkan/SPIRV headers are visible if Makefile expects them sibling
+          ln -sfn "$STACK/Vulkan-Headers" "$STACK/vulkan-ps4/Vulkan-Headers" 2>/dev/null || true
+          ln -sfn "$STACK/SPIRV-Headers" "$STACK/vulkan-ps4/SPIRV-Headers" 2>/dev/null || true
           make -C "$STACK/vulkan-ps4" -f Makefile.orbis -j"$(nproc)" \
             CC=clang CXX=clang++ LD=ld.lld AR=llvm-ar \
             OO_PS4_TOOLCHAIN="$OO_PS4_TOOLCHAIN"
-          ls -la "$STACK/vulkan-ps4"/libvulkan_ps4.*
+          ls -la "$STACK/vulkan-ps4"/libvulkan_ps4.* || ls -la "$STACK/vulkan-ps4"/
+          test -s "$STACK/vulkan-ps4/libvulkan_ps4.a" -o -s "$STACK/vulkan-ps4/libvulkan_ps4.so" -o -s "$STACK/vulkan-ps4/libvulkan_ps4.orbis.a"
 
       - name: Build vendor triangle sample package
         run: |
@@ -142,11 +148,80 @@ jobs:
           ls -la ./*.pkg
           test -s ./*.pkg
 
+      - name: GPU Lab host probe
+        run: |
+          set -euxo pipefail
+          REPORT="$GITHUB_WORKSPACE/gpu_lab_report.txt"
+          {
+            echo "=== PcPs4 GPU Lab Report ==="
+            echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "runner: $(uname -a)"
+            echo ""
+            echo "--- OpenGNM ---"
+            ls -la "$STACK/opengnm/libopengnm.a"
+            echo "sha256: $(sha256sum "$STACK/opengnm/libopengnm.a" | awk '{print $1}')"
+            echo ""
+            echo "--- opengnm-psbc (host CLI) ---"
+            ls -la "$STACK/opengnm-psbc/opengnm-psbc"
+            "$STACK/opengnm-psbc/opengnm-psbc" --help 2>&1 | head -40 || true
+            echo ""
+            echo "--- libpsbc.orbis ---"
+            ls -la "$STACK/opengnm-psbc/libpsbc.orbis.a"
+            echo "sha256: $(sha256sum "$STACK/opengnm-psbc/libpsbc.orbis.a" | awk '{print $1}')"
+            echo ""
+            echo "--- vulkan-ps4 ICD ---"
+            ls -la "$STACK/vulkan-ps4"/libvulkan_ps4.* 2>/dev/null || echo "no libvulkan_ps4.* found"
+            find "$STACK/vulkan-ps4" -maxdepth 2 -name 'libvulkan*' -exec ls -la {} \; 2>/dev/null || true
+            echo ""
+            echo "--- Sample shader compile (GLSL -> SPIR-V -> GCN .sb) ---"
+            TMPDIR=$(mktemp -d)
+            cat > "$TMPDIR/tri.vert.glsl" <<'GLSL'
+#version 450
+layout(location=0) in vec3 inPos;
+layout(location=0) out vec3 vColor;
+void main() {
+  gl_Position = vec4(inPos, 1.0);
+  vColor = inPos * 0.5 + 0.5;
+}
+GLSL
+            cat > "$TMPDIR/tri.frag.glsl" <<'GLSL'
+#version 450
+layout(location=0) in vec3 vColor;
+layout(location=0) out vec4 outColor;
+void main() { outColor = vec4(vColor, 1.0); }
+GLSL
+            glslc -fshader-stage=vertex "$TMPDIR/tri.vert.glsl" -o "$TMPDIR/tri.vert.spv"
+            glslc -fshader-stage=fragment "$TMPDIR/tri.frag.glsl" -o "$TMPDIR/tri.frag.spv"
+            "$STACK/opengnm-psbc/opengnm-psbc" -s vertex -f "$TMPDIR/tri.vert.spv" -o "$TMPDIR/tri.vert.sb" 2>&1 || true
+            "$STACK/opengnm-psbc/opengnm-psbc" -s fragment -f "$TMPDIR/tri.frag.spv" -o "$TMPDIR/tri.frag.sb" 2>&1 || true
+            ls -la "$TMPDIR"/*.sb "$TMPDIR"/*.spv 2>/dev/null || true
+            echo "vert.sb size: $(wc -c < "$TMPDIR/tri.vert.sb" 2>/dev/null || echo missing)"
+            echo "frag.sb size: $(wc -c < "$TMPDIR/tri.frag.sb" 2>/dev/null || echo missing)"
+            rm -rf "$TMPDIR"
+            echo ""
+            echo "--- Triangle PKG ---"
+            ls -la "$STACK/freegnm-examples/triangle"/*.pkg
+            echo ""
+            echo "--- CPU / memory (host runner) ---"
+            nproc
+            free -h || true
+            echo ""
+            echo "GPU Lab host probe complete."
+          } | tee "$REPORT"
+          test -s "$REPORT"
+
       - name: Upload vendor triangle sample package
         uses: actions/upload-artifact@v4
         with:
           name: GPU-Triangle-Sample-PKG
           path: stack/freegnm-examples/triangle/*.pkg
+          if-no-files-found: error
+
+      - name: Upload GPU Lab report
+        uses: actions/upload-artifact@v4
+        with:
+          name: GPU-Lab-Report
+          path: gpu_lab_report.txt
           if-no-files-found: error
 
       - name: Upload built stack libraries

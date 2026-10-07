@@ -44,7 +44,7 @@
 #include "psbc_compile.h"
 #include <vulkan/vulkan.h>
 
-#define LAB_VERSION "v1"
+#define LAB_VERSION "v2"
 #define LOG_PATH "/data/gpulab_" LAB_VERSION "_log.txt"
 #define PROGRESS_PATH "/data/gpulab_" LAB_VERSION "_progress.txt"
 
@@ -447,18 +447,32 @@ static void test_solid(const char* label, int idx, const char* vs,
 
 static void test_gradient(void) {
 	test_begin(T_GRADIENT);
-	lab_log("T2: expect WHITE background and an ORANGE-to-YELLOW gradient triangle");
+	lab_log("T2: three scenes on a WHITE background (constant-buffer clear):");
+	lab_log("T2a: ORANGE-to-YELLOW gradient triangle (the vendor sample)");
+	lab_log("T2b: triangle using only the interpolated RED channel (expect plain RED)");
+	lab_log("T2c: triangle using only the interpolated GREEN channel (expect a GREEN gradient, dark at the bottom-left)");
 	Scene sc;
-	if (g_gpu.dead || gpu_init() != 0 ||
-		load_scene(
-			&sc, "/app0/assets/misc/tri.vert.sb", "/app0/assets/misc/tri.frag.sb",
-			NULL
-		) != 0) {
+	if (g_gpu.dead || gpu_init() != 0) {
 		test_end(T_GRADIENT, 1, "setup failed");
 		return;
 	}
-	int rc = show_scene(&sc, FRAMES);
-	test_end(T_GRADIENT, rc != 0, rc ? "render failed" : "rendered (check the colours on screen)");
+	int bad = 0;
+	const char* pix[3] = {
+		"/app0/assets/misc/tri.frag.sb", "/app0/assets/misc/interp_r.frag.sb",
+		"/app0/assets/misc/interp_g.frag.sb"
+	};
+	for (int i = 0; i < 3; i += 1) {
+		if (load_scene(&sc, "/app0/assets/misc/tri.vert.sb", pix[i], NULL) != 0) {
+			bad += 1;
+			continue;
+		}
+		lab_log("T2: showing scene %c", 'a' + i);
+		if (show_scene(&sc, 120) != 0) {
+			bad += 1;
+			break;
+		}
+	}
+	test_end(T_GRADIENT, bad != 0, bad ? "a scene failed" : "rendered (check the colours on screen)");
 }
 
 static int read_all(const char* path, void** data, size_t* size) {
@@ -884,7 +898,10 @@ static void test_vulkan(void) {
 	VKSTEP("render loop (180 frames)");
 	for (int frame = 0; frame < FRAMES; frame += 1) {
 		uint32_t idx = 0;
+		const int dbg = frame < 2;
+		if (dbg) lab_log("vk: frame %d - vkAcquireNextImageKHR", frame);
 		VkResult r = vkAcquireNextImageKHR(dev, sc, UINT64_MAX, acq, VK_NULL_HANDLE, &idx);
+		if (dbg) lab_log("vk: frame %d - acquired image %u (result %d)", frame, idx, (int)r);
 		if (r != VK_SUCCESS && r != VK_SUBOPTIMAL_KHR) {
 			lab_log("vk: vkAcquireNextImageKHR failed %d at frame %d", (int)r, frame);
 			test_end(T_VULKAN, 1, "acquire failed");
@@ -901,7 +918,9 @@ static void test_vulkan(void) {
 			.signalSemaphoreCount = 1,
 			.pSignalSemaphores = &done,
 		};
+		if (dbg) lab_log("vk: frame %d - vkQueueSubmit", frame);
 		r = vkQueueSubmit(queue, 1, &si, VK_NULL_HANDLE);
+		if (dbg) lab_log("vk: frame %d - submit returned %d (GPU finished)", frame, (int)r);
 		if (r != VK_SUCCESS) {
 			lab_log("vk: vkQueueSubmit failed %d at frame %d", (int)r, frame);
 			test_end(T_VULKAN, 1, "queue submit failed");
@@ -915,7 +934,9 @@ static void test_vulkan(void) {
 			.pSwapchains = &sc,
 			.pImageIndices = &idx,
 		};
+		if (dbg) lab_log("vk: frame %d - vkQueuePresentKHR", frame);
 		r = vkQueuePresentKHR(queue, &pi);
+		if (dbg) lab_log("vk: frame %d - present returned %d", frame, (int)r);
 		if (r != VK_SUCCESS && r != VK_SUBOPTIMAL_KHR) {
 			lab_log("vk: vkQueuePresentKHR failed %d at frame %d", (int)r, frame);
 			test_end(T_VULKAN, 1, "present failed");

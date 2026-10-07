@@ -11,8 +11,8 @@
 
 TITLE ?= PcPs4 GPU Lab
 VERSION = 1.00
-TITLE_ID ?= PCPSGPU01
-CONTENT_ID ?= IV0000-PCPSGPU01_00-GPULABROUNDTWO00
+TITLE_ID ?= PCPS00004
+CONTENT_ID ?= IV0000-PCPS00004_00-GPULABROUNDTHREE
 
 TOOLCHAIN = $(OO_PS4_TOOLCHAIN)
 SHARED = $(VENDOR)/shared
@@ -37,7 +37,8 @@ LDLIBS = -lc -lc++ -lkernel -lSceGnmDriver -lSceVideoOut \
 
 # Shaders compiled for the base PS4 GPU (-4) and for the PS4 Pro (-n).
 BASE_SB = assets/misc/tri.vert.sb assets/misc/tri.frag.sb assets/misc/clear.frag.sb \
-          assets/misc/solid.vert.sb assets/misc/solid.frag.sb assets/misc/clearsolid.frag.sb
+          assets/misc/solid.vert.sb assets/misc/solid.frag.sb assets/misc/clearsolid.frag.sb \
+          assets/misc/interp_r.frag.sb assets/misc/interp_g.frag.sb
 NEO_SB  = assets/misc/solid.vert.neo.sb assets/misc/solid.frag.neo.sb \
           assets/misc/clearsolid.frag.neo.sb
 # SPIR-V shipped as-is, for the on-console compile test and the Vulkan test.

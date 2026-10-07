@@ -27,7 +27,13 @@ jobs:
           set -euxo pipefail
           sudo apt-get update
           sudo apt-get install -y clang lld llvm make cmake python3 python3-mako python3-yaml python3-lxml \
-            glslc glslang-tools flex bison zlib1g-dev pkg-config git
+            glslc glslang-tools flex bison zlib1g-dev pkg-config git wget
+          # PkgTool.Core (OpenOrbis .NET) needs OpenSSL 1.x; Ubuntu 24.04 only has 3.x
+          wget -q http://security.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2.24_amd64.deb -O /tmp/libssl1.1.deb || \
+            wget -q http://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2_amd64.deb -O /tmp/libssl1.1.deb
+          sudo dpkg -i /tmp/libssl1.1.deb || true
+          rm -f /tmp/libssl1.1.deb
+          ldconfig || true
           clang --version
           ld.lld --version
           llvm-ar --version | head -n1

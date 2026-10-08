@@ -1103,10 +1103,27 @@ FILE *pcps4_real_file(FILE *f)
     }
     return f;
 }
+/* Console output from Windows code (DXVK logs here) has nowhere to go on a PS4: copy it to the run log. */
+void pcps4_console_tee(const void *buf, size_t n)
+{
+    char line[400];
+    const char *p = (const char *)buf;
+    if (!p || !n) return;
+    while (n && (p[n - 1] == '\n' || p[n - 1] == '\r')) n--;
+    if (!n) return;
+    if (n > sizeof(line) - 1) n = sizeof(line) - 1;
+    memcpy(line, p, n);
+    line[n] = 0;
+    pcps4_status_log("[win] %s", line);
+}
 static PCPS4_MS_ABI FILE *crt_fopen(const char *p, const char *m) { return fopen(p, m); }
 static PCPS4_MS_ABI int crt_fclose(FILE *f) { return fclose(pcps4_real_file(f)); }
 static PCPS4_MS_ABI SIZE_T crt_fread(void *p, SIZE_T s, SIZE_T n, FILE *f) { return fread(p,s,n,pcps4_real_file(f)); }
-static PCPS4_MS_ABI SIZE_T crt_fwrite(const void *p, SIZE_T s, SIZE_T n, FILE *f) { return fwrite(p,s,n,pcps4_real_file(f)); }
+static PCPS4_MS_ABI SIZE_T crt_fwrite(const void *p, SIZE_T s, SIZE_T n, FILE *f) {
+    FILE *r = pcps4_real_file(f);
+    if (r == stdout || r == stderr) pcps4_console_tee(p, s * n);
+    return fwrite(p,s,n,r);
+}
 static PCPS4_MS_ABI int crt_fseek(FILE *f, long o, int w) { return fseek(pcps4_real_file(f),o,w); }
 static PCPS4_MS_ABI long crt_ftell(FILE *f) { return ftell(pcps4_real_file(f)); }
 static PCPS4_MS_ABI int crt_rand(void) { return rand(); }

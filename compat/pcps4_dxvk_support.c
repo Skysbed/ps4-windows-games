@@ -338,6 +338,7 @@ static MSA I32 k___C_specific_handler(PV rec, PV frame, PV ctx, PV disp) {
 /* ======================================================================== */
 
 #define g_iob pcps4_iob
+void pcps4_console_tee(const void *buf, size_t n);
 extern char pcps4_iob[3 * 0x58];
 static MSA PV c___iob_func(void) { return g_iob; }
 static MSA U32 c____lc_codepage_func(void) { return 0; }
@@ -414,7 +415,7 @@ FILE *pcps4_real_file(FILE *f);
 #define rf pcps4_real_file
 static MSA I32 c_fflush(FILE *f) { return f ? fflush(rf(f)) : fflush(NULL); }
 static MSA I32 c_fputc(I32 c, FILE *f) { return fputc(c, rf(f)); }
-static MSA I32 c_fputs(const char *s, FILE *f) { return fputs(s, rf(f)); }
+static MSA I32 c_fputs(const char *s, FILE *f) { if (rf(f) == stdout || rf(f) == stderr) pcps4_console_tee(s, strlen(s)); return fputs(s, rf(f)); }
 static MSA I32 c_putc(I32 c, FILE *f) { return fputc(c, rf(f)); }
 static MSA I32 c_getc(FILE *f) { return fgetc(rf(f)); }
 static MSA I32 c_ungetc(I32 c, FILE *f) { return ungetc(c, rf(f)); }

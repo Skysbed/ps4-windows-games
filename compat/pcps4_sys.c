@@ -515,6 +515,8 @@ int pcps4_sys_file_read(pcps4_os_handle_t *handle,
     return 0;
 }
 
+void pcps4_console_tee(const void *buf, size_t n);
+
 int pcps4_sys_file_write(pcps4_os_handle_t *handle,
                          const void *buffer,
                          uint32_t bytes_to_write,
@@ -527,6 +529,8 @@ int pcps4_sys_file_write(pcps4_os_handle_t *handle,
         return -1;
     }
 
+    if (handle->value.fd == 1 || handle->value.fd == 2)
+        pcps4_console_tee(buffer, bytes_to_write);
     result = sceKernelWrite(handle->value.fd, buffer, bytes_to_write);
     if ((ssize_t)result < 0) {
         return -1;

@@ -289,8 +289,13 @@ static const Entry kOverrides[] = {
     {"vkGetPhysicalDeviceSurfacePresentModesKHR", (void *)shim_vkGetPhysicalDeviceSurfacePresentModesKHR},
 };
 
+static MSA void *shim_vkGetInstanceProcAddr(VkInstance, const char *name);
+static MSA void *shim_vkGetDeviceProcAddr(VkDevice, const char *name);
+
 static void *lookup(const char *name) {
     if (!name) return nullptr;
+    if (strcmp(name, "vkGetInstanceProcAddr") == 0) return (void *)shim_vkGetInstanceProcAddr;
+    if (strcmp(name, "vkGetDeviceProcAddr") == 0) return (void *)shim_vkGetDeviceProcAddr;
     for (const Entry &e : kOverrides)
         if (strcmp(e.name, name) == 0) return e.fn;
     for (const Entry &e : kTable)

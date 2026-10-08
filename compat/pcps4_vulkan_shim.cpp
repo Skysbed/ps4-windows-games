@@ -164,6 +164,27 @@ static MSA VkResult shim_vkCreateInstance(const VkInstanceCreateInfo *ci, const 
 }
 
 /* ------------------------------------------------------------------------ */
+/* features                                                                  */
+/* ------------------------------------------------------------------------ */
+
+/* DXVK refuses Direct3D 11 feature level 11_0 unless the device reports a long list of
+ * core features (geometry/tessellation shaders, BC textures, ...). The console GPU is
+ * GCN, which has the hardware for them, but the Vulkan layer does not advertise them
+ * all yet. Report them so device creation proceeds; the driver ignores the request. */
+static void claim_all_features(VkPhysicalDeviceFeatures *f) {
+    VkBool32 *b = (VkBool32 *)f;
+    for (size_t i = 0; i < sizeof(*f) / sizeof(VkBool32); i += 1) b[i] = VK_TRUE;
+}
+static MSA void shim_vkGetPhysicalDeviceFeatures(VkPhysicalDevice d, VkPhysicalDeviceFeatures *f) {
+    vkGetPhysicalDeviceFeatures(d, f);
+    if (f) claim_all_features(f);
+}
+static MSA void shim_vkGetPhysicalDeviceFeatures2(VkPhysicalDevice d, VkPhysicalDeviceFeatures2 *f) {
+    vkGetPhysicalDeviceFeatures2(d, f);
+    if (f) claim_all_features(&f->features);
+}
+
+/* ------------------------------------------------------------------------ */
 /* the export                                                                */
 /* ------------------------------------------------------------------------ */
 
@@ -179,6 +200,9 @@ static const Entry kTable[] = {
 #undef X
 
 static const Entry kOverrides[] = {
+    {"vkGetPhysicalDeviceFeatures", (void *)shim_vkGetPhysicalDeviceFeatures},
+    {"vkGetPhysicalDeviceFeatures2", (void *)shim_vkGetPhysicalDeviceFeatures2},
+    {"vkGetPhysicalDeviceFeatures2KHR", (void *)shim_vkGetPhysicalDeviceFeatures2},
     {"vkCreateInstance", (void *)shim_vkCreateInstance},
     {"vkEnumerateInstanceExtensionProperties", (void *)shim_vkEnumerateInstanceExtensionProperties},
     {"vkCreateWin32SurfaceKHR", (void *)shim_vkCreateWin32SurfaceKHR},

@@ -114,18 +114,20 @@ static void emit_context(int fd, void *uc)
     if (uc == NULL)
         return;
     mc = (const uint64_t *)((const char *)uc + 16);
-    for (i = 0; i < (int)(sizeof(regs) / sizeof(regs[0])); ++i) {
-        fd_write_str(fd, regs[i].name);
-        fd_write_str(fd, "=");
-        fd_write_hex(fd, (uintptr_t)mc[regs[i].slot]);
-        fd_write_str(fd, "\n");
-    }
     sp = (const uint64_t *)(uintptr_t)mc[23];
-    for (i = 0; i < 48; ++i) {
+    /* Stack first: [rsp] is the return address of a call through a bad pointer. */
+    for (i = 0; i < 24; ++i) {
         fd_write_str(fd, "stack+");
         fd_write_uint(fd, (unsigned long)(i * 8));
         fd_write_str(fd, "=");
         fd_write_hex(fd, (uintptr_t)sp[i]);
+        fd_write_str(fd, "\n");
+        (void)fsync(fd);
+    }
+    for (i = 0; i < (int)(sizeof(regs) / sizeof(regs[0])); ++i) {
+        fd_write_str(fd, regs[i].name);
+        fd_write_str(fd, "=");
+        fd_write_hex(fd, (uintptr_t)mc[regs[i].slot]);
         fd_write_str(fd, "\n");
     }
 }

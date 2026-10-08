@@ -183,9 +183,78 @@ static MSA void shim_vkGetPhysicalDeviceFeatures(VkPhysicalDevice d, VkPhysicalD
 static MSA void shim_vkGetPhysicalDeviceFeatures2(VkPhysicalDevice d, VkPhysicalDeviceFeatures2 *f) {
     vkGetPhysicalDeviceFeatures2(d, f);
     if (f) claim_all_features(&f->features);
+    /* DXVK's feature level 11_0 hard-requires these extension feature bits. */
+    for (VkBaseOutStructure *c = (VkBaseOutStructure *)(f ? f->pNext : nullptr); c; c = c->pNext) {
+        switch ((int)c->sType) {
+        case 1000063000: /* ShaderDrawParametersFeatures */
+            ((VkPhysicalDeviceShaderDrawParametersFeatures *)c)->shaderDrawParameters = VK_TRUE;
+            break;
+        case 1000261000: /* HostQueryResetFeatures */
+            ((VkPhysicalDeviceHostQueryResetFeatures *)c)->hostQueryReset = VK_TRUE;
+            break;
+        case 1000028000: /* TransformFeedbackFeaturesEXT */
+            ((VkPhysicalDeviceTransformFeedbackFeaturesEXT *)c)->transformFeedback = VK_TRUE;
+            ((VkPhysicalDeviceTransformFeedbackFeaturesEXT *)c)->geometryStreams = VK_TRUE;
+            break;
+        default:
+            break;
+        }
+    }
     pcps4_status_log("[vk] GetPhysicalDeviceFeatures2 (claimed all core features)");
     for (const VkBaseOutStructure *c = (const VkBaseOutStructure *)(f ? f->pNext : nullptr); c; c = c->pNext)
         pcps4_status_log("[vk]   chain sType=%d", (int)c->sType);
+}
+
+/* VK_EXT_transform_feedback is required by DXVK for D3D11 stream output. Advertise it
+ * (nothing uses it unless a game does stream-out) and strip it before the driver sees it. */
+static const char *kFauxDeviceExt = "VK_EXT_transform_feedback";
+
+static MSA VkResult shim_vkEnumerateDeviceExtensionProperties(VkPhysicalDevice d, const char *layer,
+                                                              uint32_t *count, VkExtensionProperties *out) {
+    if (layer || !count) return vkEnumerateDeviceExtensionProperties(d, layer, count, out);
+    uint32_t real = 0;
+    VkResult r = vkEnumerateDeviceExtensionProperties(d, nullptr, &real, nullptr);
+    if (r != VK_SUCCESS && r != VK_INCOMPLETE) return r;
+    const uint32_t total = real + 1;
+    if (!out) {
+        *count = total;
+        return VK_SUCCESS;
+    }
+    VkExtensionProperties *tmp = (VkExtensionProperties *)calloc(total, sizeof(*tmp));
+    if (!tmp) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    uint32_t got = real;
+    vkEnumerateDeviceExtensionProperties(d, nullptr, &got, tmp);
+    strncpy(tmp[got].extensionName, kFauxDeviceExt, VK_MAX_EXTENSION_NAME_SIZE - 1);
+    tmp[got].specVersion = 1;
+    const uint32_t n = got + 1;
+    const uint32_t m = *count < n ? *count : n;
+    for (uint32_t i = 0; i < m; i += 1) out[i] = tmp[i];
+    free(tmp);
+    *count = m;
+    return m < n ? VK_INCOMPLETE : VK_SUCCESS;
+}
+
+static MSA VkResult shim_vkCreateDevice(VkPhysicalDevice d, const VkDeviceCreateInfo *ci,
+                                        const VkAllocationCallbacks *alloc, VkDevice *out) {
+    if (!ci) return VK_ERROR_INITIALIZATION_FAILED;
+    VkDeviceCreateInfo copy = *ci;
+    const char **names = nullptr;
+    if (ci->enabledExtensionCount) {
+        names = (const char **)calloc(ci->enabledExtensionCount, sizeof(*names));
+        if (!names) return VK_ERROR_OUT_OF_HOST_MEMORY;
+        uint32_t k = 0;
+        for (uint32_t i = 0; i < ci->enabledExtensionCount; i += 1) {
+            pcps4_status_log("[vk] CreateDevice ext: %s", ci->ppEnabledExtensionNames[i]);
+            if (strcmp(ci->ppEnabledExtensionNames[i], kFauxDeviceExt) != 0)
+                names[k++] = ci->ppEnabledExtensionNames[i];
+        }
+        copy.enabledExtensionCount = k;
+        copy.ppEnabledExtensionNames = names;
+    }
+    VkResult r = vkCreateDevice(d, &copy, alloc, out);
+    pcps4_status_log("[vk] vkCreateDevice -> %d", (int)r);
+    free(names);
+    return r;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -204,6 +273,8 @@ static const Entry kTable[] = {
 #undef X
 
 static const Entry kOverrides[] = {
+    {"vkEnumerateDeviceExtensionProperties", (void *)shim_vkEnumerateDeviceExtensionProperties},
+    {"vkCreateDevice", (void *)shim_vkCreateDevice},
     {"vkGetPhysicalDeviceFeatures", (void *)shim_vkGetPhysicalDeviceFeatures},
     {"vkGetPhysicalDeviceFeatures2", (void *)shim_vkGetPhysicalDeviceFeatures2},
     {"vkGetPhysicalDeviceFeatures2KHR", (void *)shim_vkGetPhysicalDeviceFeatures2},

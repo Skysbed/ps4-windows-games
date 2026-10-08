@@ -99,7 +99,35 @@ static void emit_report(
     fd_write_str(fd, "\n");
 }
 
-/* FreeBSD amd64 ucontext: 16-byte sigmask, then mcontext as 8-byte slots. */
+/* FreeBSD amd64 ucontext: 16-byte sigmask, then mcontext as 8-byte slots.
+ * The whole dump is built in memory and written with one write(): the system
+ * can tear the process down moments after a fault. */
+static char crash_dump[4096];
+static size_t crash_dump_len;
+
+static void dump_str(const char *s)
+{
+    while (*s && crash_dump_len < sizeof(crash_dump) - 1)
+        crash_dump[crash_dump_len++] = *s++;
+}
+
+static void dump_hex(uint64_t value)
+{
+    static const char digits[] = "0123456789abcdef";
+    char buf[19];
+    int pos = 18, n;
+    buf[pos] = '\0';
+    do {
+        buf[--pos] = digits[value & 0xf];
+        value >>= 4;
+    } while (value != 0);
+    buf[--pos] = 'x';
+    buf[--pos] = '0';
+    for (n = pos; n < 18; ++n)
+        if (crash_dump_len < sizeof(crash_dump) - 1)
+            crash_dump[crash_dump_len++] = buf[n];
+}
+
 static void emit_context(int fd, void *uc)
 {
     const uint64_t *mc;
@@ -115,21 +143,21 @@ static void emit_context(int fd, void *uc)
         return;
     mc = (const uint64_t *)((const char *)uc + 16);
     sp = (const uint64_t *)(uintptr_t)mc[23];
-    /* Stack first: [rsp] is the return address of a call through a bad pointer. */
-    for (i = 0; i < 24; ++i) {
-        fd_write_str(fd, "stack+");
-        fd_write_uint(fd, (unsigned long)(i * 8));
-        fd_write_str(fd, "=");
-        fd_write_hex(fd, (uintptr_t)sp[i]);
-        fd_write_str(fd, "\n");
-        (void)fsync(fd);
-    }
     for (i = 0; i < (int)(sizeof(regs) / sizeof(regs[0])); ++i) {
-        fd_write_str(fd, regs[i].name);
-        fd_write_str(fd, "=");
-        fd_write_hex(fd, (uintptr_t)mc[regs[i].slot]);
-        fd_write_str(fd, "\n");
+        dump_str(regs[i].name);
+        dump_str("=");
+        dump_hex(mc[regs[i].slot]);
+        dump_str("\n");
     }
+    /* [rsp] is the return address of a call through a bad pointer. */
+    for (i = 0; i < 40; ++i) {
+        dump_str("stack+");
+        dump_hex((uint64_t)(i * 8));
+        dump_str("=");
+        dump_hex(sp[i]);
+        dump_str("\n");
+    }
+    (void)write(fd, crash_dump, crash_dump_len);
 }
 
 static void pcps4_fault_handler(int signal_number, void *info, void *uc)

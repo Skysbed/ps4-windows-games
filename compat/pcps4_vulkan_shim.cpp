@@ -251,6 +251,28 @@ static MSA VkResult shim_vkCreateDevice(VkPhysicalDevice d, const VkDeviceCreate
         copy.enabledExtensionCount = k;
         copy.ppEnabledExtensionNames = names;
     }
+    /* We told DXVK every core feature exists; a strict driver (or MoltenVK on the dev machine)
+     * rejects requests for ones it lacks, so mask the request down to what is really there. */
+    VkPhysicalDeviceFeatures real;
+    vkGetPhysicalDeviceFeatures(d, &real);
+    VkPhysicalDeviceFeatures masked;
+    VkPhysicalDeviceFeatures2 masked2;
+    if (ci->pEnabledFeatures) {
+        masked = *ci->pEnabledFeatures;
+        for (size_t i = 0; i < sizeof(masked) / sizeof(VkBool32); i += 1)
+            ((VkBool32 *)&masked)[i] &= ((VkBool32 *)&real)[i];
+        copy.pEnabledFeatures = &masked;
+    }
+    VkBaseInStructure *chain_head = (VkBaseInStructure *)ci->pNext;
+    for (VkBaseInStructure *c = chain_head; c; c = (VkBaseInStructure *)c->pNext) {
+        if (c->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2) {
+            VkPhysicalDeviceFeatures2 *f2 = (VkPhysicalDeviceFeatures2 *)c;
+            masked2 = *f2;
+            for (size_t i = 0; i < sizeof(VkPhysicalDeviceFeatures) / sizeof(VkBool32); i += 1)
+                ((VkBool32 *)&f2->features)[i] &= ((VkBool32 *)&real)[i];
+        }
+    }
+    (void)masked2;
     VkResult r = vkCreateDevice(d, &copy, alloc, out);
     pcps4_status_log("[vk] vkCreateDevice -> %d", (int)r);
     free(names);

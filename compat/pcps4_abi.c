@@ -63,9 +63,36 @@ WRAP(SetFilePointer, DWORD,
 WRAP(DeleteFileA, BOOL, (LPCSTR p), pcps4_DeleteFileA, (p))
 WRAP(CreateDirectoryA, BOOL, (LPCSTR p, void *s), pcps4_CreateDirectoryA, (p, s))
 WRAP(CloseHandle, BOOL, (HANDLE h), pcps4_CloseHandle, (h))
-WRAP(CreateThread, HANDLE,
-     (void *sa, SIZE_T st, LPTHREAD_START_ROUTINE fn, LPVOID p, DWORD f, DWORD *id),
-     pcps4_CreateThread, (sa, st, fn, p, f, id))
+/* A Windows thread procedure uses the Microsoft x64 convention (argument in rcx);
+ * the runtime's thread layer calls plain System V functions. Bridge with a trampoline. */
+typedef DWORD (PCPS4_MS_ABI *pcps4_ms_thread_proc)(LPVOID);
+typedef struct {
+    pcps4_ms_thread_proc fn;
+    LPVOID arg;
+} pcps4_ms_thread_start;
+
+static uint32_t pcps4_ms_thread_trampoline(void *opaque)
+{
+    pcps4_ms_thread_start start = *(pcps4_ms_thread_start *)opaque;
+    free(opaque);
+    return (uint32_t)start.fn(start.arg);
+}
+
+PCPS4_MS_ABI HANDLE pcps4_abi_CreateThread(void *sa, SIZE_T st, LPTHREAD_START_ROUTINE fn,
+                                           LPVOID p, DWORD f, DWORD *id)
+{
+    pcps4_ms_thread_start *start = (pcps4_ms_thread_start *)malloc(sizeof(*start));
+    HANDLE h;
+    if (start == NULL)
+        return NULL;
+    start->fn = (pcps4_ms_thread_proc)fn;
+    start->arg = p;
+    h = (HANDLE)pcps4_sys_thread_create(st, pcps4_ms_thread_trampoline, start, f, id);
+    if (h == NULL)
+        free(start);
+    (void)sa;
+    return h;
+}
 WRAP(CreateMutexA, HANDLE, (void *a, BOOL o, LPCSTR n), pcps4_CreateMutexA, (a, o, n))
 WRAP(CreateEventA, HANDLE, (void *a, BOOL mr, BOOL is, LPCSTR n), pcps4_CreateEventA, (a, mr, is, n))
 WRAP(SetEvent, BOOL, (HANDLE h), pcps4_SetEvent, (h))

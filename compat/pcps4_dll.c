@@ -406,7 +406,8 @@ void *pcps4_dll_load(
         (void)sceKernelMunmap(mem, map_size);
         return NULL;
     }
-    free(file_data);
+    /* image.sections points into file_data, which must outlive the loaded
+     * module (entry/section checks, protections, TLS callbacks). Keep it. */
 
     if (image.entry_point_rva != 0 &&
         !pcps4_loader_entry_is_executable(&image)) {

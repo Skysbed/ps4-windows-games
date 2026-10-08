@@ -337,7 +337,8 @@ static MSA I32 k___C_specific_handler(PV rec, PV frame, PV ctx, PV disp) {
 /* msvcrt                                                                    */
 /* ======================================================================== */
 
-static char g_iob[3 * 0x58];
+#define g_iob pcps4_iob
+extern char pcps4_iob[3 * 0x58];
 static MSA PV c___iob_func(void) { return g_iob; }
 static MSA U32 c____lc_codepage_func(void) { return 0; }
 static MSA I32 c____mb_cur_max_func(void) { return 1; }
@@ -408,15 +409,18 @@ static MSA char *c__ultoa(unsigned long v, char *buf, I32 radix) {
     return buf;
 }
 
-static MSA I32 c_fflush(FILE *f) { return fflush(f); }
-static MSA I32 c_fputc(I32 c, FILE *f) { return fputc(c, f); }
-static MSA I32 c_fputs(const char *s, FILE *f) { return fputs(s, f); }
-static MSA I32 c_putc(I32 c, FILE *f) { return fputc(c, f); }
-static MSA I32 c_getc(FILE *f) { return fgetc(f); }
-static MSA I32 c_ungetc(I32 c, FILE *f) { return ungetc(c, f); }
-static MSA I32 c_setvbuf(FILE *f, char *b, I32 mode, size_t n) { return setvbuf(f, b, mode, n); }
-static MSA I32 c_fgetpos(FILE *f, fpos_t *p) { return fgetpos(f, p); }
-static MSA I32 c_fsetpos(FILE *f, const fpos_t *p) { return fsetpos(f, p); }
+extern char pcps4_iob[3 * 0x58];
+FILE *pcps4_real_file(FILE *f);
+#define rf pcps4_real_file
+static MSA I32 c_fflush(FILE *f) { return f ? fflush(rf(f)) : fflush(NULL); }
+static MSA I32 c_fputc(I32 c, FILE *f) { return fputc(c, rf(f)); }
+static MSA I32 c_fputs(const char *s, FILE *f) { return fputs(s, rf(f)); }
+static MSA I32 c_putc(I32 c, FILE *f) { return fputc(c, rf(f)); }
+static MSA I32 c_getc(FILE *f) { return fgetc(rf(f)); }
+static MSA I32 c_ungetc(I32 c, FILE *f) { return ungetc(c, rf(f)); }
+static MSA I32 c_setvbuf(FILE *f, char *b, I32 mode, size_t n) { return setvbuf(rf(f), b, mode, n); }
+static MSA I32 c_fgetpos(FILE *f, fpos_t *p) { return fgetpos(rf(f), p); }
+static MSA I32 c_fsetpos(FILE *f, const fpos_t *p) { return fsetpos(rf(f), p); }
 static MSA U32 c_getwc(PV f) { (void)f; return 0xFFFF; }
 static MSA U32 c_putwc(U16 c, PV f) { (void)c; (void)f; return 0xFFFF; }
 static MSA U32 c_ungetwc(U16 c, PV f) { (void)c; (void)f; return 0xFFFF; }

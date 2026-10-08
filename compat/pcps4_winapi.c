@@ -1091,12 +1091,24 @@ static PCPS4_MS_ABI long long crt_strtoll(const char *s, char **e, int base) { r
 static PCPS4_MS_ABI unsigned long long crt_strtoull(const char *s, char **e, int base) { return strtoull(s,e,base); }
 static PCPS4_MS_ABI void crt_abort(void) { abort(); }
 static PCPS4_MS_ABI void crt_exit(int code) { exit(code); }
+/* Windows code is handed pointers into this fake stdio table for stdin/stdout/stderr
+ * (__iob_func); map them back to the real streams before calling libc. */
+char pcps4_iob[3 * 0x58];
+FILE *pcps4_real_file(FILE *f)
+{
+    char *p = (char *)f;
+    if (p >= pcps4_iob && p < pcps4_iob + sizeof(pcps4_iob)) {
+        size_t i = (size_t)(p - pcps4_iob) / 0x58;
+        return i == 0 ? stdin : i == 1 ? stdout : stderr;
+    }
+    return f;
+}
 static PCPS4_MS_ABI FILE *crt_fopen(const char *p, const char *m) { return fopen(p, m); }
-static PCPS4_MS_ABI int crt_fclose(FILE *f) { return fclose(f); }
-static PCPS4_MS_ABI SIZE_T crt_fread(void *p, SIZE_T s, SIZE_T n, FILE *f) { return fread(p,s,n,f); }
-static PCPS4_MS_ABI SIZE_T crt_fwrite(const void *p, SIZE_T s, SIZE_T n, FILE *f) { return fwrite(p,s,n,f); }
-static PCPS4_MS_ABI int crt_fseek(FILE *f, long o, int w) { return fseek(f,o,w); }
-static PCPS4_MS_ABI long crt_ftell(FILE *f) { return ftell(f); }
+static PCPS4_MS_ABI int crt_fclose(FILE *f) { return fclose(pcps4_real_file(f)); }
+static PCPS4_MS_ABI SIZE_T crt_fread(void *p, SIZE_T s, SIZE_T n, FILE *f) { return fread(p,s,n,pcps4_real_file(f)); }
+static PCPS4_MS_ABI SIZE_T crt_fwrite(const void *p, SIZE_T s, SIZE_T n, FILE *f) { return fwrite(p,s,n,pcps4_real_file(f)); }
+static PCPS4_MS_ABI int crt_fseek(FILE *f, long o, int w) { return fseek(pcps4_real_file(f),o,w); }
+static PCPS4_MS_ABI long crt_ftell(FILE *f) { return ftell(pcps4_real_file(f)); }
 static PCPS4_MS_ABI int crt_rand(void) { return rand(); }
 static PCPS4_MS_ABI void crt_srand(unsigned int s) { srand(s); }
 

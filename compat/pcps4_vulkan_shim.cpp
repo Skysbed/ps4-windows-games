@@ -22,6 +22,7 @@
 #include <vulkan/vulkan.h>
 
 #include "pcps4_dxvk_support.h"
+#include "pcps4_status.h"
 
 #define MSA __attribute__((ms_abi))
 
@@ -182,6 +183,9 @@ static MSA void shim_vkGetPhysicalDeviceFeatures(VkPhysicalDevice d, VkPhysicalD
 static MSA void shim_vkGetPhysicalDeviceFeatures2(VkPhysicalDevice d, VkPhysicalDeviceFeatures2 *f) {
     vkGetPhysicalDeviceFeatures2(d, f);
     if (f) claim_all_features(&f->features);
+    pcps4_status_log("[vk] GetPhysicalDeviceFeatures2 (claimed all core features)");
+    for (const VkBaseOutStructure *c = (const VkBaseOutStructure *)(f ? f->pNext : nullptr); c; c = c->pNext)
+        pcps4_status_log("[vk]   chain sType=%d", (int)c->sType);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -223,8 +227,16 @@ static void *lookup(const char *name) {
     return nullptr;
 }
 
-static MSA void *shim_vkGetInstanceProcAddr(VkInstance, const char *name) { return lookup(name); }
-static MSA void *shim_vkGetDeviceProcAddr(VkDevice, const char *name) { return lookup(name); }
+static MSA void *shim_vkGetInstanceProcAddr(VkInstance, const char *name) {
+    void *p = lookup(name);
+    pcps4_status_log("[vk] GetInstanceProcAddr %s -> %s", name ? name : "(null)", p ? "ok" : "MISSING");
+    return p;
+}
+static MSA void *shim_vkGetDeviceProcAddr(VkDevice, const char *name) {
+    void *p = lookup(name);
+    if (!p) pcps4_status_log("[vk] GetDeviceProcAddr %s -> MISSING", name ? name : "(null)");
+    return p;
+}
 
 extern "C" void pcps4_dxvk_register_vulkan(pcps4_pe_resolver *resolver) {
     static const char *const dlls[] = {"vulkan-1.dll", "VULKAN-1.dll"};

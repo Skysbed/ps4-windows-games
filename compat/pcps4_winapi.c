@@ -510,6 +510,11 @@ static PCPS4_MS_ABI DWORD win_GetEnvironmentVariableA(
     }
 
     value = getenv(name);
+#if PCPS4_DXVK
+    /* The app's directory is read-only and DXVK's shader state cache writes from a thread. */
+    if (value == NULL && strcmp(name, "DXVK_STATE_CACHE") == 0)
+        value = "0";
+#endif
     if (value == NULL) {
         if (buffer != NULL && size != 0)
             buffer[0] = '\0';

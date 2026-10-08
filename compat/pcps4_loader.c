@@ -15,7 +15,8 @@
 
 #include "pcps4_loader.h"
 #include "pcps4_status.h"
-#include "pcps4_fault.h"  /* pcps4_fault_stage: crash breadcrumb */
+#include "pcps4_fault.h"
+#include "pcps4_teb.h"  /* pcps4_fault_stage: crash breadcrumb */
 
 #include <setjmp.h>
 #include <stdio.h>
@@ -317,6 +318,7 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
         return PCPS4_LOADER_ERR_NULL;
 
     /* Parse once up front just to learn how much memory to reserve. */
+    pcps4_fault_stage("loader: parse PE headers");
     prc = pcps4_pe_parse(exe, exe_size, &probe);
     if (prc != PCPS4_PE_OK) {
         pcps4_status_log("[pcps4] load parse failed: %s", pcps4_pe_status_str(prc));
@@ -328,7 +330,8 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
         return PCPS4_LOADER_ERR_LOAD;
 
     /* Allocate anonymous RW memory for the image. */
-    krc = sceKernelMmap(NULL, map_size, PROT_READ | PROT_WRITE,
+    pcps4_fault_stage("loader: mmap PE image");
+    krc = sceKernelMmap(NULL, map_size + PCPS4_TEB_PAGE, PROT_READ | PROT_WRITE,
                         MAP_PRIVATE | MAP_ANON, -1, 0, &mem);
     if (krc != 0 || mem == NULL) {
         pcps4_status_log("[pcps4] mmap failed: 0x%x", (unsigned)krc);
@@ -336,6 +339,7 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
     }
 
     /* Map + bind at the real runtime address so relocations resolve. */
+    pcps4_fault_stage("loader: map image and bind imports");
     prc = pcps4_pe_load(exe, exe_size, (uint8_t *)mem, map_size,
                         (uint64_t)(uintptr_t)mem, resolver,
                         &image, &resolved, &unresolved);
@@ -357,6 +361,13 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
                (unsigned)unresolved);
         sceKernelMunmap(mem, map_size);
         return PCPS4_LOADER_ERR_UNRESOLVED;
+    }
+
+    /* Windows code reads its thread block via GS; give it a fake one (see pcps4_teb.h). */
+    pcps4_teb_init((uint8_t *)mem + map_size, (const uint8_t *)mem);
+    {
+        uint32_t n = pcps4_teb_patch_image(&image, (uint8_t *)mem, (const uint8_t *)mem + map_size);
+        pcps4_status_log("[pcps4] exe: rewrote %u gs: thread-block access(es)", (unsigned)n);
     }
 
         if (!pcps4_loader_entry_is_executable(&image)) {

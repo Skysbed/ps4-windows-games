@@ -1,6 +1,8 @@
 #include "pcps4_dll.h"
 #include "pcps4_loader.h"
 #include "pcps4_status.h"
+#include "pcps4_teb.h"
+#include "pcps4_fault.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -283,6 +285,7 @@ void *pcps4_dll_load(
     if (path == NULL || resolver == NULL)
         return NULL;
 
+    pcps4_fault_stage("dll: begin load");
     normalize_name(path, name, sizeof(name));
     if (name[0] == '\\0')
         return NULL;
@@ -309,6 +312,7 @@ void *pcps4_dll_load(
         return NULL;
     }
 
+    pcps4_fault_stage("dll: parse PE headers");
     rc = pcps4_pe_parse(file_data, file_size, &probe);
     if (rc != PCPS4_PE_OK) {
         pcps4_status_log(
@@ -325,8 +329,10 @@ void *pcps4_dll_load(
     }
 
     {
-        int32_t krc = sceKernelMmap(
-            NULL, map_size,
+        int32_t krc;
+        pcps4_fault_stage("dll: mmap image");
+        krc = sceKernelMmap(
+            NULL, map_size + PCPS4_TEB_PAGE,
             PROT_READ | PROT_WRITE,
             MAP_PRIVATE | MAP_ANON, -1, 0, &mem);
         if (krc != 0 || mem == NULL) {
@@ -373,6 +379,7 @@ void *pcps4_dll_load(
     unlock();
 
     memset(&image, 0, sizeof(image));
+    pcps4_fault_stage("dll: map image and bind imports");
     rc = pcps4_pe_load(
         file_data, file_size,
         (uint8_t *)mem, map_size,
@@ -413,6 +420,14 @@ void *pcps4_dll_load(
         return NULL;
     }
 
+    /* Windows code reads its thread block via GS; give it a fake one (see pcps4_teb.h). */
+    pcps4_teb_init((uint8_t *)mem + map_size, (const uint8_t *)mem);
+    {
+        uint32_t n = pcps4_teb_patch_image(&image, (uint8_t *)mem, (const uint8_t *)mem + map_size);
+        pcps4_status_log("[pcps4] DLL %s: rewrote %u gs: thread-block access(es)", name, (unsigned)n);
+    }
+    pcps4_fault_stage("dll: applying protections");
+    pcps4_status_log("[pcps4] DLL %s: applying section protections", name);
     if (pcps4_loader_apply_image_protections(
             &image, (uint8_t *)mem, map_size) != 0) {
         pcps4_status_log(
@@ -427,6 +442,8 @@ void *pcps4_dll_load(
 
     module->image = image;
 
+    pcps4_fault_stage("dll: TLS callbacks");
+    pcps4_status_log("[pcps4] DLL %s: running TLS callbacks", name);
     if (pcps4_loader_run_tls_callbacks(
             &module->image,
             (uint8_t *)mem,
@@ -441,6 +458,8 @@ void *pcps4_dll_load(
         return NULL;
     }
 
+    pcps4_fault_stage("dll: DllMain(PROCESS_ATTACH)");
+    pcps4_status_log("[pcps4] DLL %s: calling DllMain(PROCESS_ATTACH)", name);
     if (image.entry_point_rva != 0) {
         pcps4_dll_entry_fn entry =
             (pcps4_dll_entry_fn)(

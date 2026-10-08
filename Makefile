@@ -72,6 +72,7 @@ D3D11_COM_OBJ := $(INTDIR)/pcps4_d3d11_com.o
 ABI_OBJ := $(INTDIR)/pcps4_abi.o
 WIN32_OBJ := $(INTDIR)/pcps4_win32.o
 DXGI_OBJ := $(INTDIR)/pcps4_dxgi.o
+TEB_OBJ := $(INTDIR)/pcps4_teb.o
 DXVK_OBJS :=
 DXVK_LDLIBS :=
 ifeq ($(PCPS4_DXVK),1)
@@ -249,6 +250,10 @@ $(INTDIR):
 	@mkdir -p "$(INTDIR)"
 
 
+$(TEB_OBJ): compat/pcps4_teb.c compat/pcps4_teb.h compat/pcps4_pe.h
+	@mkdir -p "$(dir $@)"
+	$(CC) $(CFLAGS) -o "$@" "$<"
+
 ifeq ($(PCPS4_DXVK),1)
 $(INTDIR)/pcps4_dxvk_support.o: compat/pcps4_dxvk_support.c compat/pcps4_dxvk_support.h compat/pcps4_loader.h
 	@mkdir -p "$(dir $@)"
@@ -263,10 +268,10 @@ $(INTDIR)/pcps4_vulkan_shim.cpp.o: compat/pcps4_vulkan_shim.cpp compat/pcps4_vul
 	$(CXX) $(CXXFLAGS) -std=c++17 -I$(PCPS4_VK_HEADERS)/include -o "$@" "$<"
 endif
 
-$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(DLL_OBJ) $(D3D11_COM_OBJ) $(ABI_OBJ) $(WIN32_OBJ) $(DXGI_OBJ) $(DXVK_OBJS)
+$(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ) $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(DLL_OBJ) $(D3D11_COM_OBJ) $(ABI_OBJ) $(WIN32_OBJ) $(DXGI_OBJ) $(TEB_OBJ) $(DXVK_OBJS)
 	@test -n "$(OBJS)" || (echo "ERROR: no PC source files found in pc_source/."; exit 1)
 	$(LD) $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) \
-	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(GNM_RENDERER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(DLL_OBJ) $(D3D11_COM_OBJ) $(ABI_OBJ) $(WIN32_OBJ) $(DXGI_OBJ) $(DXVK_OBJS) -o "$@" $(DXVK_LDLIBS) $(LDFLAGS)
+	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(GNM_RENDERER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(DLL_OBJ) $(D3D11_COM_OBJ) $(ABI_OBJ) $(WIN32_OBJ) $(DXGI_OBJ) $(TEB_OBJ) $(DXVK_OBJS) -o "$@" $(DXVK_LDLIBS) $(LDFLAGS)
 
 $(EBOOT): $(ELF)
 	@test -n "$(OO_PS4_TOOLCHAIN)" || (echo "ERROR: OO_PS4_TOOLCHAIN is not set."; exit 1)

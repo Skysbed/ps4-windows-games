@@ -191,6 +191,31 @@ index 168c1f3..d89ac5f 100644
      if (!commandBuffer || !pValues || size == 0) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      VkPs4Pipeline *pipe = cmd->current_pipeline;
+diff --git a/src/vk_ps4_device.c b/src/vk_ps4_device.c
+index 9d8a83f..2a50d20 100644
+--- a/src/vk_ps4_device.c
++++ b/src/vk_ps4_device.c
+@@ -129,9 +129,17 @@ static VkResult vk_ps4_device_init_gnm(VkPs4Device *dev) {
+                  * address of the shader code in the malloc'd buffer.
+                  * meta.shadercode points into dev->clear_ps_binary. */
+                 if (meta.shadercode) {
+-                    sceGnmPsRegsSetAddress(
+-                        &dev->clear_ps_regs, (void *)meta.shadercode
+-                    );
++                    /* PcPs4: the GPU fetches shader code from GPU-visible memory, not
++                     * from a malloc'd copy; use the driver allocator (256-byte aligned). */
++                    void *code = (void *)meta.shadercode;
++                    if (meta.shadercodesize) {
++                        void *gpu = vk_ps4_alloc(&dev->allocator, meta.shadercodesize, 256);
++                        if (gpu) {
++                            memcpy(gpu, meta.shadercode, meta.shadercodesize);
++                            code = gpu;
++                        }
++                    }
++                    sceGnmPsRegsSetAddress(&dev->clear_ps_regs, code);
+                     dev->clear_ps_ready = true;
+                 }
+             }
 diff --git a/src/vk_ps4_entry.c b/src/vk_ps4_entry.c
 index 24ef0d4..e813f6c 100644
 --- a/src/vk_ps4_entry.c

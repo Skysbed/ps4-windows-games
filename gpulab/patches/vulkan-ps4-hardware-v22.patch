@@ -16,7 +16,7 @@ index 7634d6b..6461453 100644
       * IMM_ALUFLOATCONST input usage slots emitted by psbc.
       * Each entry maps a push constant dword index to a user-data
 diff --git a/src/vk_ps4_command.c b/src/vk_ps4_command.c
-index 168c1f3..bfec3fc 100644
+index 168c1f3..9580e8c 100644
 --- a/src/vk_ps4_command.c
 +++ b/src/vk_ps4_command.c
 @@ -19,6 +19,9 @@
@@ -29,29 +29,44 @@ index 168c1f3..bfec3fc 100644
  #define VK_PS4_CMD_BUFFER_SIZE (256 * 1024)  /* 256KB default PM4 buffer */
  
  /* Forward declaration from vk_ps4_pipeline.c */
-@@ -423,7 +426,20 @@ static void vk_ps4_clear_color(VkPs4CommandBuffer *cmd,
-             tm == GNM_TM_DISPLAY_LINEAR_ALIGNED) {
-             vk_ps4_clear_color_fillmem(&cmd->gnm_cmd, img, cc);
-         } else {
--            vk_ps4_clear_color_draw(cmd, img, cc);
-+            /* PcPs4: a uniform clear writes the same dword everywhere, so tiling is
-+             * irrelevant: fill the whole surface (as sized by its memory requirements)
-+             * instead of the unproven draw-based clear. */
-+            VkMemoryRequirements req;
-+            memset(&req, 0, sizeof(req));
-+            vk_ps4_GetImageMemoryRequirements((VkDevice)cmd->device, (VkImage)img, &req);
-+            uint32_t bytes = (uint32_t)((req.size + 3) & ~(VkDeviceSize)3);
-+            if (bytes && img->memory && img->memory->gnm_mem.mapped) {
-+                uint64_t addr = (uint64_t)img->memory->gnm_mem.mapped + img->memory_offset;
-+                sceGnmDrawCmdFillMemory(&cmd->gnm_cmd, addr, bytes,
-+                                        vk_ps4_pack_clear_val_32(img->create_info.format, cc));
-+            } else {
-+                vk_ps4_clear_color_draw(cmd, img, cc);
-+            }
-         }
-     } else {
-         /* Non-RT image — use FillMemory */
-@@ -586,6 +602,9 @@ static void vk_ps4_rebind_pipeline_state(VkPs4CommandBuffer *cmd) {
+@@ -397,6 +400,36 @@ static void vk_ps4_clear_color_draw(VkPs4CommandBuffer *cmd,
+         img->create_info.extent.width,
+         img->create_info.extent.height);
+ 
++    /* PcPs4: the draw only covers the target if the full pass state is set, exactly
++     * as the working GNM clear pass does: depth/stencil off, a viewport over the
++     * target, all colour channels writable, and a rect-list primitive. */
++    {
++        GnmDbRenderControl db_off;
++        memset(&db_off, 0, sizeof(db_off));
++        sceGnmDrawCmdSetDbRenderControl(&cmd->gnm_cmd, &db_off);
++        GnmDepthStencilControl ds_off;
++        memset(&ds_off, 0, sizeof(ds_off));
++        ds_off.zfunc = GNM_DEPTH_COMPARE_NEVER;
++        ds_off.stencilfunc = GNM_DEPTH_COMPARE_NEVER;
++        ds_off.stencilbackfunc = GNM_DEPTH_COMPARE_NEVER;
++        sceGnmDrawCmdSetDepthStencilControl(&cmd->gnm_cmd, &ds_off);
++        float w = (float)img->create_info.extent.width;
++        float h = (float)img->create_info.extent.height;
++        GnmSetViewportInfo vp;
++        memset(&vp, 0, sizeof(vp));
++        vp.dmin = 0.0f;
++        vp.dmax = 1.0f;
++        vp.scale[0] = w * 0.5f;
++        vp.scale[1] = -h * 0.5f;
++        vp.scale[2] = 0.5f;
++        vp.offset[0] = w * 0.5f;
++        vp.offset[1] = h * 0.5f;
++        vp.offset[2] = 0.5f;
++        sceGnmDrawCmdSetViewport(&cmd->gnm_cmd, 0, &vp);
++        sceGnmDrawCmdSetRenderTargetMask(&cmd->gnm_cmd, 0xf);
++        sceGnmDrawCmdSetPrimitiveType(&cmd->gnm_cmd, GNM_PT_RECTLIST);
++    }
++
+     /* Bind the clear pixel shader and fullscreen VS */
+     sceGnmDrawCmdSetPsShader(&cmd->gnm_cmd, &dev->clear_ps_regs);
+     sceGnmDrawCmdSetEmbeddedVsShader(&cmd->gnm_cmd, GNM_EMBEDDED_VSH_FULLSCREEN, 0);
+@@ -586,6 +619,9 @@ static void vk_ps4_rebind_pipeline_state(VkPs4CommandBuffer *cmd) {
      /* Re-emit PS if present */
      if (pipe->has_ps) {
          sceGnmDrawCmdSetPsShader(&cmd->gnm_cmd, &pipe->ps_regs);
@@ -61,7 +76,7 @@ index 168c1f3..bfec3fc 100644
      }
  
      /* Re-emit fetch shader */
-@@ -1032,6 +1051,7 @@ vk_ps4_TrimCommandPool(VkDevice device, VkCommandPool commandPool, VkCommandPool
+@@ -1032,6 +1068,7 @@ vk_ps4_TrimCommandPool(VkDevice device, VkCommandPool commandPool, VkCommandPool
  
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdBindPipeline(VkCommandBuffer commandBuffer, VkPipelineBindPoint pipelineBindPoint, VkPipeline pipeline) {
@@ -69,7 +84,7 @@ index 168c1f3..bfec3fc 100644
      if (!commandBuffer || !pipeline) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      VkPs4Pipeline *pipe = (VkPs4Pipeline *)pipeline;
-@@ -1098,6 +1118,9 @@ vk_ps4_CmdBindPipeline(VkCommandBuffer commandBuffer, VkPipelineBindPoint pipeli
+@@ -1098,6 +1135,9 @@ vk_ps4_CmdBindPipeline(VkCommandBuffer commandBuffer, VkPipelineBindPoint pipeli
          /* Set pixel shader only if the pipeline has one */
          if (pipe->has_ps) {
              sceGnmDrawCmdSetPsShader(&cmd->gnm_cmd, &pipe->ps_regs);
@@ -79,7 +94,7 @@ index 168c1f3..bfec3fc 100644
          }
  
          /* Bind fetch shader if the pipeline has one */
-@@ -1369,6 +1392,7 @@ vk_ps4_CmdSetLineWidth(VkCommandBuffer commandBuffer, float lineWidth) {
+@@ -1369,6 +1409,7 @@ vk_ps4_CmdSetLineWidth(VkCommandBuffer commandBuffer, float lineWidth) {
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdBindVertexBuffers(VkCommandBuffer commandBuffer, uint32_t firstBinding,
                               uint32_t bindingCount, const VkBuffer *pBuffers, const VkDeviceSize *pOffsets) {
@@ -87,7 +102,7 @@ index 168c1f3..bfec3fc 100644
      if (!commandBuffer || !pBuffers) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
  
-@@ -1426,6 +1450,7 @@ vk_ps4_CmdBindVertexBuffers(VkCommandBuffer commandBuffer, uint32_t firstBinding
+@@ -1426,6 +1467,7 @@ vk_ps4_CmdBindVertexBuffers(VkCommandBuffer commandBuffer, uint32_t firstBinding
  
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdBindIndexBuffer(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDeviceSize offset, VkIndexType indexType) {
@@ -95,7 +110,7 @@ index 168c1f3..bfec3fc 100644
      if (!commandBuffer) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      cmd->index_buffer.buffer = buffer;
-@@ -1451,6 +1476,7 @@ vk_ps4_CmdBindIndexBuffer(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDevi
+@@ -1451,6 +1493,7 @@ vk_ps4_CmdBindIndexBuffer(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDevi
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdDraw(VkCommandBuffer commandBuffer, uint32_t vertexCount, uint32_t instanceCount,
                 uint32_t firstVertex, uint32_t firstInstance) {
@@ -103,7 +118,7 @@ index 168c1f3..bfec3fc 100644
      if (!commandBuffer) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
  
-@@ -1525,6 +1551,7 @@ vk_ps4_CmdDraw(VkCommandBuffer commandBuffer, uint32_t vertexCount, uint32_t ins
+@@ -1525,6 +1568,7 @@ vk_ps4_CmdDraw(VkCommandBuffer commandBuffer, uint32_t vertexCount, uint32_t ins
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdDrawIndexed(VkCommandBuffer commandBuffer, uint32_t indexCount, uint32_t instanceCount,
                        uint32_t firstIndex, int32_t vertexOffset, uint32_t firstInstance) {
@@ -111,7 +126,7 @@ index 168c1f3..bfec3fc 100644
      if (!commandBuffer) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
  
-@@ -1744,6 +1771,7 @@ vk_ps4_CmdDispatchIndirect(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDev
+@@ -1744,6 +1788,7 @@ vk_ps4_CmdDispatchIndirect(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDev
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdCopyBuffer(VkCommandBuffer commandBuffer, VkBuffer srcBuffer, VkBuffer dstBuffer,
                       uint32_t regionCount, const VkBufferCopy *pRegions) {
@@ -119,7 +134,7 @@ index 168c1f3..bfec3fc 100644
      if (!commandBuffer || !pRegions) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      VkPs4Buffer *src = (VkPs4Buffer *)srcBuffer;
-@@ -1774,6 +1802,7 @@ vk_ps4_CmdCopyBuffer(VkCommandBuffer commandBuffer, VkBuffer srcBuffer, VkBuffer
+@@ -1774,6 +1819,7 @@ vk_ps4_CmdCopyBuffer(VkCommandBuffer commandBuffer, VkBuffer srcBuffer, VkBuffer
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdFillBuffer(VkCommandBuffer commandBuffer, VkBuffer dstBuffer,
                       VkDeviceSize dstOffset, VkDeviceSize fillSize, uint32_t data) {
@@ -127,7 +142,7 @@ index 168c1f3..bfec3fc 100644
      if (!commandBuffer || !dstBuffer) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      VkPs4Buffer *dst = (VkPs4Buffer *)dstBuffer;
-@@ -1813,6 +1842,7 @@ vk_ps4_CmdFillBuffer(VkCommandBuffer commandBuffer, VkBuffer dstBuffer,
+@@ -1813,6 +1859,7 @@ vk_ps4_CmdFillBuffer(VkCommandBuffer commandBuffer, VkBuffer dstBuffer,
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdUpdateBuffer(VkCommandBuffer commandBuffer, VkBuffer dstBuffer,
                         VkDeviceSize dstOffset, VkDeviceSize dataSize, const void *pData) {
@@ -135,7 +150,7 @@ index 168c1f3..bfec3fc 100644
      if (!commandBuffer || !dstBuffer || !pData) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      VkPs4Buffer *dst = (VkPs4Buffer *)dstBuffer;
-@@ -1869,6 +1899,7 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -1869,6 +1916,7 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdCopyImage(VkCommandBuffer commandBuffer, VkImage srcImage, VkImageLayout srcImageLayout,
                      VkImage dstImage, VkImageLayout dstImageLayout,
                      uint32_t regionCount, const VkImageCopy *pRegions) {
@@ -143,7 +158,7 @@ index 168c1f3..bfec3fc 100644
      if (!commandBuffer || !pRegions) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      VkPs4Image *src = (VkPs4Image *)srcImage;
-@@ -1968,6 +1999,7 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -1968,6 +2016,7 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdBlitImage(VkCommandBuffer commandBuffer, VkImage srcImage, VkImageLayout srcImageLayout,
                      VkImage dstImage, VkImageLayout dstImageLayout,
                      uint32_t regionCount, const VkImageBlit *pRegions, VkFilter filter) {
@@ -151,7 +166,7 @@ index 168c1f3..bfec3fc 100644
      /* BlitImage with scaling/format conversion requires a shader-based blit.
       * For MVP, fall back to CmdCopyImage if regions are 1:1.
       * Full blit support is Phase 3. */
-@@ -2039,6 +2071,7 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -2039,6 +2088,7 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdCopyBufferToImage(VkCommandBuffer commandBuffer, VkBuffer srcBuffer, VkImage dstImage,
                              VkImageLayout dstImageLayout, uint32_t regionCount,
                              const VkBufferImageCopy *pRegions) {
@@ -159,7 +174,7 @@ index 168c1f3..bfec3fc 100644
      if (!commandBuffer || !pRegions) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      VkPs4Buffer *src = (VkPs4Buffer *)srcBuffer;
-@@ -2200,6 +2233,7 @@ static bool vk_ps4_attachment_used_before_subpass(VkPs4RenderPass *rp,
+@@ -2200,6 +2250,7 @@ static bool vk_ps4_attachment_used_before_subpass(VkPs4RenderPass *rp,
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdBeginRenderPass(VkCommandBuffer commandBuffer, const VkRenderPassBeginInfo *pBeginInfo,
                            VkSubpassContents contents) {
@@ -167,7 +182,7 @@ index 168c1f3..bfec3fc 100644
      (void)contents;
      if (!commandBuffer || !pBeginInfo) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
-@@ -2338,6 +2372,7 @@ vk_ps4_CmdBeginRenderPass(VkCommandBuffer commandBuffer, const VkRenderPassBegin
+@@ -2338,6 +2389,7 @@ vk_ps4_CmdBeginRenderPass(VkCommandBuffer commandBuffer, const VkRenderPassBegin
  
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdEndRenderPass(VkCommandBuffer commandBuffer) {
@@ -175,7 +190,7 @@ index 168c1f3..bfec3fc 100644
      if (!commandBuffer) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
  
-@@ -2513,6 +2548,7 @@ vk_ps4_CmdPipelineBarrier(VkCommandBuffer commandBuffer, VkPipelineStageFlags sr
+@@ -2513,6 +2565,7 @@ vk_ps4_CmdPipelineBarrier(VkCommandBuffer commandBuffer, VkPipelineStageFlags sr
                            uint32_t memoryBarrierCount, const VkMemoryBarrier *pMemoryBarriers,
                            uint32_t bufferMemoryBarrierCount, const VkBufferMemoryBarrier *pBufferMemoryBarriers,
                            uint32_t imageMemoryBarrierCount, const VkImageMemoryBarrier *pImageMemoryBarriers) {
@@ -183,7 +198,7 @@ index 168c1f3..bfec3fc 100644
      if (!commandBuffer) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
  
-@@ -2609,11 +2645,12 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -2609,11 +2662,12 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdClearColorImage(VkCommandBuffer commandBuffer, VkImage image, VkImageLayout imageLayout,
                            const VkClearColorValue *pColor, uint32_t rangeCount,
                            const VkImageSubresourceRange *pRanges) {
@@ -197,7 +212,7 @@ index 168c1f3..bfec3fc 100644
  
      /* Tiled render targets require a draw-based clear because FillMemory
       * writes linearly and doesn't respect the tiled memory layout.
-@@ -2777,6 +2814,7 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -2777,6 +2831,7 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdClearAttachments(VkCommandBuffer commandBuffer, uint32_t attachmentCount,
                             const VkClearAttachment *pAttachments, uint32_t rectCount,
                             const VkClearRect *pRects) {
@@ -205,7 +220,7 @@ index 168c1f3..bfec3fc 100644
      if (!commandBuffer || !pAttachments) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
  
-@@ -2895,6 +2933,7 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -2895,6 +2950,7 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdPushConstants(VkCommandBuffer commandBuffer, VkPipelineLayout layout,
                          VkShaderStageFlags stageFlags, uint32_t offset, uint32_t size,
                          const void *pValues) {

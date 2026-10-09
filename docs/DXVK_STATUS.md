@@ -33,6 +33,23 @@ Vulkan shim (`compat/pcps4_vulkan_shim.cpp`) → `vulkan-ps4` driver (GNM) → P
   to `/data/pcps4_<ver>_windows_game_log.txt`.
 - Driver diagnostics: `/data/vk_ps4_breadcrumb.log` (commands, images, scanout probes).
 
+## Root cause of the black screen / zero UBO + texture reads (found v43)
+
+The shader compiler (`opengnm-psbc`) had **no descriptor layout**: every uniform-buffer, texture and sampler
+access was compiled against a null descriptor, so all of them read zeros (the compiled ISA literally zeroes the
+V#/T# registers before use). Fixed in `gpulab/patches/opengnm-psbc-descriptors.patch`:
+
+- `PsbcCompileOptions` takes the pipeline's descriptor layout (per-binding offset/size) and a 32-bit address high word.
+- One `PTR_INDIRECTRESOURCETABLE` input slot is emitted per descriptor set (apislot = set index).
+- GFX7/GFX8 register limits were wrong (12 SGPRs!), which made any non-trivial shader fail to compile; corrected.
+
+Driver side (`vk_ps4_desc_tables.c`): descriptors are mirrored into GPU-visible memory at the layout the shader
+expects and the set address (low 32 bits) is written to the shader's user-data register at bind time. Descriptor
+pools now track and release their sets (they previously leaked).
+
+An independent Codex session (see PR history) produced v34-v42 from a clean, unpatched vendor driver: those builds
+lack the GPU-visible allocator in `vulkan-ps4-hardware-v22.patch` and hard-crash for that reason; they are superseded.
+
 ## Open problems
 
 1. **Nothing DXVK draws reaches the screen yet.** The remaining stages to prove on hardware: texture sampling

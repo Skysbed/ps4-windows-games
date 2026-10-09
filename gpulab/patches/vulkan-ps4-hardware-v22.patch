@@ -354,7 +354,7 @@ index 683667b..9ae954a 100644
          if (result == 0) {
              /* Poll until the GPU writes the label. */
 diff --git a/src/vk_ps4_swapchain.c b/src/vk_ps4_swapchain.c
-index bc36c63..4c411b3 100644
+index bc36c63..184417c 100644
 --- a/src/vk_ps4_swapchain.c
 +++ b/src/vk_ps4_swapchain.c
 @@ -11,6 +11,12 @@
@@ -370,7 +370,7 @@ index bc36c63..4c411b3 100644
  VKAPI_ATTR VkResult VKAPI_CALL
  vk_ps4_CreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR *pCreateInfo,
                            const VkAllocationCallbacks *pAllocator, VkSwapchainKHR *pSwapchain) {
-@@ -342,10 +348,17 @@ vk_ps4_QueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *pPresentInfo) {
+@@ -342,12 +348,29 @@ vk_ps4_QueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *pPresentInfo) {
          if (image_index < sc->image_count) {
              vk_ps4_log("QueuePresent: flip img=%u frame=%lld",
                         image_index, (long long)sc->video_out.frame);
@@ -387,4 +387,16 @@ index bc36c63..4c411b3 100644
 +            }
              sc->video_out.frame++;
              vk_ps4_log_raw("QueuePresent: flip done");
++            {   /* PcPs4 diagnostic: what did the GPU actually write into the scanout buffer? */
++                static uint32_t probe_n;
++                if (probe_n < 8 || (probe_n % 30) == 0) {
++                    const volatile uint32_t *px = (const volatile uint32_t *)sceGnmVideoOutGetBuffer(&sc->video_out, image_index);
++                    if (px)
++                        vk_ps4_log("QueuePresent: scanout img=%u px[0]=%08x px[1]=%08x px[64]=%08x px[mid]=%08x",
++                                   image_index, px[0], px[1], px[64], px[(1920u * 540u) / 2]);
++                }
++                probe_n++;
++            }
              /* The flip is complete — the display engine is done
+              * with the buffer.  Clear the in-flight tracking so
+              * AcquireNextImageKHR can reclaim this image. */

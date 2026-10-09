@@ -23,6 +23,7 @@
 
 #include "pcps4_dxvk_support.h"
 #include "pcps4_status.h"
+#include "pcps4_selftest_shaders.h"
 
 #define MSA __attribute__((ms_abi))
 
@@ -477,6 +478,212 @@ static void selftest_run(VkPhysicalDevice pd, VkDevice dev) {
     w = vkWaitForFences(dev, 1, &fence, VK_TRUE, 2000000000ull);
     pcps4_status_log("[selftest] C vkCmdClearColorImage: submit=%d wait=%d px[0]=%08x px[1]=%08x (want ff00ff00)", (int)r, (int)w,
                      px ? px[0] : 0, px ? px[1] : 0);
+
+    /* ---- D: graphics pipelines of the kind DXVK uses -------------------------------------
+     * Each variant draws a full-target triangle into a second 64x64 image and reads it back:
+     * constant colour, interpolant, push constant, uniform buffer, sampled texture. */
+    {
+        /* destination image */
+        VkImage img2;
+        vkCreateImage(dev, &ici, nullptr, &img2);
+        VkMemoryRequirements mr2;
+        vkGetImageMemoryRequirements(dev, img2, &mr2);
+        VkMemoryAllocateInfo mai2 = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        mai2.allocationSize = mr2.size;
+        mai2.memoryTypeIndex = selftest_pick_memory(pd, mr2.memoryTypeBits);
+        VkDeviceMemory mem2;
+        vkAllocateMemory(dev, &mai2, nullptr, &mem2);
+        vkBindImageMemory(dev, img2, mem2, 0);
+        volatile uint32_t *px2 = nullptr;
+        vkMapMemory(dev, mem2, 0, VK_WHOLE_SIZE, 0, (void **)&px2);
+        VkImageViewCreateInfo vci2 = vci;
+        vci2.image = img2;
+        VkImageView view2;
+        vkCreateImageView(dev, &vci2, nullptr, &view2);
+        VkFramebufferCreateInfo fci2 = fci;
+        fci2.pAttachments = &view2;
+        VkFramebuffer fb2;
+        vkCreateFramebuffer(dev, &fci2, nullptr, &fb2);
+
+        /* source texture = img, refilled with ff4080ff by a render-pass clear */
+        vkResetFences(dev, 1, &fence);
+        vkBeginCommandBuffer(cb, &bi);
+        vkCmdBeginRenderPass(cb, &rbi, VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdEndRenderPass(cb);
+        vkEndCommandBuffer(cb);
+        vkQueueSubmit(q, 1, &si, fence);
+        vkWaitForFences(dev, 1, &fence, VK_TRUE, 2000000000ull);
+        vkResetCommandBuffer(cb, 0);
+
+        VkSamplerCreateInfo smi = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+        smi.magFilter = smi.minFilter = VK_FILTER_NEAREST;
+        smi.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        smi.addressModeU = smi.addressModeV = smi.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        smi.maxLod = 0.0f;
+        VkSampler sampler;
+        vkCreateSampler(dev, &smi, nullptr, &sampler);
+
+        /* uniform buffer holding (0,1,0,1) */
+        VkBufferCreateInfo ubi = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+        ubi.size = 256;
+        ubi.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+        ubi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        VkBuffer ubuf;
+        vkCreateBuffer(dev, &ubi, nullptr, &ubuf);
+        VkMemoryRequirements umr;
+        vkGetBufferMemoryRequirements(dev, ubuf, &umr);
+        VkMemoryAllocateInfo umai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        umai.allocationSize = umr.size;
+        umai.memoryTypeIndex = selftest_pick_memory(pd, umr.memoryTypeBits);
+        VkDeviceMemory umem;
+        vkAllocateMemory(dev, &umai, nullptr, &umem);
+        vkBindBufferMemory(dev, ubuf, umem, 0);
+        volatile float *uf = nullptr;
+        vkMapMemory(dev, umem, 0, VK_WHOLE_SIZE, 0, (void **)&uf);
+        if (uf) { uf[0] = 0.0f; uf[1] = 1.0f; uf[2] = 0.0f; uf[3] = 1.0f; }
+
+        /* descriptor set layouts / pool / sets */
+        VkDescriptorSetLayoutBinding lb_tex = {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+        VkDescriptorSetLayoutBinding lb_ubo = {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+        VkDescriptorSetLayoutCreateInfo dli = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+        dli.bindingCount = 1;
+        VkDescriptorSetLayout dsl_tex, dsl_ubo;
+        dli.pBindings = &lb_tex;
+        vkCreateDescriptorSetLayout(dev, &dli, nullptr, &dsl_tex);
+        dli.pBindings = &lb_ubo;
+        vkCreateDescriptorSetLayout(dev, &dli, nullptr, &dsl_ubo);
+        VkDescriptorPoolSize dps[2] = {{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1}, {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}};
+        VkDescriptorPoolCreateInfo dpi = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+        dpi.maxSets = 2;
+        dpi.poolSizeCount = 2;
+        dpi.pPoolSizes = dps;
+        VkDescriptorPool dpool;
+        vkCreateDescriptorPool(dev, &dpi, nullptr, &dpool);
+        VkDescriptorSetLayout both[2] = {dsl_tex, dsl_ubo};
+        VkDescriptorSetAllocateInfo dai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        dai.descriptorPool = dpool;
+        dai.descriptorSetCount = 2;
+        dai.pSetLayouts = both;
+        VkDescriptorSet dsets[2];
+        vkAllocateDescriptorSets(dev, &dai, dsets);
+        VkDescriptorImageInfo dii = {sampler, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorBufferInfo dbi = {ubuf, 0, 16};
+        VkWriteDescriptorSet wr[2] = {};
+        wr[0].sType = wr[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        wr[0].dstSet = dsets[0];
+        wr[0].descriptorCount = 1;
+        wr[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        wr[0].pImageInfo = &dii;
+        wr[1].dstSet = dsets[1];
+        wr[1].descriptorCount = 1;
+        wr[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        wr[1].pBufferInfo = &dbi;
+        vkUpdateDescriptorSets(dev, 2, wr, 0, nullptr);
+
+        struct Variant {
+            const char *name;
+            const uint32_t *fs;
+            size_t fs_size;
+            int layout; /* 0 none, 1 tex, 2 ubo, 3 push */
+            uint32_t want;
+        } variants[] = {
+            {"const    ", spv_fs_const_frag, sizeof(spv_fs_const_frag), 0, 0xffffff00},
+            {"interpol ", spv_fs_uv_frag, sizeof(spv_fs_uv_frag), 0, 0xff000000},
+            {"push     ", spv_fs_push_frag, sizeof(spv_fs_push_frag), 3, 0xff4080ff},
+            {"ubo      ", spv_fs_ubo_frag, sizeof(spv_fs_ubo_frag), 2, 0xff00ff00},
+            {"texture  ", spv_fs_tex_frag, sizeof(spv_fs_tex_frag), 1, 0xff4080ff},
+        };
+        VkShaderModuleCreateInfo smci = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+        smci.codeSize = sizeof(spv_vs_vert);
+        smci.pCode = spv_vs_vert;
+        VkShaderModule vsm;
+        vkCreateShaderModule(dev, &smci, nullptr, &vsm);
+
+        for (auto &v : variants) {
+            VkPushConstantRange pcr = {VK_SHADER_STAGE_FRAGMENT_BIT, 0, 16};
+            VkPipelineLayoutCreateInfo pli = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+            VkDescriptorSetLayout use = v.layout == 1 ? dsl_tex : dsl_ubo;
+            if (v.layout == 1 || v.layout == 2) { pli.setLayoutCount = 1; pli.pSetLayouts = &use; }
+            if (v.layout == 3) { pli.pushConstantRangeCount = 1; pli.pPushConstantRanges = &pcr; }
+            VkPipelineLayout pl;
+            vkCreatePipelineLayout(dev, &pli, nullptr, &pl);
+            smci.codeSize = v.fs_size;
+            smci.pCode = v.fs;
+            VkShaderModule fsm;
+            vkCreateShaderModule(dev, &smci, nullptr, &fsm);
+            VkPipelineShaderStageCreateInfo stages[2] = {};
+            stages[0].sType = stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+            stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+            stages[0].module = vsm;
+            stages[0].pName = "main";
+            stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+            stages[1].module = fsm;
+            stages[1].pName = "main";
+            VkPipelineVertexInputStateCreateInfo vis = {VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+            VkPipelineInputAssemblyStateCreateInfo ias = {VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
+            ias.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+            VkPipelineViewportStateCreateInfo vps = {VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
+            vps.viewportCount = 1;
+            vps.scissorCount = 1;
+            VkPipelineRasterizationStateCreateInfo rs = {VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
+            rs.polygonMode = VK_POLYGON_MODE_FILL;
+            rs.cullMode = VK_CULL_MODE_NONE;
+            rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+            rs.lineWidth = 1.0f;
+            VkPipelineMultisampleStateCreateInfo ms = {VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
+            ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+            VkPipelineColorBlendAttachmentState cba = {};
+            cba.colorWriteMask = 0xf;
+            VkPipelineColorBlendStateCreateInfo cbs = {VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
+            cbs.attachmentCount = 1;
+            cbs.pAttachments = &cba;
+            VkDynamicState dyn[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+            VkPipelineDynamicStateCreateInfo dsi = {VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
+            dsi.dynamicStateCount = 2;
+            dsi.pDynamicStates = dyn;
+            VkGraphicsPipelineCreateInfo gpi = {VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+            gpi.stageCount = 2;
+            gpi.pStages = stages;
+            gpi.pVertexInputState = &vis;
+            gpi.pInputAssemblyState = &ias;
+            gpi.pViewportState = &vps;
+            gpi.pRasterizationState = &rs;
+            gpi.pMultisampleState = &ms;
+            gpi.pColorBlendState = &cbs;
+            gpi.pDynamicState = &dsi;
+            gpi.layout = pl;
+            gpi.renderPass = rp;
+            VkPipeline pipe = VK_NULL_HANDLE;
+            VkResult pr = vkCreateGraphicsPipelines(dev, VK_NULL_HANDLE, 1, &gpi, nullptr, &pipe);
+
+            if (px2) for (int i = 0; i < 4096; i += 1) px2[i] = 0xDEADBEEF;
+            VkRenderPassBeginInfo rbi2 = rbi;
+            rbi2.framebuffer = fb2;
+            vkResetFences(dev, 1, &fence);
+            vkBeginCommandBuffer(cb, &bi);
+            vkCmdBeginRenderPass(cb, &rbi2, VK_SUBPASS_CONTENTS_INLINE);
+            vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
+            VkViewport vp = {0.0f, 0.0f, 64.0f, 64.0f, 0.0f, 1.0f};
+            VkRect2D sc = {{0, 0}, {64, 64}};
+            vkCmdSetViewport(cb, 0, 1, &vp);
+            vkCmdSetScissor(cb, 0, 1, &sc);
+            if (v.layout == 1) vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pl, 0, 1, &dsets[0], 0, nullptr);
+            if (v.layout == 2) vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pl, 0, 1, &dsets[1], 0, nullptr);
+            if (v.layout == 3) {
+                float pc[4] = {1.0f, 0.5f, 0.25f, 1.0f};
+                vkCmdPushConstants(cb, pl, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 16, pc);
+            }
+            vkCmdDraw(cb, 3, 1, 0, 0);
+            vkCmdEndRenderPass(cb);
+            vkEndCommandBuffer(cb);
+            VkResult sr = vkQueueSubmit(q, 1, &si, fence);
+            VkResult wr2 = vkWaitForFences(dev, 1, &fence, VK_TRUE, 2000000000ull);
+            vkResetCommandBuffer(cb, 0);
+            pcps4_status_log("[selftest] D %s pipeline=%d submit=%d wait=%d px[0]=%08x px[7]=%08x px[63]=%08x px[2000]=%08x (want %08x%s)",
+                             v.name, (int)pr, (int)sr, (int)wr2, px2 ? px2[0] : 0, px2 ? px2[7] : 0, px2 ? px2[63] : 0,
+                             px2 ? px2[2000] : 0, v.want, v.layout == 0 && v.want == 0xff000000 ? ", red varies with x" : "");
+        }
+    }
     pcps4_status_log("[selftest] end");
 }
 

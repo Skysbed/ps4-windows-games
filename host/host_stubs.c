@@ -14,3 +14,4 @@ __attribute__((constructor)) static void host_init_stdout(void){ host_stdout_ali
 FILE *host_stdin_alias __asm__("_stdin");
 FILE *host_stderr_alias __asm__("_stderr");
 __attribute__((constructor)) static void host_init_std2(void){ host_stdin_alias = __stdinp; host_stderr_alias = __stderrp; }
+int pcps4_clear_variant;

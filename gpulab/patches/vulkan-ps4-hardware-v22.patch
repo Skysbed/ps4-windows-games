@@ -15,37 +15,125 @@ index 7634d6b..6461453 100644
      /* Push constant inline register mapping — extracted from
       * IMM_ALUFLOATCONST input usage slots emitted by psbc.
       * Each entry maps a push constant dword index to a user-data
+diff --git a/shaders/clear_push.frag b/shaders/clear_push.frag
+new file mode 100644
+index 0000000..2a54ed7
+--- /dev/null
++++ b/shaders/clear_push.frag
+@@ -0,0 +1,11 @@
++#version 450
++
++layout(location = 0) out vec4 frag_color;
++
++layout(push_constant) uniform ClearColor {
++    vec4 color;
++} pc;
++
++void main() {
++    frag_color = pc.color;
++}
+diff --git a/shaders/clear_push.frag.ps4.sb b/shaders/clear_push.frag.ps4.sb
+new file mode 100644
+index 0000000..b91c741
+Binary files /dev/null and b/shaders/clear_push.frag.ps4.sb differ
+diff --git a/shaders/clear_push.frag.spv b/shaders/clear_push.frag.spv
+new file mode 100644
+index 0000000..d6c1ddf
+Binary files /dev/null and b/shaders/clear_push.frag.spv differ
+diff --git a/shaders/clear_push_ps_binary.h b/shaders/clear_push_ps_binary.h
+new file mode 100644
+index 0000000..4f6b4aa
+--- /dev/null
++++ b/shaders/clear_push_ps_binary.h
+@@ -0,0 +1,18 @@
++/* Auto-generated from clear_push.frag (push-constant clear colour, no UBO) */
++static const unsigned char g_clear_ps_binary[216] = {
++    0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00,
++    0x98, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++    0x00, 0x00, 0x00, 0x00, 0x53, 0x68, 0x64, 0x72, 0x07, 0x00, 0x02, 0x00, 0x02, 0x0f, 0x00, 0x01,
++    0x00, 0x00, 0x00, 0x00, 0x4c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3c, 0x00, 0x00, 0x00,
++    0xff, 0xff, 0xff, 0xff, 0x40, 0x00, 0x2c, 0x00, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++    0x04, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++    0x00, 0x00, 0x00, 0x01, 0x10, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++    0x03, 0x02, 0x00, 0x7e, 0x05, 0x02, 0x02, 0x7e, 0x02, 0x00, 0x00, 0x5e, 0x04, 0x02, 0x02, 0x5e,
++    0x0f, 0x1c, 0x00, 0xf8, 0x00, 0x01, 0x80, 0x80, 0x00, 0x00, 0x81, 0xbf, 0x00, 0x00, 0x9f, 0xbf,
++    0x00, 0x00, 0x9f, 0xbf, 0x00, 0x00, 0x9f, 0xbf, 0x00, 0x00, 0x9f, 0xbf, 0x00, 0x00, 0x9f, 0xbf,
++    0x4f, 0x72, 0x62, 0x53, 0x68, 0x64, 0x72, 0x07, 0x01, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++    0x98, 0x9e, 0xd7, 0x66, 0x45, 0xf3, 0x68, 0x94, 0xa6, 0x4b, 0x03, 0xeb, 0x00, 0x00, 0x00, 0x00,
++    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++};
++static const unsigned int g_clear_ps_binary_size = 216;
 diff --git a/src/vk_ps4_command.c b/src/vk_ps4_command.c
-index 168c1f3..ffa40f1 100644
+index 168c1f3..18d55f4 100644
 --- a/src/vk_ps4_command.c
 +++ b/src/vk_ps4_command.c
-@@ -19,6 +19,10 @@
+@@ -19,6 +19,12 @@
  #include <pm4/sid.h>
  #include <pm4/amdgfxregs.h>
  
 +int pcps4_clear_variant;
++extern uint8_t pcps4_clear_push_reg[4];
++extern int pcps4_clear_push_ready;
 +static unsigned pcps4_cmdlog_n;
 +#define PCPS4_CMDLOG(n) do { if (pcps4_cmdlog_n < 200) { pcps4_cmdlog_n++; vk_ps4_log("CMD %s", n); } } while (0)
 +
  #define VK_PS4_CMD_BUFFER_SIZE (256 * 1024)  /* 256KB default PM4 buffer */
  
  /* Forward declaration from vk_ps4_pipeline.c */
-@@ -358,7 +362,13 @@ static void vk_ps4_clear_color_draw(VkPs4CommandBuffer *cmd,
+@@ -356,31 +362,29 @@ static void vk_ps4_clear_color_draw(VkPs4CommandBuffer *cmd,
+         return;
+     }
  
-     /* Allocate 16 bytes inside the command buffer for the clear color.
-      * This is GPU-visible memory that the shader can read via the V#. */
+-    /* Allocate 16 bytes inside the command buffer for the clear color.
+-     * This is GPU-visible memory that the shader can read via the V#. */
 -    void *color_buf = sceGnmCmdAllocInside(&cmd->gnm_cmd, 16, 4);
-+    void *color_buf;
-+    if (pcps4_clear_variant == 1) {
-+        /* PcPs4 experiment: constants in driver-allocated GPU-visible memory */
-+        color_buf = vk_ps4_alloc(&dev->allocator, 16, 16);
+-    if (!color_buf) {
+-        /* AllocInside failed — fall back to FillMemory */
++    /* Bind the RT being cleared at slot 0. The clear PS outputs to MRT0, so the target
++     * must be at slot 0 regardless of which slot it was originally bound to; the
++     * original bindings are restored by a later vk_ps4_bind_subpass_targets. */
++    sceGnmDrawCmdSetRenderTarget(&cmd->gnm_cmd, 0, &img->gnm_rt);
++
++    /* PcPs4: the colour travels as inline push constants in user-data registers. A
++     * constant-buffer version of this shader read zeros (the compiler folded the
++     * descriptor away), and descriptors were never needed for a flat colour. */
++    if (pcps4_clear_push_ready) {
++        GnmCommandBuffer *gc = &cmd->gnm_cmd;
++        for (uint32_t k = 0; k < 4; k++) {
++            if ((uint32_t)(gc->endptr - gc->cmdptr) < 3 && gc->callback.func)
++                gc->callback.func(gc, 3, gc->callback.userdata);
++            if ((uint32_t)(gc->endptr - gc->cmdptr) < 3) break;
++            gc->cmdptr[0] = PKT3(PKT3_SET_SH_REG, 1, 0);
++            gc->cmdptr[1] = (R_00B030_SPI_SHADER_USER_DATA_PS_0 + pcps4_clear_push_reg[k] * 4 - SI_SH_REG_OFFSET) >> 2;
++            gc->cmdptr[2] = cc->uint32[k];
++            gc->cmdptr += 3;
++        }
 +    } else {
-+        color_buf = sceGnmCmdAllocInside(&cmd->gnm_cmd, 16, 4);
-+    }
-     if (!color_buf) {
-         /* AllocInside failed — fall back to FillMemory */
          vk_ps4_clear_color_fillmem(&cmd->gnm_cmd, img, cc);
-@@ -397,6 +407,36 @@ static void vk_ps4_clear_color_draw(VkPs4CommandBuffer *cmd,
+         return;
+     }
+-    memcpy(color_buf, cc->float32, 16);
+-
+-    /* Build a const buffer V# pointing to the clear color.
+-     * Use sceGnmCreateConstBuffer which sets stride=16, numrecords=1,
+-     * format=R32G32B32A32_FLOAT — matching what the shader compiler
+-     * generates for a vec4 UBO load (s_buffer_load_dwordx4). */
+-    GnmBuffer vsharp = sceGnmCreateConstBuffer(color_buf, 16);
+-
+-    /* Set the V# at PS user data register 0 (IMM_CONSTBUFFER slot) */
+-    sceGnmDrawCmdSetVsharpUserData(&cmd->gnm_cmd, GNM_STAGE_PS, 0, &vsharp);
+-
+-    /* Bind the RT being cleared at slot 0.  The clear PS outputs to
+-     * MRT0, so the target must be at slot 0 regardless of which slot
+-     * it was originally bound to by vk_ps4_bind_subpass_targets.
+-     * The original bindings are restored after all clears by a
+-     * re-call to vk_ps4_bind_subpass_targets. */
+-    sceGnmDrawCmdSetRenderTarget(&cmd->gnm_cmd, 0, &img->gnm_rt);
+ 
+     /* Disable blending for RT0 so the clear color overwrites the RT
+      * instead of being blended with existing contents.  The previous
+@@ -397,6 +401,36 @@ static void vk_ps4_clear_color_draw(VkPs4CommandBuffer *cmd,
          img->create_info.extent.width,
          img->create_info.extent.height);
  
@@ -82,7 +170,7 @@ index 168c1f3..ffa40f1 100644
      /* Bind the clear pixel shader and fullscreen VS */
      sceGnmDrawCmdSetPsShader(&cmd->gnm_cmd, &dev->clear_ps_regs);
      sceGnmDrawCmdSetEmbeddedVsShader(&cmd->gnm_cmd, GNM_EMBEDDED_VSH_FULLSCREEN, 0);
-@@ -586,6 +626,9 @@ static void vk_ps4_rebind_pipeline_state(VkPs4CommandBuffer *cmd) {
+@@ -586,6 +620,9 @@ static void vk_ps4_rebind_pipeline_state(VkPs4CommandBuffer *cmd) {
      /* Re-emit PS if present */
      if (pipe->has_ps) {
          sceGnmDrawCmdSetPsShader(&cmd->gnm_cmd, &pipe->ps_regs);
@@ -92,7 +180,7 @@ index 168c1f3..ffa40f1 100644
      }
  
      /* Re-emit fetch shader */
-@@ -1032,6 +1075,7 @@ vk_ps4_TrimCommandPool(VkDevice device, VkCommandPool commandPool, VkCommandPool
+@@ -1032,6 +1069,7 @@ vk_ps4_TrimCommandPool(VkDevice device, VkCommandPool commandPool, VkCommandPool
  
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdBindPipeline(VkCommandBuffer commandBuffer, VkPipelineBindPoint pipelineBindPoint, VkPipeline pipeline) {
@@ -100,7 +188,7 @@ index 168c1f3..ffa40f1 100644
      if (!commandBuffer || !pipeline) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      VkPs4Pipeline *pipe = (VkPs4Pipeline *)pipeline;
-@@ -1098,6 +1142,9 @@ vk_ps4_CmdBindPipeline(VkCommandBuffer commandBuffer, VkPipelineBindPoint pipeli
+@@ -1098,6 +1136,9 @@ vk_ps4_CmdBindPipeline(VkCommandBuffer commandBuffer, VkPipelineBindPoint pipeli
          /* Set pixel shader only if the pipeline has one */
          if (pipe->has_ps) {
              sceGnmDrawCmdSetPsShader(&cmd->gnm_cmd, &pipe->ps_regs);
@@ -110,7 +198,7 @@ index 168c1f3..ffa40f1 100644
          }
  
          /* Bind fetch shader if the pipeline has one */
-@@ -1369,6 +1416,7 @@ vk_ps4_CmdSetLineWidth(VkCommandBuffer commandBuffer, float lineWidth) {
+@@ -1369,6 +1410,7 @@ vk_ps4_CmdSetLineWidth(VkCommandBuffer commandBuffer, float lineWidth) {
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdBindVertexBuffers(VkCommandBuffer commandBuffer, uint32_t firstBinding,
                               uint32_t bindingCount, const VkBuffer *pBuffers, const VkDeviceSize *pOffsets) {
@@ -118,7 +206,7 @@ index 168c1f3..ffa40f1 100644
      if (!commandBuffer || !pBuffers) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
  
-@@ -1426,6 +1474,7 @@ vk_ps4_CmdBindVertexBuffers(VkCommandBuffer commandBuffer, uint32_t firstBinding
+@@ -1426,6 +1468,7 @@ vk_ps4_CmdBindVertexBuffers(VkCommandBuffer commandBuffer, uint32_t firstBinding
  
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdBindIndexBuffer(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDeviceSize offset, VkIndexType indexType) {
@@ -126,7 +214,7 @@ index 168c1f3..ffa40f1 100644
      if (!commandBuffer) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      cmd->index_buffer.buffer = buffer;
-@@ -1451,6 +1500,7 @@ vk_ps4_CmdBindIndexBuffer(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDevi
+@@ -1451,6 +1494,7 @@ vk_ps4_CmdBindIndexBuffer(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDevi
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdDraw(VkCommandBuffer commandBuffer, uint32_t vertexCount, uint32_t instanceCount,
                 uint32_t firstVertex, uint32_t firstInstance) {
@@ -134,7 +222,7 @@ index 168c1f3..ffa40f1 100644
      if (!commandBuffer) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
  
-@@ -1525,6 +1575,7 @@ vk_ps4_CmdDraw(VkCommandBuffer commandBuffer, uint32_t vertexCount, uint32_t ins
+@@ -1525,6 +1569,7 @@ vk_ps4_CmdDraw(VkCommandBuffer commandBuffer, uint32_t vertexCount, uint32_t ins
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdDrawIndexed(VkCommandBuffer commandBuffer, uint32_t indexCount, uint32_t instanceCount,
                        uint32_t firstIndex, int32_t vertexOffset, uint32_t firstInstance) {
@@ -142,7 +230,7 @@ index 168c1f3..ffa40f1 100644
      if (!commandBuffer) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
  
-@@ -1744,6 +1795,7 @@ vk_ps4_CmdDispatchIndirect(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDev
+@@ -1744,6 +1789,7 @@ vk_ps4_CmdDispatchIndirect(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDev
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdCopyBuffer(VkCommandBuffer commandBuffer, VkBuffer srcBuffer, VkBuffer dstBuffer,
                       uint32_t regionCount, const VkBufferCopy *pRegions) {
@@ -150,7 +238,7 @@ index 168c1f3..ffa40f1 100644
      if (!commandBuffer || !pRegions) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      VkPs4Buffer *src = (VkPs4Buffer *)srcBuffer;
-@@ -1774,6 +1826,7 @@ vk_ps4_CmdCopyBuffer(VkCommandBuffer commandBuffer, VkBuffer srcBuffer, VkBuffer
+@@ -1774,6 +1820,7 @@ vk_ps4_CmdCopyBuffer(VkCommandBuffer commandBuffer, VkBuffer srcBuffer, VkBuffer
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdFillBuffer(VkCommandBuffer commandBuffer, VkBuffer dstBuffer,
                       VkDeviceSize dstOffset, VkDeviceSize fillSize, uint32_t data) {
@@ -158,7 +246,7 @@ index 168c1f3..ffa40f1 100644
      if (!commandBuffer || !dstBuffer) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      VkPs4Buffer *dst = (VkPs4Buffer *)dstBuffer;
-@@ -1813,6 +1866,7 @@ vk_ps4_CmdFillBuffer(VkCommandBuffer commandBuffer, VkBuffer dstBuffer,
+@@ -1813,6 +1860,7 @@ vk_ps4_CmdFillBuffer(VkCommandBuffer commandBuffer, VkBuffer dstBuffer,
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdUpdateBuffer(VkCommandBuffer commandBuffer, VkBuffer dstBuffer,
                         VkDeviceSize dstOffset, VkDeviceSize dataSize, const void *pData) {
@@ -166,7 +254,7 @@ index 168c1f3..ffa40f1 100644
      if (!commandBuffer || !dstBuffer || !pData) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      VkPs4Buffer *dst = (VkPs4Buffer *)dstBuffer;
-@@ -1869,6 +1923,7 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -1869,6 +1917,7 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdCopyImage(VkCommandBuffer commandBuffer, VkImage srcImage, VkImageLayout srcImageLayout,
                      VkImage dstImage, VkImageLayout dstImageLayout,
                      uint32_t regionCount, const VkImageCopy *pRegions) {
@@ -174,7 +262,7 @@ index 168c1f3..ffa40f1 100644
      if (!commandBuffer || !pRegions) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      VkPs4Image *src = (VkPs4Image *)srcImage;
-@@ -1968,6 +2023,7 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -1968,6 +2017,7 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdBlitImage(VkCommandBuffer commandBuffer, VkImage srcImage, VkImageLayout srcImageLayout,
                      VkImage dstImage, VkImageLayout dstImageLayout,
                      uint32_t regionCount, const VkImageBlit *pRegions, VkFilter filter) {
@@ -182,7 +270,7 @@ index 168c1f3..ffa40f1 100644
      /* BlitImage with scaling/format conversion requires a shader-based blit.
       * For MVP, fall back to CmdCopyImage if regions are 1:1.
       * Full blit support is Phase 3. */
-@@ -2039,6 +2095,7 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -2039,6 +2089,7 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdCopyBufferToImage(VkCommandBuffer commandBuffer, VkBuffer srcBuffer, VkImage dstImage,
                              VkImageLayout dstImageLayout, uint32_t regionCount,
                              const VkBufferImageCopy *pRegions) {
@@ -190,7 +278,7 @@ index 168c1f3..ffa40f1 100644
      if (!commandBuffer || !pRegions) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      VkPs4Buffer *src = (VkPs4Buffer *)srcBuffer;
-@@ -2200,6 +2257,7 @@ static bool vk_ps4_attachment_used_before_subpass(VkPs4RenderPass *rp,
+@@ -2200,6 +2251,7 @@ static bool vk_ps4_attachment_used_before_subpass(VkPs4RenderPass *rp,
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdBeginRenderPass(VkCommandBuffer commandBuffer, const VkRenderPassBeginInfo *pBeginInfo,
                            VkSubpassContents contents) {
@@ -198,7 +286,7 @@ index 168c1f3..ffa40f1 100644
      (void)contents;
      if (!commandBuffer || !pBeginInfo) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
-@@ -2338,6 +2396,7 @@ vk_ps4_CmdBeginRenderPass(VkCommandBuffer commandBuffer, const VkRenderPassBegin
+@@ -2338,6 +2390,7 @@ vk_ps4_CmdBeginRenderPass(VkCommandBuffer commandBuffer, const VkRenderPassBegin
  
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdEndRenderPass(VkCommandBuffer commandBuffer) {
@@ -206,7 +294,7 @@ index 168c1f3..ffa40f1 100644
      if (!commandBuffer) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
  
-@@ -2513,6 +2572,7 @@ vk_ps4_CmdPipelineBarrier(VkCommandBuffer commandBuffer, VkPipelineStageFlags sr
+@@ -2513,6 +2566,7 @@ vk_ps4_CmdPipelineBarrier(VkCommandBuffer commandBuffer, VkPipelineStageFlags sr
                            uint32_t memoryBarrierCount, const VkMemoryBarrier *pMemoryBarriers,
                            uint32_t bufferMemoryBarrierCount, const VkBufferMemoryBarrier *pBufferMemoryBarriers,
                            uint32_t imageMemoryBarrierCount, const VkImageMemoryBarrier *pImageMemoryBarriers) {
@@ -214,7 +302,7 @@ index 168c1f3..ffa40f1 100644
      if (!commandBuffer) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
  
-@@ -2609,11 +2669,12 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -2609,11 +2663,12 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdClearColorImage(VkCommandBuffer commandBuffer, VkImage image, VkImageLayout imageLayout,
                            const VkClearColorValue *pColor, uint32_t rangeCount,
                            const VkImageSubresourceRange *pRanges) {
@@ -228,7 +316,7 @@ index 168c1f3..ffa40f1 100644
  
      /* Tiled render targets require a draw-based clear because FillMemory
       * writes linearly and doesn't respect the tiled memory layout.
-@@ -2777,6 +2838,7 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -2777,6 +2832,7 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdClearAttachments(VkCommandBuffer commandBuffer, uint32_t attachmentCount,
                             const VkClearAttachment *pAttachments, uint32_t rectCount,
                             const VkClearRect *pRects) {
@@ -236,7 +324,7 @@ index 168c1f3..ffa40f1 100644
      if (!commandBuffer || !pAttachments) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
  
-@@ -2895,6 +2957,7 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -2895,6 +2951,7 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdPushConstants(VkCommandBuffer commandBuffer, VkPipelineLayout layout,
                          VkShaderStageFlags stageFlags, uint32_t offset, uint32_t size,
                          const void *pValues) {
@@ -245,10 +333,53 @@ index 168c1f3..ffa40f1 100644
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      VkPs4Pipeline *pipe = cmd->current_pipeline;
 diff --git a/src/vk_ps4_device.c b/src/vk_ps4_device.c
-index 9d8a83f..2a50d20 100644
+index 9d8a83f..990b2d6 100644
 --- a/src/vk_ps4_device.c
 +++ b/src/vk_ps4_device.c
-@@ -129,9 +129,17 @@ static VkResult vk_ps4_device_init_gnm(VkPs4Device *dev) {
+@@ -30,6 +30,9 @@
+ /* Submit the GNM default-hardware-state preamble and mark the device as
+  * GNM-initialized.  Returns VK_SUCCESS on success, an error otherwise.
+  * On failure the caller is responsible for tearing down partial state. */
++uint8_t pcps4_clear_push_reg[4];
++int pcps4_clear_push_ready;
++
+ static VkResult vk_ps4_device_init_gnm(VkPs4Device *dev) {
+     const uint64_t cmd_bytes = (uint64_t)VK_PS4_GNM_INIT_CMD_DWORDS * sizeof(uint32_t);
+     const uint64_t alignment = 64 * 1024; /* 64KB Garlic alignment */
+@@ -111,7 +114,7 @@ static VkResult vk_ps4_device_init_gnm(VkPs4Device *dev) {
+      * and parse it with sceGnmShaderBinaryGetMetadata to extract the PS
+      * stage registers and shader code address. */
+     {
+-#include "../shaders/clear_ps_binary.h"
++#include "../shaders/clear_push_ps_binary.h"
+         dev->clear_ps_binary = malloc(g_clear_ps_binary_size);
+         if (dev->clear_ps_binary) {
+             memcpy(dev->clear_ps_binary, g_clear_ps_binary, g_clear_ps_binary_size);
+@@ -123,15 +126,41 @@ static VkResult vk_ps4_device_init_gnm(VkPs4Device *dev) {
+             if (gnm_err == GNM_ERROR_OK && meta.stage) {
+                 const GnmPsShader *ps = (const GnmPsShader *)meta.stage;
+                 dev->clear_ps_regs = ps->registers;
++                /* The clear colour arrives as inline push constants: remember which
++                 * user-data register carries each of the four dwords. */
++                pcps4_clear_push_ready = 0;
++                {
++                    uint32_t found = 0;
++                    for (uint32_t k = 0; k < meta.numinputusageslots; k++) {
++                        const GnmInputUsageSlot *sl = &meta.inputusageslots[k];
++                        if (sl->usagetype == GNM_SHINPUTUSAGE_IMM_ALUFLOATCONST && sl->apislot < 4) {
++                            pcps4_clear_push_reg[sl->apislot] = sl->startregister;
++                            found |= 1u << sl->apislot;
++                        }
++                    }
++                    pcps4_clear_push_ready = (found == 0xF);
++                    vk_ps4_log("clear PS: push regs %u %u %u %u ready=%d",
++                               pcps4_clear_push_reg[0], pcps4_clear_push_reg[1],
++                               pcps4_clear_push_reg[2], pcps4_clear_push_reg[3],
++                               (int)pcps4_clear_push_ready);
++                }
+                 /* The binary's spishaderpgmlops is an offset from the
+                  * start of the GnmPsShader, not a GPU address.  We must
+                  * call sceGnmPsRegsSetAddress to patch it to the actual
                   * address of the shader code in the malloc'd buffer.
                   * meta.shadercode points into dev->clear_ps_binary. */
                  if (meta.shadercode) {

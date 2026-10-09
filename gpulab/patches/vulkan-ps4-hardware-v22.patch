@@ -167,6 +167,49 @@ index 24ef0d4..e813f6c 100644
      /* Recover the original malloc pointer stored before the aligned address. */
      free(((void **)ptr)[-1]);
  #else
+diff --git a/src/vk_ps4_image.c b/src/vk_ps4_image.c
+index 6545469..5efa78b 100644
+--- a/src/vk_ps4_image.c
++++ b/src/vk_ps4_image.c
+@@ -208,6 +208,9 @@ vk_ps4_GetImageMemoryRequirements(VkDevice device, VkImage image, VkMemoryRequir
+                                           (1u << VK_PS4_MEMORY_TYPE_ONION);
+ }
+ 
++VkPs4Image *pcps4_probe_images[16];
++uint32_t pcps4_probe_image_count;
++
+ VKAPI_ATTR VkResult VKAPI_CALL
+ vk_ps4_BindImageMemory(VkDevice device, VkImage image, VkDeviceMemory memory, VkDeviceSize offset) {
+     if (!device || !image || !memory) {
+@@ -226,6 +229,16 @@ vk_ps4_BindImageMemory(VkDevice device, VkImage image, VkDeviceMemory memory, Vk
+ 
+     void *gpu_addr = (char *)mem->gnm_mem.mapped + offset;
+ 
++    {   /* PcPs4 diagnostic: remember bound images so present can probe their contents */
++        extern VkPs4Image *pcps4_probe_images[16];
++        extern uint32_t pcps4_probe_image_count;
++        if (pcps4_probe_image_count < 16 && !img->is_swapchain_image)
++            pcps4_probe_images[pcps4_probe_image_count++] = img;
++        vk_ps4_log("BindImageMemory: img=%p %ux%u fmt=%d usage=0x%x rt=%d addr=%p",
++                   (void *)img, img->create_info.extent.width, img->create_info.extent.height,
++                   (int)img->create_info.format, (unsigned)img->create_info.usage,
++                   (int)img->is_render_target, gpu_addr);
++    }
+     if (img->is_render_target) {
+         sceGnmRtSetBaseAddr(&img->gnm_rt, gpu_addr);
+     } else {
+@@ -290,6 +303,11 @@ vk_ps4_CreateImageView(VkDevice device, const VkImageViewCreateInfo *pCreateInfo
+         }
+     }
+ 
++    vk_ps4_log("CreateImageView: img=%p rt=%d base=%p fmt=%d", (void *)view->image,
++               (int)view->image->is_render_target,
++               view->image->is_render_target ? sceGnmRtGetBaseAddr(&view->image->gnm_rt)
++                                             : sceGnmTexGetBaseAddress(&view->image->gnm_texture),
++               (int)pCreateInfo->format);
+     *pImageView = (VkImageView)view;
+     return VK_SUCCESS;
+ }
 diff --git a/src/vk_ps4_pipeline.c b/src/vk_ps4_pipeline.c
 index b621e66..cba9861 100644
 --- a/src/vk_ps4_pipeline.c
@@ -354,7 +397,7 @@ index 683667b..9ae954a 100644
          if (result == 0) {
              /* Poll until the GPU writes the label. */
 diff --git a/src/vk_ps4_swapchain.c b/src/vk_ps4_swapchain.c
-index bc36c63..184417c 100644
+index bc36c63..0bfad35 100644
 --- a/src/vk_ps4_swapchain.c
 +++ b/src/vk_ps4_swapchain.c
 @@ -11,6 +11,12 @@
@@ -370,7 +413,7 @@ index bc36c63..184417c 100644
  VKAPI_ATTR VkResult VKAPI_CALL
  vk_ps4_CreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR *pCreateInfo,
                            const VkAllocationCallbacks *pAllocator, VkSwapchainKHR *pSwapchain) {
-@@ -342,12 +348,29 @@ vk_ps4_QueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *pPresentInfo) {
+@@ -342,12 +348,42 @@ vk_ps4_QueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *pPresentInfo) {
          if (image_index < sc->image_count) {
              vk_ps4_log("QueuePresent: flip img=%u frame=%lld",
                         image_index, (long long)sc->video_out.frame);
@@ -394,6 +437,19 @@ index bc36c63..184417c 100644
 +                    if (px)
 +                        vk_ps4_log("QueuePresent: scanout img=%u px[0]=%08x px[1]=%08x px[64]=%08x px[mid]=%08x",
 +                                   image_index, px[0], px[1], px[64], px[(1920u * 540u) / 2]);
++                }
++                if (probe_n < 8 || (probe_n % 60) == 0) {
++                    extern VkPs4Image *pcps4_probe_images[16];
++                    extern uint32_t pcps4_probe_image_count;
++                    for (uint32_t k = 0; k < pcps4_probe_image_count; k++) {
++                        VkPs4Image *im = pcps4_probe_images[k];
++                        const volatile uint32_t *q = im->is_render_target ? (const volatile uint32_t *)sceGnmRtGetBaseAddr(&im->gnm_rt)
++                                                                           : (const volatile uint32_t *)sceGnmTexGetBaseAddress(&im->gnm_texture);
++                        if (q && im->create_info.extent.width >= 64)
++                            vk_ps4_log("probe img=%p %ux%u fmt=%d rt=%d px[0]=%08x px[1]=%08x px[512]=%08x",
++                                       (void *)im, im->create_info.extent.width, im->create_info.extent.height,
++                                       (int)im->create_info.format, (int)im->is_render_target, q[0], q[1], q[512]);
++                    }
 +                }
 +                probe_n++;
 +            }

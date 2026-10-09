@@ -333,7 +333,7 @@ index 168c1f3..18d55f4 100644
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      VkPs4Pipeline *pipe = cmd->current_pipeline;
 diff --git a/src/vk_ps4_device.c b/src/vk_ps4_device.c
-index 9d8a83f..990b2d6 100644
+index 9d8a83f..2e896bf 100644
 --- a/src/vk_ps4_device.c
 +++ b/src/vk_ps4_device.c
 @@ -30,6 +30,9 @@
@@ -355,7 +355,7 @@ index 9d8a83f..990b2d6 100644
          dev->clear_ps_binary = malloc(g_clear_ps_binary_size);
          if (dev->clear_ps_binary) {
              memcpy(dev->clear_ps_binary, g_clear_ps_binary, g_clear_ps_binary_size);
-@@ -123,15 +126,41 @@ static VkResult vk_ps4_device_init_gnm(VkPs4Device *dev) {
+@@ -123,15 +126,47 @@ static VkResult vk_ps4_device_init_gnm(VkPs4Device *dev) {
              if (gnm_err == GNM_ERROR_OK && meta.stage) {
                  const GnmPsShader *ps = (const GnmPsShader *)meta.stage;
                  dev->clear_ps_regs = ps->registers;
@@ -370,6 +370,12 @@ index 9d8a83f..990b2d6 100644
 +                            pcps4_clear_push_reg[sl->apislot] = sl->startregister;
 +                            found |= 1u << sl->apislot;
 +                        }
++                    }
++                    if (found != 0xF) {
++                        /* The offline compile records no push-constant slots; the shader reads the
++                         * colour from user SGPRs s2..s5 (s0:s1 hold the unused table pointer). */
++                        for (uint32_t k = 0; k < 4; k++) pcps4_clear_push_reg[k] = (uint8_t)(2 + k);
++                        found = 0xF;
 +                    }
 +                    pcps4_clear_push_ready = (found == 0xF);
 +                    vk_ps4_log("clear PS: push regs %u %u %u %u ready=%d",

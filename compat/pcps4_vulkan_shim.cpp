@@ -234,6 +234,8 @@ static MSA VkResult shim_vkEnumerateDeviceExtensionProperties(VkPhysicalDevice d
     return m < n ? VK_INCOMPLETE : VK_SUCCESS;
 }
 
+static void selftest_run(VkPhysicalDevice pd, VkDevice dev);
+
 static MSA VkResult shim_vkCreateDevice(VkPhysicalDevice d, const VkDeviceCreateInfo *ci,
                                         const VkAllocationCallbacks *alloc, VkDevice *out) {
     if (!ci) return VK_ERROR_INITIALIZATION_FAILED;
@@ -275,8 +277,192 @@ static MSA VkResult shim_vkCreateDevice(VkPhysicalDevice d, const VkDeviceCreate
     (void)masked2;
     VkResult r = vkCreateDevice(d, &copy, alloc, out);
     pcps4_status_log("[vk] vkCreateDevice -> %d", (int)r);
+    if (r == VK_SUCCESS) selftest_run(d, *out);
     free(names);
     return r;
+}
+
+/* ------------------------------------------------------------------------ */
+/* hardware self-test                                                        */
+/* ------------------------------------------------------------------------ */
+
+/* Runs once after the first device is created and reports what the GPU really did, using
+ * the driver's own Vulkan entry points: a render-pass clear of a small colour target,
+ * a buffer fill, and a draw-free image clear, each read back through the CPU. */
+static uint32_t selftest_pick_memory(VkPhysicalDevice pd, uint32_t bits) {
+    VkPhysicalDeviceMemoryProperties mp;
+    vkGetPhysicalDeviceMemoryProperties(pd, &mp);
+    for (uint32_t i = 0; i < mp.memoryTypeCount; i += 1) {
+        if (!(bits & (1u << i))) continue;
+        const VkMemoryPropertyFlags want = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+        if ((mp.memoryTypes[i].propertyFlags & want) == want) return i;
+    }
+    return 0;
+}
+
+static void selftest_run(VkPhysicalDevice pd, VkDevice dev) {
+    static int done;
+    if (done) return;
+    done = 1;
+    pcps4_status_log("[selftest] begin");
+    VkQueue q = VK_NULL_HANDLE;
+    vkGetDeviceQueue(dev, 0, 0, &q);
+
+    VkCommandPoolCreateInfo pci = {VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+    pci.queueFamilyIndex = 0;
+    pci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    VkCommandPool pool;
+    if (vkCreateCommandPool(dev, &pci, nullptr, &pool) != VK_SUCCESS) { pcps4_status_log("[selftest] pool failed"); return; }
+    VkCommandBufferAllocateInfo cai = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    cai.commandPool = pool;
+    cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cai.commandBufferCount = 1;
+    VkCommandBuffer cb;
+    vkAllocateCommandBuffers(dev, &cai, &cb);
+
+    /* target image */
+    VkImageCreateInfo ici = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    ici.imageType = VK_IMAGE_TYPE_2D;
+    ici.format = VK_FORMAT_R8G8B8A8_UNORM;
+    ici.extent = {64, 64, 1};
+    ici.mipLevels = 1;
+    ici.arrayLayers = 1;
+    ici.samples = VK_SAMPLE_COUNT_1_BIT;
+    ici.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ici.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkImage img;
+    if (vkCreateImage(dev, &ici, nullptr, &img) != VK_SUCCESS) { pcps4_status_log("[selftest] image failed"); return; }
+    VkMemoryRequirements mr;
+    vkGetImageMemoryRequirements(dev, img, &mr);
+    VkMemoryAllocateInfo mai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    mai.allocationSize = mr.size;
+    mai.memoryTypeIndex = selftest_pick_memory(pd, mr.memoryTypeBits);
+    VkDeviceMemory mem;
+    if (vkAllocateMemory(dev, &mai, nullptr, &mem) != VK_SUCCESS) { pcps4_status_log("[selftest] alloc failed"); return; }
+    vkBindImageMemory(dev, img, mem, 0);
+    volatile uint32_t *px = nullptr;
+    vkMapMemory(dev, mem, 0, VK_WHOLE_SIZE, 0, (void **)&px);
+    pcps4_status_log("[selftest] image 64x64 size=%llu mapped=%p", (unsigned long long)mr.size, (void *)px);
+    if (px) for (int i = 0; i < 64; i += 1) px[i] = 0xDEADBEEF;
+
+    VkImageViewCreateInfo vci = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    vci.image = img;
+    vci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vci.format = ici.format;
+    vci.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    VkImageView view;
+    vkCreateImageView(dev, &vci, nullptr, &view);
+
+    VkAttachmentDescription att = {};
+    att.format = ici.format;
+    att.samples = VK_SAMPLE_COUNT_1_BIT;
+    att.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    att.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    att.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    att.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    att.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    att.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    VkAttachmentReference ref = {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    VkSubpassDescription sp = {};
+    sp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    sp.colorAttachmentCount = 1;
+    sp.pColorAttachments = &ref;
+    VkRenderPassCreateInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+    rpi.attachmentCount = 1;
+    rpi.pAttachments = &att;
+    rpi.subpassCount = 1;
+    rpi.pSubpasses = &sp;
+    VkRenderPass rp;
+    vkCreateRenderPass(dev, &rpi, nullptr, &rp);
+    VkFramebufferCreateInfo fci = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+    fci.renderPass = rp;
+    fci.attachmentCount = 1;
+    fci.pAttachments = &view;
+    fci.width = 64;
+    fci.height = 64;
+    fci.layers = 1;
+    VkFramebuffer fb;
+    vkCreateFramebuffer(dev, &fci, nullptr, &fb);
+
+    VkFenceCreateInfo fi = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    VkFence fence;
+    vkCreateFence(dev, &fi, nullptr, &fence);
+
+    /* A: render-pass clear to (1.0, 0.5, 0.25, 1.0) = 0xff4080ff */
+    VkCommandBufferBeginInfo bi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    vkBeginCommandBuffer(cb, &bi);
+    VkClearValue cv;
+    cv.color = {{1.0f, 0.5f, 0.25f, 1.0f}};
+    VkRenderPassBeginInfo rbi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+    rbi.renderPass = rp;
+    rbi.framebuffer = fb;
+    rbi.renderArea = {{0, 0}, {64, 64}};
+    rbi.clearValueCount = 1;
+    rbi.pClearValues = &cv;
+    vkCmdBeginRenderPass(cb, &rbi, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdEndRenderPass(cb);
+    vkEndCommandBuffer(cb);
+    VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &cb;
+    VkResult r = vkQueueSubmit(q, 1, &si, fence);
+    VkResult w = vkWaitForFences(dev, 1, &fence, VK_TRUE, 2000000000ull);
+    pcps4_status_log("[selftest] A render-pass clear: submit=%d wait=%d px[0]=%08x px[1]=%08x px[63]=%08x (want ff4080ff)",
+                     (int)r, (int)w, px ? px[0] : 0, px ? px[1] : 0, px ? px[63] : 0);
+
+    /* B: buffer fill */
+    VkBufferCreateInfo bci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    bci.size = 4096;
+    bci.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    VkBuffer buf;
+    vkCreateBuffer(dev, &bci, nullptr, &buf);
+    VkMemoryRequirements bmr;
+    vkGetBufferMemoryRequirements(dev, buf, &bmr);
+    VkMemoryAllocateInfo bmai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    bmai.allocationSize = bmr.size;
+    bmai.memoryTypeIndex = selftest_pick_memory(pd, bmr.memoryTypeBits);
+    VkDeviceMemory bmem;
+    vkAllocateMemory(dev, &bmai, nullptr, &bmem);
+    vkBindBufferMemory(dev, buf, bmem, 0);
+    volatile uint32_t *bp = nullptr;
+    vkMapMemory(dev, bmem, 0, VK_WHOLE_SIZE, 0, (void **)&bp);
+    if (bp) for (int i = 0; i < 16; i += 1) bp[i] = 0xDEADBEEF;
+    vkResetFences(dev, 1, &fence);
+    vkResetCommandBuffer(cb, 0);
+    vkBeginCommandBuffer(cb, &bi);
+    vkCmdFillBuffer(cb, buf, 0, 4096, 0x12345678);
+    vkEndCommandBuffer(cb);
+    r = vkQueueSubmit(q, 1, &si, fence);
+    w = vkWaitForFences(dev, 1, &fence, VK_TRUE, 2000000000ull);
+    pcps4_status_log("[selftest] B buffer fill: submit=%d wait=%d b[0]=%08x b[15]=%08x (want 12345678)", (int)r, (int)w,
+                     bp ? bp[0] : 0, bp ? bp[15] : 0);
+
+    /* C: vkCmdClearColorImage */
+    if (px) for (int i = 0; i < 64; i += 1) px[i] = 0xDEADBEEF;
+    vkResetFences(dev, 1, &fence);
+    vkResetCommandBuffer(cb, 0);
+    vkBeginCommandBuffer(cb, &bi);
+    VkImageMemoryBarrier ib = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    ib.srcAccessMask = 0;
+    ib.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    ib.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    ib.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    ib.srcQueueFamilyIndex = ib.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    ib.image = img;
+    ib.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &ib);
+    VkClearColorValue cc = {{0.0f, 1.0f, 0.0f, 1.0f}};
+    VkImageSubresourceRange rr = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdClearColorImage(cb, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &cc, 1, &rr);
+    vkEndCommandBuffer(cb);
+    r = vkQueueSubmit(q, 1, &si, fence);
+    w = vkWaitForFences(dev, 1, &fence, VK_TRUE, 2000000000ull);
+    pcps4_status_log("[selftest] C vkCmdClearColorImage: submit=%d wait=%d px[0]=%08x px[1]=%08x (want ff00ff00)", (int)r, (int)w,
+                     px ? px[0] : 0, px ? px[1] : 0);
+    pcps4_status_log("[selftest] end");
 }
 
 /* ------------------------------------------------------------------------ */

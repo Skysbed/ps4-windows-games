@@ -123,7 +123,7 @@ index 0000000..4f6b4aa
 +};
 +static const unsigned int g_clear_ps_binary_size = 216;
 diff --git a/src/vk_ps4_command.c b/src/vk_ps4_command.c
-index 168c1f3..30a5dd3 100644
+index 168c1f3..72b3c0f 100644
 --- a/src/vk_ps4_command.c
 +++ b/src/vk_ps4_command.c
 @@ -19,6 +19,12 @@
@@ -134,7 +134,7 @@ index 168c1f3..30a5dd3 100644
 +extern uint8_t pcps4_clear_push_reg[4];
 +extern int pcps4_clear_push_ready;
 +static unsigned pcps4_cmdlog_n;
-+#define PCPS4_CMDLOG(n) do { if (pcps4_cmdlog_n < 200) { pcps4_cmdlog_n++; vk_ps4_log("CMD %s", n); } } while (0)
++#define PCPS4_CMDLOG(n) do { if (pcps4_cmdlog_n < 1500) { pcps4_cmdlog_n++; vk_ps4_log("CMD %s", n); } } while (0)
 +
  #define VK_PS4_CMD_BUFFER_SIZE (256 * 1024)  /* 256KB default PM4 buffer */
  
@@ -584,10 +584,10 @@ index 0000000..7ebf3da
 +    emit_stage(cmd, pipe->ps_input_usage_slots, pipe->ps_input_usage_slot_count, R_00B030_SPI_SHADER_USER_DATA_PS_0, false);
 +}
 diff --git a/src/vk_ps4_descriptor.c b/src/vk_ps4_descriptor.c
-index c9d6e1c..c8a8bc0 100644
+index c9d6e1c..5e2fbd0 100644
 --- a/src/vk_ps4_descriptor.c
 +++ b/src/vk_ps4_descriptor.c
-@@ -429,6 +429,20 @@ vk_ps4_CmdBindDescriptorSets(VkCommandBuffer commandBuffer, VkPipelineBindPoint
+@@ -429,6 +429,29 @@ vk_ps4_CmdBindDescriptorSets(VkCommandBuffer commandBuffer, VkPipelineBindPoint
  
      GnmShaderStage stage = vk_bind_point_to_gnm_stage(pipelineBindPoint);
  
@@ -601,6 +601,15 @@ index c9d6e1c..c8a8bc0 100644
 +            if (firstSet + i >= 8) break;
 +            vk_ps4_flush_set(ds, &dyn, &dyn_left);
 +            cmd->bound_sets[firstSet + i] = ds;
++            {   /* PcPs4 diagnostic */
++                static unsigned bind_logs;
++                if (ds && ds->gpu_mem && bind_logs++ < 24) {
++                    const uint32_t *w = (const uint32_t *)ds->gpu_mem;
++                    vk_ps4_log("BindSet set=%u mem=%p dyn=%u [%08x %08x %08x %08x | %08x %08x %08x %08x %08x %08x %08x %08x]",
++                               firstSet + i, (void *)ds->gpu_mem, dynamicOffsetCount,
++                               w[0], w[1], w[2], w[3], w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
++                }
++            }
 +        }
 +        if (cmd->current_pipeline) vk_ps4_emit_set_tables(cmd, cmd->current_pipeline);
 +    }
@@ -863,7 +872,7 @@ index 6545469..5efa78b 100644
      return VK_SUCCESS;
  }
 diff --git a/src/vk_ps4_pipeline.c b/src/vk_ps4_pipeline.c
-index b621e66..56bd5a3 100644
+index b621e66..4b79499 100644
 --- a/src/vk_ps4_pipeline.c
 +++ b/src/vk_ps4_pipeline.c
 @@ -19,7 +19,9 @@
@@ -1018,7 +1027,36 @@ index b621e66..56bd5a3 100644
                          }
                      }
                      pipe->tes_module = mod;
-@@ -700,9 +734,9 @@ vk_ps4_CreateComputePipelines(VkDevice device, VkPipelineCache pipelineCache,
+@@ -655,6 +689,28 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
+             }
+         }
+ 
++        {   /* PcPs4 diagnostic: describe the pipeline DXVK asked for */
++            static unsigned pipe_logs;
++            if (pipe_logs++ < 60) {
++                const VkPs4PipelineLayout *dl = (const VkPs4PipelineLayout *)ci->layout;
++                vk_ps4_log("PIPE #%u stages=%u topo=%d dyn=%u cbatt=%u blend0=%d wm0=0x%x cull=%d layout_sets=%u pc=%u",
++                    pipe_logs, ci->stageCount,
++                    ci->pInputAssemblyState ? (int)ci->pInputAssemblyState->topology : -1,
++                    ci->pDynamicState ? ci->pDynamicState->dynamicStateCount : 0,
++                    ci->pColorBlendState ? ci->pColorBlendState->attachmentCount : 0,
++                    (ci->pColorBlendState && ci->pColorBlendState->attachmentCount) ? (int)ci->pColorBlendState->pAttachments[0].blendEnable : -1,
++                    (ci->pColorBlendState && ci->pColorBlendState->attachmentCount) ? (unsigned)ci->pColorBlendState->pAttachments[0].colorWriteMask : 0,
++                    ci->pRasterizationState ? (int)ci->pRasterizationState->cullMode : -1,
++                    dl ? dl->set_layout_count : 0, dl ? dl->push_constant_range_count : 0);
++                if (dl)
++                    for (uint32_t sl = 0; sl < dl->set_layout_count; sl++)
++                        if (dl->set_layouts[sl])
++                            for (uint32_t bb = 0; bb < dl->set_layouts[sl]->binding_count; bb++)
++                                vk_ps4_log("   set%u b%u type=%d count=%u", sl, dl->set_layouts[sl]->bindings[bb].binding,
++                                           (int)dl->set_layouts[sl]->bindings[bb].descriptorType,
++                                           dl->set_layouts[sl]->bindings[bb].descriptorCount);
++            }
++        }
+         pPipelines[i] = (VkPipeline)pipe;
+     }
+ 
+@@ -700,9 +756,9 @@ vk_ps4_CreateComputePipelines(VkDevice device, VkPipelineCache pipelineCache,
          void *cached_binary = NULL;
          if (pipelineCache && mod->binary && mod->binary_size > 0) {
              cache_hash = vk_ps4_pipeline_cache_hash(mod->binary, mod->binary_size,
@@ -1030,7 +1068,7 @@ index b621e66..56bd5a3 100644
                                                           &cached_size);
          }
  
-@@ -715,7 +749,8 @@ vk_ps4_CreateComputePipelines(VkDevice device, VkPipelineCache pipelineCache,
+@@ -715,7 +771,8 @@ vk_ps4_CreateComputePipelines(VkDevice device, VkPipelineCache pipelineCache,
              }
          } else {
              VkResult vr = vk_ps4_compile_shader_module(
@@ -1040,7 +1078,7 @@ index b621e66..56bd5a3 100644
              );
              if (vr != VK_SUCCESS) {
                  if (binary && binary != mod->binary) {
-@@ -728,7 +763,7 @@ vk_ps4_CreateComputePipelines(VkDevice device, VkPipelineCache pipelineCache,
+@@ -728,7 +785,7 @@ vk_ps4_CreateComputePipelines(VkDevice device, VkPipelineCache pipelineCache,
              }
              if (pipelineCache && binary && binary_size > 0 && mod->binary && mod->binary_size > 0) {
                  vk_ps4_pipeline_cache_insert(pipelineCache, cache_hash,
@@ -1049,7 +1087,7 @@ index b621e66..56bd5a3 100644
                                               (uint32_t)mod->binary_size,
                                               binary, binary_size);
              }
-@@ -1018,17 +1053,36 @@ vk_ps4_CreateDescriptorPool(VkDevice device, const VkDescriptorPoolCreateInfo *p
+@@ -1018,17 +1075,36 @@ vk_ps4_CreateDescriptorPool(VkDevice device, const VkDescriptorPoolCreateInfo *p
      return VK_SUCCESS;
  }
  
@@ -1091,7 +1129,7 @@ index b621e66..56bd5a3 100644
      vk_ps4_free(alloc, pool);
  }
  
-@@ -1064,8 +1118,12 @@ vk_ps4_AllocateDescriptorSets(VkDevice device, const VkDescriptorSetAllocateInfo
+@@ -1064,8 +1140,12 @@ vk_ps4_AllocateDescriptorSets(VkDevice device, const VkDescriptorSetAllocateInfo
          if (pool && pool->free_count > 0) {
              set = pool->free_list[--pool->free_count];
              pool->free_list[pool->free_count] = NULL;
@@ -1105,7 +1143,7 @@ index b621e66..56bd5a3 100644
          }
  
          if (!set) {
-@@ -1077,6 +1135,22 @@ vk_ps4_AllocateDescriptorSets(VkDevice device, const VkDescriptorSetAllocateInfo
+@@ -1077,6 +1157,22 @@ vk_ps4_AllocateDescriptorSets(VkDevice device, const VkDescriptorSetAllocateInfo
                  }
                  return VK_ERROR_OUT_OF_HOST_MEMORY;
              }
@@ -1128,7 +1166,7 @@ index b621e66..56bd5a3 100644
          }
  
          set->type = VK_PS4_OBJ_DESCRIPTOR_SET;
-@@ -1127,15 +1201,15 @@ vk_ps4_FreeDescriptorSets(VkDevice device, VkDescriptorPool descriptorPool,
+@@ -1127,15 +1223,15 @@ vk_ps4_FreeDescriptorSets(VkDevice device, VkDescriptorPool descriptorPool,
          VkPs4DescriptorSet *set = (VkPs4DescriptorSet *)pDescriptorSets[i];
          /* Free binding resource arrays */
          for (uint32_t b = 0; b < set->binding_count; b++) {
@@ -1150,7 +1188,7 @@ index b621e66..56bd5a3 100644
          }
          if (pool) pool->sets_freed++;
      }
-@@ -1152,14 +1226,7 @@ vk_ps4_ResetDescriptorPool(VkDevice device, VkDescriptorPool descriptorPool, VkD
+@@ -1152,14 +1248,7 @@ vk_ps4_ResetDescriptorPool(VkDevice device, VkDescriptorPool descriptorPool, VkD
      const VkAllocationCallbacks *alloc = &dev->allocator;
      VkPs4DescriptorPool *pool = (VkPs4DescriptorPool *)descriptorPool;
  

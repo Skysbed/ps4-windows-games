@@ -16,10 +16,20 @@ index 7634d6b..6461453 100644
       * IMM_ALUFLOATCONST input usage slots emitted by psbc.
       * Each entry maps a push constant dword index to a user-data
 diff --git a/src/vk_ps4_command.c b/src/vk_ps4_command.c
-index 168c1f3..e9cef9b 100644
+index 168c1f3..d89ac5f 100644
 --- a/src/vk_ps4_command.c
 +++ b/src/vk_ps4_command.c
-@@ -586,6 +586,9 @@ static void vk_ps4_rebind_pipeline_state(VkPs4CommandBuffer *cmd) {
+@@ -19,6 +19,9 @@
+ #include <pm4/sid.h>
+ #include <pm4/amdgfxregs.h>
+ 
++static unsigned pcps4_cmdlog_n;
++#define PCPS4_CMDLOG(n) do { if (pcps4_cmdlog_n < 200) { pcps4_cmdlog_n++; vk_ps4_log("CMD %s", n); } } while (0)
++
+ #define VK_PS4_CMD_BUFFER_SIZE (256 * 1024)  /* 256KB default PM4 buffer */
+ 
+ /* Forward declaration from vk_ps4_pipeline.c */
+@@ -586,6 +589,9 @@ static void vk_ps4_rebind_pipeline_state(VkPs4CommandBuffer *cmd) {
      /* Re-emit PS if present */
      if (pipe->has_ps) {
          sceGnmDrawCmdSetPsShader(&cmd->gnm_cmd, &pipe->ps_regs);
@@ -29,7 +39,15 @@ index 168c1f3..e9cef9b 100644
      }
  
      /* Re-emit fetch shader */
-@@ -1098,6 +1101,9 @@ vk_ps4_CmdBindPipeline(VkCommandBuffer commandBuffer, VkPipelineBindPoint pipeli
+@@ -1032,6 +1038,7 @@ vk_ps4_TrimCommandPool(VkDevice device, VkCommandPool commandPool, VkCommandPool
+ 
+ VKAPI_ATTR void VKAPI_CALL
+ vk_ps4_CmdBindPipeline(VkCommandBuffer commandBuffer, VkPipelineBindPoint pipelineBindPoint, VkPipeline pipeline) {
++    PCPS4_CMDLOG("BindPipeline");
+     if (!commandBuffer || !pipeline) return;
+     VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
+     VkPs4Pipeline *pipe = (VkPs4Pipeline *)pipeline;
+@@ -1098,6 +1105,9 @@ vk_ps4_CmdBindPipeline(VkCommandBuffer commandBuffer, VkPipelineBindPoint pipeli
          /* Set pixel shader only if the pipeline has one */
          if (pipe->has_ps) {
              sceGnmDrawCmdSetPsShader(&cmd->gnm_cmd, &pipe->ps_regs);
@@ -39,6 +57,140 @@ index 168c1f3..e9cef9b 100644
          }
  
          /* Bind fetch shader if the pipeline has one */
+@@ -1369,6 +1379,7 @@ vk_ps4_CmdSetLineWidth(VkCommandBuffer commandBuffer, float lineWidth) {
+ VKAPI_ATTR void VKAPI_CALL
+ vk_ps4_CmdBindVertexBuffers(VkCommandBuffer commandBuffer, uint32_t firstBinding,
+                              uint32_t bindingCount, const VkBuffer *pBuffers, const VkDeviceSize *pOffsets) {
++    PCPS4_CMDLOG("BindVertexBuffers");
+     if (!commandBuffer || !pBuffers) return;
+     VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
+ 
+@@ -1426,6 +1437,7 @@ vk_ps4_CmdBindVertexBuffers(VkCommandBuffer commandBuffer, uint32_t firstBinding
+ 
+ VKAPI_ATTR void VKAPI_CALL
+ vk_ps4_CmdBindIndexBuffer(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDeviceSize offset, VkIndexType indexType) {
++    PCPS4_CMDLOG("BindIndexBuffer");
+     if (!commandBuffer) return;
+     VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
+     cmd->index_buffer.buffer = buffer;
+@@ -1451,6 +1463,7 @@ vk_ps4_CmdBindIndexBuffer(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDevi
+ VKAPI_ATTR void VKAPI_CALL
+ vk_ps4_CmdDraw(VkCommandBuffer commandBuffer, uint32_t vertexCount, uint32_t instanceCount,
+                uint32_t firstVertex, uint32_t firstInstance) {
++    PCPS4_CMDLOG("Draw");
+     if (!commandBuffer) return;
+     VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
+ 
+@@ -1525,6 +1538,7 @@ vk_ps4_CmdDraw(VkCommandBuffer commandBuffer, uint32_t vertexCount, uint32_t ins
+ VKAPI_ATTR void VKAPI_CALL
+ vk_ps4_CmdDrawIndexed(VkCommandBuffer commandBuffer, uint32_t indexCount, uint32_t instanceCount,
+                       uint32_t firstIndex, int32_t vertexOffset, uint32_t firstInstance) {
++    PCPS4_CMDLOG("DrawIndexed");
+     if (!commandBuffer) return;
+     VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
+ 
+@@ -1744,6 +1758,7 @@ vk_ps4_CmdDispatchIndirect(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDev
+ VKAPI_ATTR void VKAPI_CALL
+ vk_ps4_CmdCopyBuffer(VkCommandBuffer commandBuffer, VkBuffer srcBuffer, VkBuffer dstBuffer,
+                      uint32_t regionCount, const VkBufferCopy *pRegions) {
++    PCPS4_CMDLOG("CopyBuffer");
+     if (!commandBuffer || !pRegions) return;
+     VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
+     VkPs4Buffer *src = (VkPs4Buffer *)srcBuffer;
+@@ -1774,6 +1789,7 @@ vk_ps4_CmdCopyBuffer(VkCommandBuffer commandBuffer, VkBuffer srcBuffer, VkBuffer
+ VKAPI_ATTR void VKAPI_CALL
+ vk_ps4_CmdFillBuffer(VkCommandBuffer commandBuffer, VkBuffer dstBuffer,
+                      VkDeviceSize dstOffset, VkDeviceSize fillSize, uint32_t data) {
++    PCPS4_CMDLOG("FillBuffer");
+     if (!commandBuffer || !dstBuffer) return;
+     VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
+     VkPs4Buffer *dst = (VkPs4Buffer *)dstBuffer;
+@@ -1813,6 +1829,7 @@ vk_ps4_CmdFillBuffer(VkCommandBuffer commandBuffer, VkBuffer dstBuffer,
+ VKAPI_ATTR void VKAPI_CALL
+ vk_ps4_CmdUpdateBuffer(VkCommandBuffer commandBuffer, VkBuffer dstBuffer,
+                        VkDeviceSize dstOffset, VkDeviceSize dataSize, const void *pData) {
++    PCPS4_CMDLOG("UpdateBuffer");
+     if (!commandBuffer || !dstBuffer || !pData) return;
+     VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
+     VkPs4Buffer *dst = (VkPs4Buffer *)dstBuffer;
+@@ -1869,6 +1886,7 @@ VKAPI_ATTR void VKAPI_CALL
+ vk_ps4_CmdCopyImage(VkCommandBuffer commandBuffer, VkImage srcImage, VkImageLayout srcImageLayout,
+                     VkImage dstImage, VkImageLayout dstImageLayout,
+                     uint32_t regionCount, const VkImageCopy *pRegions) {
++    PCPS4_CMDLOG("CopyImage");
+     if (!commandBuffer || !pRegions) return;
+     VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
+     VkPs4Image *src = (VkPs4Image *)srcImage;
+@@ -1968,6 +1986,7 @@ VKAPI_ATTR void VKAPI_CALL
+ vk_ps4_CmdBlitImage(VkCommandBuffer commandBuffer, VkImage srcImage, VkImageLayout srcImageLayout,
+                     VkImage dstImage, VkImageLayout dstImageLayout,
+                     uint32_t regionCount, const VkImageBlit *pRegions, VkFilter filter) {
++    PCPS4_CMDLOG("BlitImage");
+     /* BlitImage with scaling/format conversion requires a shader-based blit.
+      * For MVP, fall back to CmdCopyImage if regions are 1:1.
+      * Full blit support is Phase 3. */
+@@ -2039,6 +2058,7 @@ VKAPI_ATTR void VKAPI_CALL
+ vk_ps4_CmdCopyBufferToImage(VkCommandBuffer commandBuffer, VkBuffer srcBuffer, VkImage dstImage,
+                             VkImageLayout dstImageLayout, uint32_t regionCount,
+                             const VkBufferImageCopy *pRegions) {
++    PCPS4_CMDLOG("CopyBufferToImage");
+     if (!commandBuffer || !pRegions) return;
+     VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
+     VkPs4Buffer *src = (VkPs4Buffer *)srcBuffer;
+@@ -2200,6 +2220,7 @@ static bool vk_ps4_attachment_used_before_subpass(VkPs4RenderPass *rp,
+ VKAPI_ATTR void VKAPI_CALL
+ vk_ps4_CmdBeginRenderPass(VkCommandBuffer commandBuffer, const VkRenderPassBeginInfo *pBeginInfo,
+                           VkSubpassContents contents) {
++    PCPS4_CMDLOG("BeginRenderPass");
+     (void)contents;
+     if (!commandBuffer || !pBeginInfo) return;
+     VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
+@@ -2338,6 +2359,7 @@ vk_ps4_CmdBeginRenderPass(VkCommandBuffer commandBuffer, const VkRenderPassBegin
+ 
+ VKAPI_ATTR void VKAPI_CALL
+ vk_ps4_CmdEndRenderPass(VkCommandBuffer commandBuffer) {
++    PCPS4_CMDLOG("EndRenderPass");
+     if (!commandBuffer) return;
+     VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
+ 
+@@ -2513,6 +2535,7 @@ vk_ps4_CmdPipelineBarrier(VkCommandBuffer commandBuffer, VkPipelineStageFlags sr
+                           uint32_t memoryBarrierCount, const VkMemoryBarrier *pMemoryBarriers,
+                           uint32_t bufferMemoryBarrierCount, const VkBufferMemoryBarrier *pBufferMemoryBarriers,
+                           uint32_t imageMemoryBarrierCount, const VkImageMemoryBarrier *pImageMemoryBarriers) {
++    PCPS4_CMDLOG("PipelineBarrier");
+     if (!commandBuffer) return;
+     VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
+ 
+@@ -2609,11 +2632,12 @@ VKAPI_ATTR void VKAPI_CALL
+ vk_ps4_CmdClearColorImage(VkCommandBuffer commandBuffer, VkImage image, VkImageLayout imageLayout,
+                           const VkClearColorValue *pColor, uint32_t rangeCount,
+                           const VkImageSubresourceRange *pRanges) {
++    PCPS4_CMDLOG("ClearColorImage");
+     if (!commandBuffer || !image || !pColor || !pRanges) return;
+     VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
+     VkPs4Image *img = (VkPs4Image *)image;
+ 
+-    if (!img->memory || !img->memory->gnm_mem.mapped) return;
++    if (!img->memory || !img->memory->gnm_mem.mapped) { vk_ps4_log("CMD ClearColorImage: SKIPPED (image has no mapped memory)"); return; }
+ 
+     /* Tiled render targets require a draw-based clear because FillMemory
+      * writes linearly and doesn't respect the tiled memory layout.
+@@ -2777,6 +2801,7 @@ VKAPI_ATTR void VKAPI_CALL
+ vk_ps4_CmdClearAttachments(VkCommandBuffer commandBuffer, uint32_t attachmentCount,
+                            const VkClearAttachment *pAttachments, uint32_t rectCount,
+                            const VkClearRect *pRects) {
++    PCPS4_CMDLOG("ClearAttachments");
+     if (!commandBuffer || !pAttachments) return;
+     VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
+ 
+@@ -2895,6 +2920,7 @@ VKAPI_ATTR void VKAPI_CALL
+ vk_ps4_CmdPushConstants(VkCommandBuffer commandBuffer, VkPipelineLayout layout,
+                         VkShaderStageFlags stageFlags, uint32_t offset, uint32_t size,
+                         const void *pValues) {
++    PCPS4_CMDLOG("PushConstants");
+     if (!commandBuffer || !pValues || size == 0) return;
+     VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
+     VkPs4Pipeline *pipe = cmd->current_pipeline;
 diff --git a/src/vk_ps4_entry.c b/src/vk_ps4_entry.c
 index 24ef0d4..e813f6c 100644
 --- a/src/vk_ps4_entry.c

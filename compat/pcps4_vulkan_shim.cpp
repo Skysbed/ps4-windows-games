@@ -289,6 +289,8 @@ static MSA VkResult shim_vkCreateDevice(VkPhysicalDevice d, const VkDeviceCreate
 /* Runs once after the first device is created and reports what the GPU really did, using
  * the driver's own Vulkan entry points: a render-pass clear of a small colour target,
  * a buffer fill, and a draw-free image clear, each read back through the CPU. */
+extern "C" int pcps4_clear_variant;
+
 static uint32_t selftest_pick_memory(VkPhysicalDevice pd, uint32_t bits) {
     VkPhysicalDeviceMemoryProperties mp;
     vkGetPhysicalDeviceMemoryProperties(pd, &mp);
@@ -390,9 +392,9 @@ static void selftest_run(VkPhysicalDevice pd, VkDevice dev) {
     VkFence fence;
     vkCreateFence(dev, &fi, nullptr, &fence);
 
-    /* A: render-pass clear to (1.0, 0.5, 0.25, 1.0) = 0xff4080ff */
+    /* A: render-pass clear to (1.0, 0.5, 0.25, 1.0) = 0xff4080ff, once with the clear colour
+     * placed inside the command buffer and once in separate GPU-visible memory. */
     VkCommandBufferBeginInfo bi = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    vkBeginCommandBuffer(cb, &bi);
     VkClearValue cv;
     cv.color = {{1.0f, 0.5f, 0.25f, 1.0f}};
     VkRenderPassBeginInfo rbi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
@@ -401,16 +403,29 @@ static void selftest_run(VkPhysicalDevice pd, VkDevice dev) {
     rbi.renderArea = {{0, 0}, {64, 64}};
     rbi.clearValueCount = 1;
     rbi.pClearValues = &cv;
-    vkCmdBeginRenderPass(cb, &rbi, VK_SUBPASS_CONTENTS_INLINE);
-    vkCmdEndRenderPass(cb);
-    vkEndCommandBuffer(cb);
     VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
     si.commandBufferCount = 1;
     si.pCommandBuffers = &cb;
-    VkResult r = vkQueueSubmit(q, 1, &si, fence);
-    VkResult w = vkWaitForFences(dev, 1, &fence, VK_TRUE, 2000000000ull);
-    pcps4_status_log("[selftest] A render-pass clear: submit=%d wait=%d px[0]=%08x px[1]=%08x px[63]=%08x (want ff4080ff)",
-                     (int)r, (int)w, px ? px[0] : 0, px ? px[1] : 0, px ? px[63] : 0);
+    VkResult r = VK_SUCCESS, w = VK_SUCCESS;
+    for (int variant = 0; variant < 2; variant += 1) {
+        if (px) {
+            for (int i = 0; i < 64; i += 1) px[i] = 0xDEADBEEF;
+            px[6000] = 0xCAFEF00D; /* control: outside the surface, GPU must not touch it */
+        }
+        uint32_t pre = px ? px[0] : 0;
+        pcps4_clear_variant = variant;
+        vkResetFences(dev, 1, &fence);
+        vkBeginCommandBuffer(cb, &bi);
+        vkCmdBeginRenderPass(cb, &rbi, VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdEndRenderPass(cb);
+        vkEndCommandBuffer(cb);
+        r = vkQueueSubmit(q, 1, &si, fence);
+        w = vkWaitForFences(dev, 1, &fence, VK_TRUE, 2000000000ull);
+        pcps4_status_log("[selftest] A%d render-pass clear: submit=%d wait=%d pre=%08x px[0]=%08x px[1]=%08x px[63]=%08x control=%08x (want ff4080ff, control cafef00d)",
+                         variant, (int)r, (int)w, pre, px ? px[0] : 0, px ? px[1] : 0, px ? px[63] : 0, px ? px[6000] : 0);
+        vkResetCommandBuffer(cb, 0);
+    }
+    pcps4_clear_variant = 0;
 
     /* B: buffer fill */
     VkBufferCreateInfo bci = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};

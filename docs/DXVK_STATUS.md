@@ -52,8 +52,11 @@ lack the GPU-visible allocator in `vulkan-ps4-hardware-v22.patch` and hard-crash
 
 ## Open problems
 
-1. **Nothing DXVK draws reaches the screen yet.** The remaining stages to prove on hardware: texture sampling
-   through descriptor tables (the copy-to-screen pass), constant-buffer reads, interpolants, vertex input.
+1. **Correct on-screen output is not yet proven.** v45 fixed a specialization-constant issue in DXVK's
+   present shader, but a clean process exit still does not prove that non-black pixels reached scanout.
+   v46 adds a separate acceptance result based on the driver's `QueuePresent: scanout ... px[mid]=...`
+   samples: at least two flips, two scanout samples, and changing non-black RGB values. This is a useful
+   visibility gate for the synthetic clear test, not proof that an arbitrary game renders correctly.
 2. A filled (DMA) render-target clear on DXVK's 640x360 backbuffer hard-hangs the console at the first flip
    while the same fill is fine on a 64x64 test image — unexplained; the draw-based clear is used instead.
 3. C++ exception unwinding (Windows x64 SEH dispatcher) is not implemented; DXVK throws on some error paths.
@@ -63,3 +66,17 @@ lack the GPU-visible allocator in `vulkan-ps4-hardware-v22.patch` and hard-crash
 
 `gpulab/patches/vulkan-ps4-hardware-v22.patch` is the cumulative diff against the vendor `vulkan-ps4` checkout
 (f4d940b) used for the builds (plus the earlier `vulkan-ps4-hardware.patch`).
+
+## v46 scanout acceptance gate
+
+The bundled Windows executable's exit status is now reported separately from the DXVK scanout probe. Before
+starting the PE, PcPs4 removes the previous `/data/vk_ps4_breadcrumb.log` so stale scanout samples cannot
+make a new run pass. After the PE returns, the wrapper parses the driver's `QueuePresent: flip done` and
+`QueuePresent: scanout ... px[mid]=...` records. The scanout result passes only when there are at least two
+flips and two samples, at least two samples contain non-black RGB (alpha is ignored), and the RGB sample
+changes at least once. This deliberately verifies that changing colour reached the scanout buffer; it does
+not replace visual inspection or a real-game test.
+
+The repository CI can build the core package and run host tests for this parser. The DXVK-on-PS4 package
+still requires the external patched `vulkan-ps4` / `libpsbc.orbis.a` / `libopengnm.a` libraries described by
+`tools/build_dxvk_local.sh`; the ordinary OpenOrbis workflow does not build those dependencies.

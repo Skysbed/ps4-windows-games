@@ -55,6 +55,7 @@ jobs:
           set -euxo pipefail
           make test
           make test-host
+          make test-dxvk-syntax
 
       - name: Build native Windows D3D11 smoke + DLL probe
         run: |

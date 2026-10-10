@@ -1,4 +1,4 @@
-name: PcPs4 v6 OpenOrbis build
+name: PcPs4 v46 Core OpenOrbis build (DXVK package requires external GPU libraries)
 
 on:
   push:
@@ -81,7 +81,7 @@ jobs:
       - name: Upload native Windows D3D11 smoke binary
         uses: actions/upload-artifact@v4
         with:
-          name: PcPs4-v6-Windows-D3D11-Smoke-EXE
+          name: PcPs4-v46-Core-Windows-D3D11-Smoke-EXE
           path: build/win_d3d11_smoke.exe
           if-no-files-found: error
 
@@ -110,14 +110,14 @@ jobs:
       - name: Upload installable base PS4 package
         uses: actions/upload-artifact@v4
         with:
-          name: PcPs4-PKG
+          name: PcPs4-v46-Core-PKG
           path: build/package/*.pkg
           if-no-files-found: error
 
       - name: Upload base GP4 and eboot
         uses: actions/upload-artifact@v4
         with:
-          name: PcPs4-PKG-Diagnostics
+          name: PcPs4-v46-Core-PKG-Diagnostics
           path: |
             build/package/*.gp4
             eboot.bin
@@ -153,26 +153,26 @@ jobs:
           grep -Eq 'game/game\\.exe|game/game.exe' "$GP4"
 
           # Versioned filename keeps downloads unmistakable.
-          cp "$(find build/win-smoke/package -maxdepth 1 -name '*.pkg' -type f -print -quit)" "build/win-smoke/PcPs4-v6-Windows-Game-Diagnostic.pkg"
+          cp "$(find build/win-smoke/package -maxdepth 1 -name '*.pkg' -type f -print -quit)" "build/win-smoke/PcPs4-v46-Core-Windows-Game-Diagnostic.pkg"
 
       - name: Upload PS4 package containing native Windows D3D11 smoke binary
         uses: actions/upload-artifact@v4
         with:
-          name: PcPs4-v6-Windows-D3D11-Smoke-PKG
-          path: build/win-smoke/PcPs4-v6-Windows-Game-Diagnostic.pkg
+          name: PcPs4-v46-Core-Windows-D3D11-Smoke-PKG
+          path: build/win-smoke/PcPs4-v46-Core-Windows-Game-Diagnostic.pkg
           if-no-files-found: error
 
       - name: Upload FINAL one-package PS4 Windows smoke
         uses: actions/upload-artifact@v4
         with:
-          name: PcPs4-v6-FINAL-Windows-Game-Diagnostic-PKG
-          path: build/win-smoke/PcPs4-v6-Windows-Game-Diagnostic.pkg
+          name: PcPs4-v46-Core-FINAL-Windows-Game-Diagnostic-PKG
+          path: build/win-smoke/PcPs4-v46-Core-Windows-Game-Diagnostic.pkg
           if-no-files-found: error
 
       - name: Upload bundled GP4 diagnostics
         uses: actions/upload-artifact@v4
         with:
-          name: PcPs4-PKG-Windows-D3D11-Smoke-Diagnostics
+          name: PcPs4-v46-Core-PKG-Windows-D3D11-Smoke-Diagnostics
           path: |
             build/win-smoke/package/*.gp4
             build/win-smoke/package/game/game.exe
@@ -181,7 +181,7 @@ jobs:
       - name: Upload translated source and report
         uses: actions/upload-artifact@v4
         with:
-          name: PcPs4-translated-source
+          name: PcPs4-v46-Core-translated-source
           path: |
             build/generated/*.c
             build/generated/*.cpp

@@ -86,7 +86,17 @@ int main(void)
     pcps4_status_log(
         "[pcps4] bundled Windows game returned rc=%d entry=%d",
         game_rc, (int)game_entry_ret);
-    pcps4_status_report("Bundled Windows game", game_rc == 0);
+    pcps4_status_report("Windows PE process exit", game_rc == 0);
+#if PCPS4_DXVK
+    /*
+     * ExitProcess(0) proves that the PE returned; it does not prove pixels
+     * reached the display. Verify this run's changing, non-black scanout data
+     * as a separate result so a successful loader cannot mask a black screen.
+     */
+    pcps4_status_step("DXVK scanout RGB probe");
+    int scanout_rc = pcps4_game_validate_dxvk_scanout();
+    pcps4_status_report("DXVK scanout RGB probe", scanout_rc == 0);
+#endif
 #else
     /* Enter the interactive PC-style D3D11 + XInput path. */
     int game_rc = pcps4_d3d11_game_run();

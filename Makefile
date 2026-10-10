@@ -373,7 +373,7 @@ $(PE_EXPORT_HOST_TEST): compat/pcps4_pe.c compat/pcps4_pe.h tests/pe_export_host
 	$(HOST_CC) $(HOST_CFLAGS) -o "$@" compat/pcps4_pe.c tests/pe_export_host_test.c
 
 $(DXVK_SCANOUT_HOST_TEST): compat/pcps4_dxvk_diagnostics.c compat/pcps4_dxvk_diagnostics.h tests/dxvk_scanout_host_test.c | $(INTDIR)
-	$(HOST_CC) $(HOST_CFLAGS) -o "$@" compat/pcps4_dxvk_diagnostics.c tests/dxvk_scanout_host_test.c
+	$(HOST_CC) $(HOST_CFLAGS) -Icompat -o "$@" compat/pcps4_dxvk_diagnostics.c tests/dxvk_scanout_host_test.c
 
 info:
 	@test -n "$(OO_PS4_TOOLCHAIN)" || (echo "ERROR: OO_PS4_TOOLCHAIN is not set."; exit 1)

@@ -125,7 +125,7 @@ LDFLAGS := -m elf_x86_64 -pie \
            $(if $(filter 1,$(PCPS4_ENABLE_OPENGNM)),-L$(PCPS4_OPENGNM_DIR) -lopengnm,) \
            $(TOOLCHAIN)/lib/crt1.o
 
-.PHONY: all pkg eboot translate test test-host clean info
+.PHONY: all pkg eboot translate test test-host test-dxvk-syntax clean info
 
 # Host-compiled unit tests (run on the CI host, not the PS4 target).
 HOST_CC    ?= clang
@@ -350,6 +350,12 @@ test-host: $(PE_HOST_TEST) $(PE_MAP_HOST_TEST) $(PE_BIND_HOST_TEST) $(PE_EXPORT_
 	"$(PE_EXPORT_HOST_TEST)"
 	"$(DXBC_HOST_TEST)"
 	"$(DXVK_SCANOUT_HOST_TEST)"
+
+test-dxvk-syntax: | $(INTDIR)
+	@mkdir -p "$(INTDIR)/dxvk-syntax"
+	$(PYTHON) "$(TRANSLATOR)" pc_source/main.c --out "$(INTDIR)/dxvk-syntax/main.c" --report "$(INTDIR)/dxvk-syntax/translation.json" --strict
+	$(CC) $(COMMONFLAGS) -std=c11 -DPCPS4_ENABLE_OPENGNM=0 -DPCPS4_RUN_GAME=1 -DPCPS4_BUNDLED_GAME=1 -DPCPS4_DXVK=1 -fsyntax-only "$(INTDIR)/dxvk-syntax/main.c"
+	$(CC) $(COMMONFLAGS) -std=c11 -DPCPS4_ENABLE_OPENGNM=0 -DPCPS4_RUN_GAME=1 -DPCPS4_BUNDLED_GAME=1 -DPCPS4_DXVK=1 -fsyntax-only compat/pcps4_game.c
 
 $(PE_HOST_TEST): compat/pcps4_pe.c compat/pcps4_pe.h tests/pe_host_test.c | $(INTDIR)
 	$(HOST_CC) $(HOST_CFLAGS) -o "$@" compat/pcps4_pe.c tests/pe_host_test.c

@@ -2,6 +2,7 @@
 
 #if PCPS4_DXVK
 /* vulkan-ps4 driver breadcrumbs -> /data/vk_ps4_breadcrumb.log (weak: absent without the GPU stack) */
+#include "pcps4_dxvk_diagnostics.h"
 extern void vk_ps4_log_open(const char *path) __attribute__((weak));
 #endif
 #include "pcps4_status.h"
@@ -67,6 +68,45 @@ static int read_file(
     return 0;
 }
 
+#if PCPS4_DXVK
+int pcps4_game_validate_dxvk_scanout(void)
+{
+    static const char *const path = "/data/vk_ps4_breadcrumb.log";
+    pcps4_dxvk_scanout_report report;
+    FILE *file = fopen(path, "rb");
+
+    if (file == NULL) {
+        pcps4_status_log("[pcps4] DXVK scanout FAILED: cannot open %s", path);
+        return -1;
+    }
+
+    int parse_rc = pcps4_dxvk_scanout_parse(file, &report);
+    fclose(file);
+    if (parse_rc != 0) {
+        pcps4_status_log("[pcps4] DXVK scanout FAILED: could not parse %s", path);
+        return -2;
+    }
+
+    pcps4_status_log(
+        "[pcps4] DXVK scanout: flips=%u samples=%u nonblack=%u color_changes=%u first_rgb=%06x last_rgb=%06x",
+        (unsigned)report.flip_count,
+        (unsigned)report.scanout_samples,
+        (unsigned)report.nonblack_samples,
+        (unsigned)report.color_changes,
+        (unsigned)report.first_rgb,
+        (unsigned)report.last_rgb);
+
+    if (!pcps4_dxvk_scanout_passes_visibility_check(&report)) {
+        pcps4_status_log(
+            "[pcps4] DXVK scanout FAILED: need >=2 flips, >=2 scanout samples, and changing non-black RGB");
+        return -3;
+    }
+
+    pcps4_status_log("[pcps4] DXVK scanout RGB probe = PASS");
+    return 0;
+}
+#endif
+
 int pcps4_game_run_file(const char *path, int32_t *out_entry_ret)
 {
     /* ~230 KB: keep it off the stack, and valid for GetProcAddress later. */
@@ -91,7 +131,15 @@ int pcps4_game_run_file(const char *path, int32_t *out_entry_ret)
     pcps4_winapi_build_resolver(&resolver);
 
 #if PCPS4_DXVK
-    if (vk_ps4_log_open) vk_ps4_log_open(NULL);
+    /*
+     * Do not let an earlier run's pixel probes satisfy this run's acceptance
+     * check. The driver opens a fresh breadcrumb log immediately afterwards.
+     */
+    (void)remove("/data/vk_ps4_breadcrumb.log");
+    if (vk_ps4_log_open)
+        vk_ps4_log_open(NULL);
+    else
+        pcps4_status_log("[pcps4] DXVK driver breadcrumb logger unavailable");
 #endif
 
     pcps4_status_log("[pcps4] game load: %s (%u bytes)",

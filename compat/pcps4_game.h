@@ -17,6 +17,11 @@ int pcps4_game_run_file(const char *path, int32_t *out_entry_ret);
 /* Convenience entry point for the package's staged /app0/game/game.exe. */
 int pcps4_game_run_bundled(int32_t *out_entry_ret);
 
+#if PCPS4_DXVK
+/* Validate pixels emitted by the current DXVK run, not just PE exit status. */
+int pcps4_game_validate_dxvk_scanout(void);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

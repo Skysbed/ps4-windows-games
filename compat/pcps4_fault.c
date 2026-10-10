@@ -186,6 +186,7 @@ static void pcps4_fault_handler(int signal_number, void *info, void *uc)
 void pcps4_fault_thread_init(void)
 {
 #if defined(__FreeBSD__)
+    extern int sigaltstack(const stack_t *, stack_t *);
     stack_t ss;
     void *mem = malloc(64 * 1024);
     if (mem == NULL)

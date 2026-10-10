@@ -182,8 +182,24 @@ static void pcps4_fault_handler(int signal_number, void *info, void *uc)
     _exit(128 + signal_number);
 }
 
+/* Give the calling thread its own signal stack so a stack overflow can still be reported. */
+void pcps4_fault_thread_init(void)
+{
+#if defined(__FreeBSD__)
+    stack_t ss;
+    void *mem = malloc(64 * 1024);
+    if (mem == NULL)
+        return;
+    ss.ss_sp = mem;
+    ss.ss_size = 64 * 1024;
+    ss.ss_flags = 0;
+    (void)sigaltstack(&ss, NULL);
+#endif
+}
+
 int pcps4_fault_install(void)
 {
+    pcps4_fault_thread_init();
     static const int signals[] = {
         SIGSEGV,
         SIGBUS,
@@ -201,7 +217,7 @@ int pcps4_fault_install(void)
     action.sa_handler = (void (*)(int))pcps4_fault_handler;
 #endif
     sigemptyset(&action.sa_mask);
-    action.sa_flags = 0x40; /* SA_SIGINFO */
+    action.sa_flags = 0x40 | 0x1; /* SA_SIGINFO | SA_ONSTACK */
 
     for (i = 0; i < sizeof(signals) / sizeof(signals[0]); ++i) {
         if (sigaction(signals[i], &action, NULL) != 0) {

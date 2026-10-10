@@ -236,6 +236,8 @@ static MSA VkResult shim_vkEnumerateDeviceExtensionProperties(VkPhysicalDevice d
 }
 
 static void selftest_run(VkPhysicalDevice pd, VkDevice dev);
+static VkPhysicalDevice g_host_pd;
+static uint32_t selftest_pick_memory_any(uint32_t bits);
 
 static MSA VkResult shim_vkCreateDevice(VkPhysicalDevice d, const VkDeviceCreateInfo *ci,
                                         const VkAllocationCallbacks *alloc, VkDevice *out) {
@@ -278,6 +280,7 @@ static MSA VkResult shim_vkCreateDevice(VkPhysicalDevice d, const VkDeviceCreate
     (void)masked2;
     VkResult r = vkCreateDevice(d, &copy, alloc, out);
     pcps4_status_log("[vk] vkCreateDevice -> %d", (int)r);
+    g_host_pd = d;
     if (r == VK_SUCCESS) selftest_run(d, *out);
     free(names);
     return r;
@@ -302,6 +305,8 @@ static uint32_t selftest_pick_memory(VkPhysicalDevice pd, uint32_t bits) {
     }
     return 0;
 }
+
+static uint32_t selftest_pick_memory_any(uint32_t bits) { return selftest_pick_memory(g_host_pd, bits); }
 
 static void selftest_run(VkPhysicalDevice pd, VkDevice dev) {
     static int done;
@@ -687,6 +692,85 @@ static void selftest_run(VkPhysicalDevice pd, VkDevice dev) {
     pcps4_status_log("[selftest] end");
 }
 
+
+#ifdef PCPS4_HOST
+/* ------------------------------------------------------------------------ */
+/* headless swapchain for the Mac development harness                        */
+/* ------------------------------------------------------------------------ */
+
+/* The harness has no window, so the fake surface cannot back a real swapchain. Provide one made of
+ * ordinary images so the full DXVK frame loop (acquire, render, present) runs on a Mac. */
+struct HostSwap {
+    VkDevice dev;
+    VkQueue q;
+    uint32_t n;
+    uint32_t next;
+    VkImage img[4];
+    VkDeviceMemory mem[4];
+};
+
+static MSA VkResult shim_vkCreateSwapchainKHR(VkDevice dev, const VkSwapchainCreateInfoKHR *ci,
+                                              const VkAllocationCallbacks *, VkSwapchainKHR *out) {
+    HostSwap *sw = (HostSwap *)calloc(1, sizeof(*sw));
+    sw->dev = dev;
+    vkGetDeviceQueue(dev, 0, 0, &sw->q);
+    sw->n = ci->minImageCount < 4 ? (ci->minImageCount < 2 ? 2 : ci->minImageCount) : 4;
+    for (uint32_t i = 0; i < sw->n; i += 1) {
+        VkImageCreateInfo ic = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+        ic.imageType = VK_IMAGE_TYPE_2D;
+        ic.format = ci->imageFormat;
+        ic.extent = {ci->imageExtent.width, ci->imageExtent.height, 1};
+        ic.mipLevels = 1;
+        ic.arrayLayers = 1;
+        ic.samples = VK_SAMPLE_COUNT_1_BIT;
+        ic.tiling = VK_IMAGE_TILING_OPTIMAL;
+        ic.usage = ci->imageUsage | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        ic.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        if (vkCreateImage(dev, &ic, nullptr, &sw->img[i]) != VK_SUCCESS) return VK_ERROR_INITIALIZATION_FAILED;
+        VkMemoryRequirements mr;
+        vkGetImageMemoryRequirements(dev, sw->img[i], &mr);
+        VkMemoryAllocateInfo ma = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        ma.allocationSize = mr.size;
+        ma.memoryTypeIndex = selftest_pick_memory_any(mr.memoryTypeBits);
+        if (vkAllocateMemory(dev, &ma, nullptr, &sw->mem[i]) != VK_SUCCESS) return VK_ERROR_INITIALIZATION_FAILED;
+        vkBindImageMemory(dev, sw->img[i], sw->mem[i], 0);
+    }
+    *out = (VkSwapchainKHR)sw;
+    return VK_SUCCESS;
+}
+static MSA void shim_vkDestroySwapchainKHR(VkDevice, VkSwapchainKHR, const VkAllocationCallbacks *) {}
+static MSA VkResult shim_vkGetSwapchainImagesKHR(VkDevice, VkSwapchainKHR s, uint32_t *count, VkImage *imgs) {
+    HostSwap *sw = (HostSwap *)s;
+    if (!imgs) { *count = sw->n; return VK_SUCCESS; }
+    uint32_t m = *count < sw->n ? *count : sw->n;
+    for (uint32_t i = 0; i < m; i += 1) imgs[i] = sw->img[i];
+    *count = m;
+    return m < sw->n ? VK_INCOMPLETE : VK_SUCCESS;
+}
+static MSA VkResult shim_vkAcquireNextImageKHR(VkDevice, VkSwapchainKHR s, uint64_t, VkSemaphore sem, VkFence fence,
+                                               uint32_t *idx) {
+    HostSwap *sw = (HostSwap *)s;
+    *idx = sw->next++ % sw->n;
+    VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    si.signalSemaphoreCount = sem ? 1 : 0;
+    si.pSignalSemaphores = &sem;
+    vkQueueSubmit(sw->q, 1, &si, fence);
+    return VK_SUCCESS;
+}
+static MSA VkResult shim_vkQueuePresentKHR(VkQueue q, const VkPresentInfoKHR *pi) {
+    static uint32_t frame;
+    VkPipelineStageFlags stage[8];
+    for (int i = 0; i < 8; i += 1) stage[i] = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+    VkSubmitInfo si = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    si.waitSemaphoreCount = pi->waitSemaphoreCount < 8 ? pi->waitSemaphoreCount : 8;
+    si.pWaitSemaphores = pi->pWaitSemaphores;
+    si.pWaitDstStageMask = stage;
+    vkQueueSubmit(q, 1, &si, VK_NULL_HANDLE);
+    if ((++frame % 30) == 0) pcps4_status_log("[host] present frame %u", frame);
+    return VK_SUCCESS;
+}
+#endif
+
 /* ------------------------------------------------------------------------ */
 /* the export                                                                */
 /* ------------------------------------------------------------------------ */
@@ -703,6 +787,13 @@ static const Entry kTable[] = {
 #undef X
 
 static const Entry kOverrides[] = {
+#ifdef PCPS4_HOST
+    {"vkCreateSwapchainKHR", (void *)shim_vkCreateSwapchainKHR},
+    {"vkDestroySwapchainKHR", (void *)shim_vkDestroySwapchainKHR},
+    {"vkGetSwapchainImagesKHR", (void *)shim_vkGetSwapchainImagesKHR},
+    {"vkAcquireNextImageKHR", (void *)shim_vkAcquireNextImageKHR},
+    {"vkQueuePresentKHR", (void *)shim_vkQueuePresentKHR},
+#endif
     {"vkEnumerateDeviceExtensionProperties", (void *)shim_vkEnumerateDeviceExtensionProperties},
     {"vkCreateDevice", (void *)shim_vkCreateDevice},
     {"vkGetPhysicalDeviceFeatures", (void *)shim_vkGetPhysicalDeviceFeatures},

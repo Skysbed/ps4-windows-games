@@ -872,21 +872,22 @@ index 6545469..5efa78b 100644
      return VK_SUCCESS;
  }
 diff --git a/src/vk_ps4_pipeline.c b/src/vk_ps4_pipeline.c
-index b621e66..4b79499 100644
+index b621e66..3369d76 100644
 --- a/src/vk_ps4_pipeline.c
 +++ b/src/vk_ps4_pipeline.c
-@@ -19,7 +19,9 @@
+@@ -19,7 +19,10 @@
  VkResult vk_ps4_compile_shader_module(VkPs4ShaderModule *mod, VkShaderStageFlagBits stage,
                                        const VkAllocationCallbacks *alloc,
                                        void **out_binary, size_t *out_binary_size,
 -                                      GnmShaderMetadata *out_metadata);
 +                                      GnmShaderMetadata *out_metadata,
-+                                      const VkPs4PipelineLayout *playout);
-+uint32_t vk_ps4_layout_hash(const VkPs4PipelineLayout *pl);
++                                      const VkPs4PipelineLayout *playout,
++                                      const VkSpecializationInfo *spec);
++uint32_t vk_ps4_stage_key_hash(const VkPs4PipelineLayout *pl, const VkSpecializationInfo *spec);
  
  /* Forward declaration from vk_ps4_command.c */
  extern uint32_t vk_stencil_op_to_pm4(VkStencilOp op);
-@@ -95,6 +97,18 @@ GnmPrimitiveType vk_topology_to_gnm(VkPrimitiveTopology topology) {
+@@ -95,6 +98,18 @@ GnmPrimitiveType vk_topology_to_gnm(VkPrimitiveTopology topology) {
      }
  }
  
@@ -905,38 +906,38 @@ index b621e66..4b79499 100644
  VKAPI_ATTR VkResult VKAPI_CALL
  vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
                                  uint32_t createInfoCount,
-@@ -305,9 +319,9 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
+@@ -305,9 +320,9 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
              void *cached_binary = NULL;
              if (pipelineCache && mod->binary && mod->binary_size > 0) {
                  cache_hash = vk_ps4_pipeline_cache_hash(mod->binary, mod->binary_size,
 -                                                        (uint32_t)stage->stage);
-+                                                        (uint32_t)stage->stage ^ vk_ps4_layout_hash((const VkPs4PipelineLayout *)ci->layout));
++                                                        (uint32_t)stage->stage ^ vk_ps4_stage_key_hash((const VkPs4PipelineLayout *)ci->layout, stage->pSpecializationInfo));
                  cached_binary = vk_ps4_pipeline_cache_lookup(pipelineCache, cache_hash,
 -                                                             (uint32_t)stage->stage,
-+                                                             (uint32_t)stage->stage ^ vk_ps4_layout_hash((const VkPs4PipelineLayout *)ci->layout),
++                                                             (uint32_t)stage->stage ^ vk_ps4_stage_key_hash((const VkPs4PipelineLayout *)ci->layout, stage->pSpecializationInfo),
                                                               &cached_size);
              }
  
-@@ -324,7 +338,8 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
+@@ -324,7 +339,8 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
              } else {
                  /* Cache miss — compile the shader */
                  VkResult vr = vk_ps4_compile_shader_module(
 -                    mod, stage->stage, alloc, &binary, &binary_size, &metadata
 +                    mod, stage->stage, alloc, &binary, &binary_size, &metadata,
-+                    (const VkPs4PipelineLayout *)ci->layout
++                    (const VkPs4PipelineLayout *)ci->layout, stage->pSpecializationInfo
                  );
                  if (vr != VK_SUCCESS) {
                      if (binary && binary != mod->binary) {
-@@ -336,7 +351,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
+@@ -336,7 +352,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
                  /* Insert into pipeline cache */
                  if (pipelineCache && binary && binary_size > 0 && mod->binary && mod->binary_size > 0) {
                      vk_ps4_pipeline_cache_insert(pipelineCache, cache_hash,
 -                                                 (uint32_t)stage->stage,
-+                                                 (uint32_t)stage->stage ^ vk_ps4_layout_hash((const VkPs4PipelineLayout *)ci->layout),
++                                                 (uint32_t)stage->stage ^ vk_ps4_stage_key_hash((const VkPs4PipelineLayout *)ci->layout, stage->pSpecializationInfo),
                                                   (uint32_t)mod->binary_size,
                                                   binary, binary_size);
                  }
-@@ -369,7 +384,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
+@@ -369,7 +385,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
                           * to actual GPU address in the compiled binary. */
                          if (metadata.shadercode) {
                              sceGnmLsRegsSetAddress(&pipe->ls_regs,
@@ -945,7 +946,7 @@ index b621e66..4b79499 100644
                          }
                          /* LS doesn't have vertex input semantics in the same
                           * format — skip semantic extraction for LS */
-@@ -381,7 +396,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
+@@ -381,7 +397,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
                          pipe->has_es = true;
                          if (metadata.shadercode) {
                              sceGnmEsRegsSetAddress(&pipe->es_regs,
@@ -954,7 +955,7 @@ index b621e66..4b79499 100644
                          }
                      } else {
                          /* Standard VS: GnmVsShader (common + regs + semantics) */
-@@ -389,7 +404,17 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
+@@ -389,7 +405,17 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
                          pipe->vs_regs = vs->registers;
                          if (metadata.shadercode) {
                              sceGnmVsRegsSetAddress(&pipe->vs_regs,
@@ -973,7 +974,7 @@ index b621e66..4b79499 100644
                          }
                          /* Extract vertex input semantics */
                          uint32_t nsemantics = vs->numinputsemantics;
-@@ -413,7 +438,16 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
+@@ -413,7 +439,16 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
                      pipe->ps_regs = ps->registers;
                      if (metadata.shadercode) {
                          sceGnmPsRegsSetAddress(&pipe->ps_regs,
@@ -991,7 +992,7 @@ index b621e66..4b79499 100644
                      }
                      pipe->fs_module = mod;
                      ps_found = true;
-@@ -437,7 +471,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
+@@ -437,7 +472,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
                          pipe->has_gs = true;
                          if (metadata.shadercode) {
                              sceGnmGsRegsSetAddress(&pipe->gs_regs,
@@ -1000,7 +1001,7 @@ index b621e66..4b79499 100644
                          }
                      }
                      /* Store the module regardless — it may be used later
-@@ -458,7 +492,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
+@@ -458,7 +493,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
                          pipe->has_hs = true;
                          if (metadata.shadercode) {
                              sceGnmHsRegsSetAddress(&pipe->hs_regs,
@@ -1009,7 +1010,7 @@ index b621e66..4b79499 100644
                          }
                      }
                      pipe->tcs_module = mod;
-@@ -477,7 +511,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
+@@ -477,7 +512,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
                          pipe->has_es = true;
                          if (metadata.shadercode) {
                              sceGnmEsRegsSetAddress(&pipe->es_regs,
@@ -1018,7 +1019,7 @@ index b621e66..4b79499 100644
                          }
                      } else {
                          /* DS_VS or compiler fallback: treat as vertex shader.
-@@ -487,7 +521,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
+@@ -487,7 +522,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
                          pipe->has_ds_vs = true;
                          if (metadata.shadercode) {
                              sceGnmVsRegsSetAddress(&pipe->vs_regs,
@@ -1027,7 +1028,7 @@ index b621e66..4b79499 100644
                          }
                      }
                      pipe->tes_module = mod;
-@@ -655,6 +689,28 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
+@@ -655,6 +690,28 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
              }
          }
  
@@ -1056,38 +1057,38 @@ index b621e66..4b79499 100644
          pPipelines[i] = (VkPipeline)pipe;
      }
  
-@@ -700,9 +756,9 @@ vk_ps4_CreateComputePipelines(VkDevice device, VkPipelineCache pipelineCache,
+@@ -700,9 +757,9 @@ vk_ps4_CreateComputePipelines(VkDevice device, VkPipelineCache pipelineCache,
          void *cached_binary = NULL;
          if (pipelineCache && mod->binary && mod->binary_size > 0) {
              cache_hash = vk_ps4_pipeline_cache_hash(mod->binary, mod->binary_size,
 -                                                    (uint32_t)ci->stage.stage);
-+                                                    (uint32_t)ci->stage.stage ^ vk_ps4_layout_hash((const VkPs4PipelineLayout *)ci->layout));
++                                                    (uint32_t)ci->stage.stage ^ vk_ps4_stage_key_hash((const VkPs4PipelineLayout *)ci->layout, ci->stage.pSpecializationInfo));
              cached_binary = vk_ps4_pipeline_cache_lookup(pipelineCache, cache_hash,
 -                                                         (uint32_t)ci->stage.stage,
-+                                                         (uint32_t)ci->stage.stage ^ vk_ps4_layout_hash((const VkPs4PipelineLayout *)ci->layout),
++                                                         (uint32_t)ci->stage.stage ^ vk_ps4_stage_key_hash((const VkPs4PipelineLayout *)ci->layout, ci->stage.pSpecializationInfo),
                                                           &cached_size);
          }
  
-@@ -715,7 +771,8 @@ vk_ps4_CreateComputePipelines(VkDevice device, VkPipelineCache pipelineCache,
+@@ -715,7 +772,8 @@ vk_ps4_CreateComputePipelines(VkDevice device, VkPipelineCache pipelineCache,
              }
          } else {
              VkResult vr = vk_ps4_compile_shader_module(
 -                mod, ci->stage.stage, alloc, &binary, &binary_size, &metadata
 +                mod, ci->stage.stage, alloc, &binary, &binary_size, &metadata,
-+                (const VkPs4PipelineLayout *)ci->layout
++                (const VkPs4PipelineLayout *)ci->layout, ci->stage.pSpecializationInfo
              );
              if (vr != VK_SUCCESS) {
                  if (binary && binary != mod->binary) {
-@@ -728,7 +785,7 @@ vk_ps4_CreateComputePipelines(VkDevice device, VkPipelineCache pipelineCache,
+@@ -728,7 +786,7 @@ vk_ps4_CreateComputePipelines(VkDevice device, VkPipelineCache pipelineCache,
              }
              if (pipelineCache && binary && binary_size > 0 && mod->binary && mod->binary_size > 0) {
                  vk_ps4_pipeline_cache_insert(pipelineCache, cache_hash,
 -                                             (uint32_t)ci->stage.stage,
-+                                             (uint32_t)ci->stage.stage ^ vk_ps4_layout_hash((const VkPs4PipelineLayout *)ci->layout),
++                                             (uint32_t)ci->stage.stage ^ vk_ps4_stage_key_hash((const VkPs4PipelineLayout *)ci->layout, ci->stage.pSpecializationInfo),
                                               (uint32_t)mod->binary_size,
                                               binary, binary_size);
              }
-@@ -1018,17 +1075,36 @@ vk_ps4_CreateDescriptorPool(VkDevice device, const VkDescriptorPoolCreateInfo *p
+@@ -1018,17 +1076,36 @@ vk_ps4_CreateDescriptorPool(VkDevice device, const VkDescriptorPoolCreateInfo *p
      return VK_SUCCESS;
  }
  
@@ -1129,7 +1130,7 @@ index b621e66..4b79499 100644
      vk_ps4_free(alloc, pool);
  }
  
-@@ -1064,8 +1140,12 @@ vk_ps4_AllocateDescriptorSets(VkDevice device, const VkDescriptorSetAllocateInfo
+@@ -1064,8 +1141,12 @@ vk_ps4_AllocateDescriptorSets(VkDevice device, const VkDescriptorSetAllocateInfo
          if (pool && pool->free_count > 0) {
              set = pool->free_list[--pool->free_count];
              pool->free_list[pool->free_count] = NULL;
@@ -1143,7 +1144,7 @@ index b621e66..4b79499 100644
          }
  
          if (!set) {
-@@ -1077,6 +1157,22 @@ vk_ps4_AllocateDescriptorSets(VkDevice device, const VkDescriptorSetAllocateInfo
+@@ -1077,6 +1158,22 @@ vk_ps4_AllocateDescriptorSets(VkDevice device, const VkDescriptorSetAllocateInfo
                  }
                  return VK_ERROR_OUT_OF_HOST_MEMORY;
              }
@@ -1166,7 +1167,7 @@ index b621e66..4b79499 100644
          }
  
          set->type = VK_PS4_OBJ_DESCRIPTOR_SET;
-@@ -1127,15 +1223,15 @@ vk_ps4_FreeDescriptorSets(VkDevice device, VkDescriptorPool descriptorPool,
+@@ -1127,15 +1224,15 @@ vk_ps4_FreeDescriptorSets(VkDevice device, VkDescriptorPool descriptorPool,
          VkPs4DescriptorSet *set = (VkPs4DescriptorSet *)pDescriptorSets[i];
          /* Free binding resource arrays */
          for (uint32_t b = 0; b < set->binding_count; b++) {
@@ -1188,7 +1189,7 @@ index b621e66..4b79499 100644
          }
          if (pool) pool->sets_freed++;
      }
-@@ -1152,14 +1248,7 @@ vk_ps4_ResetDescriptorPool(VkDevice device, VkDescriptorPool descriptorPool, VkD
+@@ -1152,14 +1249,7 @@ vk_ps4_ResetDescriptorPool(VkDevice device, VkDescriptorPool descriptorPool, VkD
      const VkAllocationCallbacks *alloc = &dev->allocator;
      VkPs4DescriptorPool *pool = (VkPs4DescriptorPool *)descriptorPool;
  
@@ -1277,15 +1278,88 @@ index 683667b..9ae954a 100644
          if (result == 0) {
              /* Poll until the GPU writes the label. */
 diff --git a/src/vk_ps4_shader.c b/src/vk_ps4_shader.c
-index 151a536..57a90e3 100644
+index 151a536..dfd7977 100644
 --- a/src/vk_ps4_shader.c
 +++ b/src/vk_ps4_shader.c
-@@ -147,10 +147,29 @@ vk_ps4_DestroyShaderModule(VkDevice device, VkShaderModule shaderModule, const V
+@@ -147,10 +147,103 @@ vk_ps4_DestroyShaderModule(VkDevice device, VkShaderModule shaderModule, const V
  
  /* Helper: compile a shader module for a specific stage using libpsbc.
   * Called from pipeline creation. Returns the compiled binary and metadata. */
 +/* Stable hash of a pipeline layout's descriptor bindings: the same SPIR-V compiles differently
 + * against different layouts, so the pipeline cache key must include it. */
++static uint32_t spec_hash(const VkSpecializationInfo *spec) {
++    uint32_t h = 2166136261u;
++    if (!spec || !spec->mapEntryCount) return 0;
++    for (uint32_t i = 0; i < spec->mapEntryCount; i++) {
++        const VkSpecializationMapEntry *e = &spec->pMapEntries[i];
++        h = (h ^ e->constantID) * 16777619u;
++        for (size_t b = 0; b < e->size && e->offset + b < spec->dataSize; b++)
++            h = (h ^ ((const uint8_t *)spec->pData)[e->offset + b]) * 16777619u;
++    }
++    return h;
++}
++
++/* Pipeline-cache key part: everything besides the SPIR-V that changes the compiled code. */
++uint32_t vk_ps4_stage_key_hash(const VkPs4PipelineLayout *pl, const VkSpecializationInfo *spec) {
++    extern uint32_t vk_ps4_layout_hash(const VkPs4PipelineLayout *pl);
++    return vk_ps4_layout_hash(pl) ^ (spec_hash(spec) << 8);
++}
++
++/* Apply specialization constants to a copy of the SPIR-V: the shader compiler does not take
++ * specialization info, so bake the values in by turning each OpSpecConstant* with a SpecId
++ * decoration into the matching OpConstant*. DXVK's present shader, for one, branches on a
++ * specialization constant to decide whether to sample a gamma ramp that is not bound. */
++static uint32_t *specialize_spirv(const uint32_t *in, size_t bytes, const VkSpecializationInfo *spec,
++                                  const VkAllocationCallbacks *alloc) {
++    size_t words = bytes / 4;
++    uint32_t *out = (uint32_t *)vk_ps4_alloc(alloc, bytes, 4);
++    if (!out) return NULL;
++    memcpy(out, in, bytes);
++    enum { MAXSPEC = 256 };
++    uint32_t spec_target[MAXSPEC], spec_id[MAXSPEC];
++    uint32_t n = 0;
++    for (size_t i = 5; i < words;) {
++        uint32_t op = out[i] & 0xffff, wc = out[i] >> 16;
++        if (wc == 0 || i + wc > words) break;
++        if (op == 71 /* OpDecorate */ && wc >= 4 && out[i + 2] == 1 /* SpecId */ && n < MAXSPEC) {
++            spec_target[n] = out[i + 1];
++            spec_id[n] = out[i + 3];
++            n++;
++        }
++        i += wc;
++    }
++    for (size_t i = 5; i < words;) {
++        uint32_t op = out[i] & 0xffff, wc = out[i] >> 16;
++        if (wc == 0 || i + wc > words) break;
++        if (op == 48 || op == 49 || op == 50) {
++            uint32_t result = out[i + 2];
++            for (uint32_t k = 0; k < n; k++) {
++                if (spec_target[k] != result) continue;
++                for (uint32_t e = 0; e < spec->mapEntryCount; e++) {
++                    const VkSpecializationMapEntry *me = &spec->pMapEntries[e];
++                    if (me->constantID != spec_id[k] || me->offset + me->size > spec->dataSize) continue;
++                    const uint8_t *d = (const uint8_t *)spec->pData + me->offset;
++                    if (op == 50) {
++                        for (uint32_t w = 0; w < wc - 3 && (w * 4) < me->size; w++) {
++                            uint32_t v = 0;
++                            memcpy(&v, d + w * 4, (me->size - w * 4) < 4 ? (me->size - w * 4) : 4);
++                            out[i + 3 + w] = v;
++                        }
++                        out[i] = (wc << 16) | 43; /* OpConstant */
++                    } else {
++                        uint32_t v = 0;
++                        memcpy(&v, d, me->size < 4 ? me->size : 4);
++                        out[i] = (wc << 16) | (v ? 41 : 42); /* OpConstantTrue / OpConstantFalse */
++                    }
++                    break;
++                }
++            }
++        }
++        i += wc;
++    }
++    return out;
++}
++
 +uint32_t vk_ps4_layout_hash(const VkPs4PipelineLayout *pl) {
 +    uint32_t h = 2166136261u;
 +    if (!pl) return 0;
@@ -1307,11 +1381,12 @@ index 151a536..57a90e3 100644
                                        void **out_binary, size_t *out_binary_size,
 -                                      GnmShaderMetadata *out_metadata) {
 +                                      GnmShaderMetadata *out_metadata,
-+                                      const VkPs4PipelineLayout *playout) {
++                                      const VkPs4PipelineLayout *playout,
++                                      const VkSpecializationInfo *spec) {
      if (!mod || !mod->binary || mod->binary_size == 0) {
          return VK_ERROR_INITIALIZATION_FAILED;
      }
-@@ -162,6 +181,36 @@ VkResult vk_ps4_compile_shader_module(VkPs4ShaderModule *mod, VkShaderStageFlagB
+@@ -162,6 +255,36 @@ VkResult vk_ps4_compile_shader_module(VkPs4ShaderModule *mod, VkShaderStageFlagB
  
      /* Set up compile options (zero-init to avoid stack garbage) */
      PsbcCompileOptions opts = {0};
@@ -1348,6 +1423,24 @@ index 151a536..57a90e3 100644
      opts.target = PSBC_TARGET_PS4_BASE;
      opts.entrypoint = "main";
      opts.optimise = true;
+@@ -183,12 +306,16 @@ VkResult vk_ps4_compile_shader_module(VkPs4ShaderModule *mod, VkShaderStageFlagB
+ 
+     /* Compile */
+     PsbcShaderOutput output = {0};
++    uint32_t *specialized = NULL;
++    if (spec && spec->mapEntryCount)
++        specialized = specialize_spirv((const uint32_t *)mod->binary, mod->binary_size, spec, alloc);
+     PsbcResult result = psbc_compile_shader(
+-        mod->binary,        /* SPIR-V data */
++        specialized ? specialized : mod->binary,        /* SPIR-V data */
+         mod->binary_size,   /* SPIR-V size */
+         &opts,
+         &output
+     );
++    if (specialized) vk_ps4_free(alloc, specialized);
+ 
+     if (result != PSBC_RESULT_OK) {
+         vk_ps4_log("compile_shader: %s FAILED psbc_result=%d", stage_name, (int)result);
 diff --git a/src/vk_ps4_swapchain.c b/src/vk_ps4_swapchain.c
 index bc36c63..0bfad35 100644
 --- a/src/vk_ps4_swapchain.c

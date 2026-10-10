@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200112L
 #include "pcps4_sys.h"
+#include "pcps4_fault.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -711,6 +712,7 @@ static void *thread_bootstrap(void *opaque)
 
     current_thread_id = thread_id;
     free(start);
+    pcps4_fault_thread_init();
     exit_code = function(argument);
     return (void *)(uintptr_t)exit_code;
 }

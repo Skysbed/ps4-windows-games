@@ -12,6 +12,7 @@ extern "C" {
  * after stack/memory corruption is less safe than terminating the app.
  */
 int pcps4_fault_install(void);
+void pcps4_fault_thread_init(void);
 
 /*
  * Record the stage the app is currently executing. This is a single pointer

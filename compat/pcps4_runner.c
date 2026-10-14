@@ -68,6 +68,14 @@ void pcps4_runner_loop(void)
         runs++;
         runner_log("[runner] run %s (#%ld)", path[0] ? path : "<built-in>", (long)runs);
 
+        /* Only load modules from the runner's own folder with the expected name. */
+        if (path[0] && (strncmp(path, "/data/pcps4/core_", 17) != 0 || strstr(path, "..") ||
+                        strlen(path) < 22 || strcmp(path + strlen(path) - 4, ".prx") != 0)) {
+            runner_log("[runner] rejected module path %s", path, 0);
+            write_done(-2, path);
+            continue;
+        }
+
         pcps4_status_suspend_display();
         long rc = -1;
         if (path[0]) {

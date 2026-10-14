@@ -279,7 +279,10 @@ $(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ
 
 CORE_ELF := $(INTDIR)/pcps4_core.elf
 CORE_PRX := $(INTDIR)/pcps4_core.prx
-LDFLAGS_CORE := $(filter-out $(TOOLCHAIN)/lib/crt1.o,$(LDFLAGS)) --export-dynamic $(TOOLCHAIN)/lib/crtlib.o
+# Linked as a shared object, not -pie: -pie rewrites thread-local accesses to the main program's
+# TLS block, which corrupts memory once the code runs as a loaded module. -Bsymbolic keeps the
+# module's references to its own symbols inside the module.
+LDFLAGS_CORE := $(filter-out -pie $(TOOLCHAIN)/lib/crt1.o,$(LDFLAGS)) -shared -Bsymbolic --export-dynamic $(TOOLCHAIN)/lib/crtlib.o
 
 # The same code as the app, as a loadable module for the hands-free runner (compat/pcps4_runner.c).
 $(CORE_ELF): $(ELF)

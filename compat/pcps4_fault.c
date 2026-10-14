@@ -128,7 +128,8 @@ static void dump_hex(uint64_t value)
             crash_dump[crash_dump_len++] = buf[n];
 }
 
-static void emit_context(int fd, void *uc)
+/* Registers first, written straight away; the stack walk can fault on a bad stack pointer. */
+static void emit_context(int fd, void *uc, void *info)
 {
     const uint64_t *mc;
     const uint64_t *sp;
@@ -141,14 +142,25 @@ static void emit_context(int fd, void *uc)
 
     if (uc == NULL)
         return;
+    crash_dump_len = 0;
+    if (info != NULL) {
+        dump_str("si_addr=");
+        dump_hex((uint64_t)(uintptr_t)*(void *const *)((const char *)info + 24));
+        dump_str("\n");
+    }
     mc = (const uint64_t *)((const char *)uc + 16);
-    sp = (const uint64_t *)(uintptr_t)mc[23];
     for (i = 0; i < (int)(sizeof(regs) / sizeof(regs[0])); ++i) {
         dump_str(regs[i].name);
         dump_str("=");
         dump_hex(mc[regs[i].slot]);
         dump_str("\n");
     }
+    (void)write(fd, crash_dump, crash_dump_len);
+
+    sp = (const uint64_t *)(uintptr_t)mc[23];
+    if (sp == NULL || ((uintptr_t)sp & 7) != 0)
+        return;
+    crash_dump_len = 0;
     /* [rsp] is the return address of a call through a bad pointer. */
     for (i = 0; i < 40; ++i) {
         dump_str("stack+");
@@ -160,25 +172,47 @@ static void emit_context(int fd, void *uc)
     (void)write(fd, crash_dump, crash_dump_len);
 }
 
+/* Runner support: instead of ending the process, park the faulting thread so the runner can
+ * abandon the run and keep the app alive (see compat/pcps4_runner.c). */
+static volatile int pcps4_park_mode = 0;
+static volatile int pcps4_fault_total = 0;
+static __thread int pcps4_in_handler = 0;
+
+void pcps4_fault_set_park(int on) { pcps4_park_mode = on; }
+int pcps4_fault_count(void) { return pcps4_fault_total; }
+
+static void park_forever(void)
+{
+    extern int sceKernelUsleep(unsigned int);
+    for (;;)
+        (void)sceKernelUsleep(1000000);
+}
+
 static void pcps4_fault_handler(int signal_number, void *info, void *uc)
 {
     int fd;
-    (void)info;
+    int first;
 
-    if (pcps4_fault_seen)
+    if (pcps4_in_handler) {
+        if (pcps4_park_mode)
+            park_forever();
         _exit(128 + signal_number);
-    pcps4_fault_seen = 1;
+    }
+    pcps4_in_handler = 1;
+    first = __atomic_fetch_add(&pcps4_fault_total, 1, __ATOMIC_SEQ_CST) == 0;
+    (void)pcps4_fault_seen;
 
-    /* Toolchain signal handlers use the legacy one-argument ABI. */
     emit_report(STDERR_FILENO, signal_number, 0);
 
-    fd = open(PCPS4_CRASH_PATH, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    fd = open(PCPS4_CRASH_PATH, O_WRONLY | O_CREAT | (first ? O_TRUNC : O_APPEND), 0666);
     if (fd >= 0) {
         emit_report(fd, signal_number, 0);
-        emit_context(fd, uc);
+        emit_context(fd, uc, info);
         (void)close(fd);
     }
 
+    if (pcps4_park_mode)
+        park_forever();
     _exit(128 + signal_number);
 }
 

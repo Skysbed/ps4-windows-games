@@ -1447,10 +1447,10 @@ index 151a536..dfd7977 100644
      if (result != PSBC_RESULT_OK) {
          vk_ps4_log("compile_shader: %s FAILED psbc_result=%d", stage_name, (int)result);
 diff --git a/src/vk_ps4_swapchain.c b/src/vk_ps4_swapchain.c
-index bc36c63..0bfad35 100644
+index bc36c63..62ab023 100644
 --- a/src/vk_ps4_swapchain.c
 +++ b/src/vk_ps4_swapchain.c
-@@ -11,6 +11,12 @@
+@@ -11,6 +11,24 @@
  
  #include <string.h>
  
@@ -1460,10 +1460,59 @@ index bc36c63..0bfad35 100644
 +int pcps4_vk_skip_submit_done = 0;
 +#define PCPS4_VKTRACE(m) do { if (pcps4_vk_trace) pcps4_vk_trace(m); } while (0)
 +
++/* PcPs4: swapchains currently holding the display, so an abandoned run can release it. */
++static VkPs4Swapchain *g_pcps4_open_sc[8];
++
++void vk_ps4_force_close_video_out(void) {
++    for (int k = 0; k < 8; k++) {
++        if (g_pcps4_open_sc[k]) {
++            sceGnmVideoOutClose(&g_pcps4_open_sc[k]->video_out);
++            g_pcps4_open_sc[k] = NULL;
++        }
++    }
++}
++
  VKAPI_ATTR VkResult VKAPI_CALL
  vk_ps4_CreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR *pCreateInfo,
                            const VkAllocationCallbacks *pAllocator, VkSwapchainKHR *pSwapchain) {
-@@ -342,12 +348,42 @@ vk_ps4_QueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *pPresentInfo) {
+@@ -76,7 +94,9 @@ vk_ps4_CreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR *pCrea
+     sc->image_count = vo_info.numbuffers;
+     sc->images = vk_ps4_alloc_zero(alloc, sc->image_count * sizeof(VkPs4Image), 16);
+     if (!sc->images) {
+-        sceGnmVideoOutClose(&sc->video_out);
++        for (int k = 0; k < 8; k++)
++        if (g_pcps4_open_sc[k] == sc) g_pcps4_open_sc[k] = NULL;
++    sceGnmVideoOutClose(&sc->video_out);
+         vk_ps4_free(alloc, sc);
+         return VK_ERROR_OUT_OF_HOST_MEMORY;
+     }
+@@ -130,11 +150,15 @@ vk_ps4_CreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR *pCrea
+ 
+     if (!rt_ok) {
+         vk_ps4_free(alloc, sc->images);
+-        sceGnmVideoOutClose(&sc->video_out);
++        for (int k = 0; k < 8; k++)
++        if (g_pcps4_open_sc[k] == sc) g_pcps4_open_sc[k] = NULL;
++    sceGnmVideoOutClose(&sc->video_out);
+         vk_ps4_free(alloc, sc);
+         return VK_ERROR_INITIALIZATION_FAILED;
+     }
+ 
++    for (int k = 0; k < 8; k++)
++        if (!g_pcps4_open_sc[k]) { g_pcps4_open_sc[k] = sc; break; }
+     *pSwapchain = (VkSwapchainKHR)sc;
+     return VK_SUCCESS;
+ }
+@@ -155,6 +179,8 @@ vk_ps4_DestroySwapchainKHR(VkDevice device, VkSwapchainKHR swapchain, const VkAl
+     if (sc->images) {
+         vk_ps4_free(alloc, sc->images);
+     }
++    for (int k = 0; k < 8; k++)
++        if (g_pcps4_open_sc[k] == sc) g_pcps4_open_sc[k] = NULL;
+     sceGnmVideoOutClose(&sc->video_out);
+     vk_ps4_free(alloc, sc);
+ }
+@@ -342,12 +368,42 @@ vk_ps4_QueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *pPresentInfo) {
          if (image_index < sc->image_count) {
              vk_ps4_log("QueuePresent: flip img=%u frame=%lld",
                         image_index, (long long)sc->video_out.frame);

@@ -13,6 +13,8 @@ extern "C" {
  */
 int pcps4_fault_install(void);
 void pcps4_fault_thread_init(void);
+void pcps4_fault_set_park(int on);
+int pcps4_fault_count(void);
 
 /*
  * Record the stage the app is currently executing. This is a single pointer

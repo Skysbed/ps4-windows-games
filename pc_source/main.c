@@ -104,8 +104,9 @@ void pcps4_runner_loop(void);
 
 int main(void)
 {
-    pcps4_main_sequence();
-    /* Stay open and rerun on demand: see compat/pcps4_runner.c. */
+    /* Show the screen and log, then hand over to the runner, which does the first run on a
+     * protected thread and then reruns on demand (see compat/pcps4_runner.c). */
+    pcps4_status_begin();
     pcps4_runner_loop();
     return 0;
 }

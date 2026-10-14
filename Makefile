@@ -72,7 +72,7 @@ D3D11_COM_OBJ := $(INTDIR)/pcps4_d3d11_com.o
 ABI_OBJ := $(INTDIR)/pcps4_abi.o
 WIN32_OBJ := $(INTDIR)/pcps4_win32.o
 DXGI_OBJ := $(INTDIR)/pcps4_dxgi.o
-TEB_OBJ := $(INTDIR)/pcps4_teb.o
+TEB_OBJ := $(INTDIR)/pcps4_teb.o $(INTDIR)/pcps4_runner.o
 DXVK_OBJS :=
 DXVK_LDLIBS :=
 ifeq ($(PCPS4_DXVK),1)
@@ -250,7 +250,11 @@ $(INTDIR):
 	@mkdir -p "$(INTDIR)"
 
 
-$(TEB_OBJ): compat/pcps4_teb.c compat/pcps4_teb.h compat/pcps4_pe.h
+$(INTDIR)/pcps4_teb.o: compat/pcps4_teb.c compat/pcps4_teb.h compat/pcps4_pe.h
+	@mkdir -p "$(dir $@)"
+	$(CC) $(CFLAGS) -o "$@" "$<"
+
+$(INTDIR)/pcps4_runner.o: compat/pcps4_runner.c compat/pcps4_status.h compat/pcps4_version.h
 	@mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) -o "$@" "$<"
 
@@ -272,6 +276,20 @@ $(ELF): $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) $(GNM_RENDERER_OBJ
 	@test -n "$(OBJS)" || (echo "ERROR: no PC source files found in pc_source/."; exit 1)
 	$(LD) $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) \
 	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(GNM_RENDERER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(DLL_OBJ) $(D3D11_COM_OBJ) $(ABI_OBJ) $(WIN32_OBJ) $(DXGI_OBJ) $(TEB_OBJ) $(DXVK_OBJS) -o "$@" $(DXVK_LDLIBS) $(LDFLAGS)
+
+CORE_ELF := $(INTDIR)/pcps4_core.elf
+CORE_PRX := $(INTDIR)/pcps4_core.prx
+LDFLAGS_CORE := $(filter-out $(TOOLCHAIN)/lib/crt1.o,$(LDFLAGS)) --export-dynamic $(TOOLCHAIN)/lib/crtlib.o
+
+# The same code as the app, as a loadable module for the hands-free runner (compat/pcps4_runner.c).
+$(CORE_ELF): $(ELF)
+	$(LD) $(OBJS) $(SYS_OBJ) $(FAULT_OBJ) $(GFX_OBJ) $(GNM_OBJ) \
+	       $(GPU_OBJ) $(D3D11_OBJ) $(SHADER_OBJ) $(GNM_RENDERER_OBJ) $(PE_OBJ) $(LOADER_OBJ) $(STATUS_OBJ) $(XINPUT_OBJ) $(WINAPI_OBJ) $(GAME_OBJ) $(DLL_OBJ) $(D3D11_COM_OBJ) $(ABI_OBJ) $(WIN32_OBJ) $(DXGI_OBJ) $(TEB_OBJ) $(DXVK_OBJS) -o "$@" $(DXVK_LDLIBS) $(LDFLAGS_CORE)
+
+$(CORE_PRX): $(CORE_ELF)
+	"$(CREATE_FSELF)" -in="$(CORE_ELF)" -out="$(INTDIR)/pcps4_core.oelf" --lib="$@" --paid 0x3800000000000011
+
+core: $(CORE_PRX)
 
 $(EBOOT): $(ELF)
 	@test -n "$(OO_PS4_TOOLCHAIN)" || (echo "ERROR: OO_PS4_TOOLCHAIN is not set."; exit 1)

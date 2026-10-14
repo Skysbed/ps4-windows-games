@@ -23,7 +23,7 @@ void pcps4_status_finish_forever(void);
 
 static volatile LONG demo_value = 0;
 
-int main(void)
+int pcps4_main_sequence(void)
 {
     DWORD start;
     char buffer[32];
@@ -97,7 +97,15 @@ int main(void)
     pcps4_status_resume_display();
 #endif
 
-    /* Stay on the result screen if the game path is disabled or returns. */
-    pcps4_status_finish_forever();
+    return 0;
+}
+
+void pcps4_runner_loop(void);
+
+int main(void)
+{
+    pcps4_main_sequence();
+    /* Stay open and rerun on demand: see compat/pcps4_runner.c. */
+    pcps4_runner_loop();
     return 0;
 }

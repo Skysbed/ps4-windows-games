@@ -27,7 +27,7 @@ esac
 export DOTNET_BUNDLE_EXTRACT_BASE_DIR="${DOTNET_BUNDLE_EXTRACT_BASE_DIR:-/tmp/dotnet_extract}"
 export DOTNET_EnableWriteXorExecute=0
 cd "$HERE"
-make -B pkg INTDIR="$OUT" PACKAGE_ROOT="$OUT/package" PCPS4_DXVK=1 PCPS4_BUNDLED_GAME=1 \
+make -B pkg core INTDIR="$OUT" PACKAGE_ROOT="$OUT/package" PCPS4_DXVK=1 PCPS4_BUNDLED_GAME=1 \
   PCPS4_GAME_DIR="$GAME" PCPS4_VK_LIBS="$VK_LIBS" PCPS4_VK_HEADERS="$VKHDR" \
   TITLE="PcPs4 DXVK First Light" TITLE_ID=PCPS00006 CONTENT_ID=IV0000-PCPS00006_00-DXVKFIRSTLIGHT01 \
   CC="clang -Wno-incompatible-pointer-types" CXX="clang++ -Wno-incompatible-pointer-types" \

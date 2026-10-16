@@ -134,7 +134,7 @@ static void emit_context(int fd, void *uc)
     const uint64_t *sp;
     int i;
     static const struct { const char *name; int slot; } regs[] = {
-        {"rip", 20}, {"rsp", 23}, {"rbp", 9}, {"rax", 7}, {"rbx", 8}, {"rcx", 4}, {"rdx", 3},
+        {"rip", 20}, {"rsp", 22}, {"rbp", 9}, {"rax", 7}, {"rbx", 8}, {"rcx", 4}, {"rdx", 3},
         {"rsi", 2}, {"rdi", 1}, {"r8", 5}, {"r9", 6}, {"r10", 10}, {"r11", 11}, {"r12", 12},
         {"r13", 13}, {"r14", 14}, {"r15", 15}, {"addr", 17}
     };
@@ -142,22 +142,32 @@ static void emit_context(int fd, void *uc)
     if (uc == NULL)
         return;
     mc = (const uint64_t *)((const char *)uc + 16);
-    sp = (const uint64_t *)(uintptr_t)mc[23];
+    /* FreeBSD amd64 mcontext: mc_rsp is slot 22 (slot 23 is mc_ss). */
+    sp = (const uint64_t *)(uintptr_t)mc[22];
     for (i = 0; i < (int)(sizeof(regs) / sizeof(regs[0])); ++i) {
         dump_str(regs[i].name);
         dump_str("=");
         dump_hex(mc[regs[i].slot]);
         dump_str("\n");
     }
-    /* [rsp] is the return address of a call through a bad pointer. */
-    for (i = 0; i < 40; ++i) {
-        dump_str("stack+");
-        dump_hex((uint64_t)(i * 8));
-        dump_str("=");
-        dump_hex(sp[i]);
-        dump_str("\n");
-    }
+    /*
+     * sp[0] is the return address of a call through a bad pointer, i.e. the
+     * instruction right after the faulting `call` - that is the real crash
+     * site when rip is null. Flush the registers first so they survive even if
+     * the stack read itself faults, and only walk the stack when sp looks sane.
+     */
     (void)write(fd, crash_dump, crash_dump_len);
+    crash_dump_len = 0;
+    if (sp != NULL && ((uintptr_t)sp & 7u) == 0u) {
+        for (i = 0; i < 40; ++i) {
+            dump_str("stack+");
+            dump_hex((uint64_t)(i * 8));
+            dump_str("=");
+            dump_hex(sp[i]);
+            dump_str("\n");
+        }
+        (void)write(fd, crash_dump, crash_dump_len);
+    }
 }
 
 static void pcps4_fault_handler(int signal_number, void *info, void *uc)

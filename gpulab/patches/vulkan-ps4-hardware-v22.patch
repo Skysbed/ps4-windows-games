@@ -11,10 +11,33 @@ index e104443..ead0c85 100644
  	src/vk_ps4_swapchain.c \
  	src/vk_ps4_queue.c \
 diff --git a/include/vk_ps4_internal.h b/include/vk_ps4_internal.h
-index 7634d6b..d8dade7 100644
+index 7634d6b..969b3e2 100644
 --- a/include/vk_ps4_internal.h
 +++ b/include/vk_ps4_internal.h
-@@ -269,6 +269,8 @@ struct VkPs4CommandBuffer {
+@@ -182,6 +182,22 @@ struct VkPs4Device {
+     void *clear_ps_binary;
+     GnmPsStageRegisters clear_ps_regs;
+     bool clear_ps_ready;
++
++    /* Driver-side present blit: a fullscreen textured draw that samples a
++     * source texture into a swapchain image, bypassing DXVK's own present
++     * blitter (whose psbc-compiled shaders produce no visible output). Built
++     * lazily from the proven self-test texture shaders (blit_shaders.h). */
++    bool blit_ready;
++    bool blit_tried;
++    void *blit_vs_binary;
++    void *blit_ps_binary;
++    GnmVsStageRegisters blit_vs_regs;
++    GnmPsStageRegisters blit_ps_regs;
++    GnmVertexExportSemantic blit_vs_exports[32];
++    uint32_t blit_vs_export_count;
++    GnmPixelInputSemantic blit_ps_inputs[32];
++    uint32_t blit_ps_input_count;
++    uint8_t blit_ps_settable_reg; /* PS user-data reg for the set-0 table ptr, 0xff=none */
+ };
+ 
+ /* === Queue === */
+@@ -269,6 +285,8 @@ struct VkPs4CommandBuffer {
      uint32_t stencil_refmask_front;   /* DB_STENCILREFMASK shadow */
      uint32_t stencil_refmask_back;    /* DB_STENCILREFMASK_BF shadow */
      bool stencil_shadow_valid;        /* initialized from pipeline bind */
@@ -23,7 +46,7 @@ index 7634d6b..d8dade7 100644
  };
  
  /* === Memory === */
-@@ -515,6 +517,12 @@ struct VkPs4Pipeline {
+@@ -515,6 +533,12 @@ struct VkPs4Pipeline {
      /* Vertex input semantics extracted from VS shader binary */
      GnmVertexInputSemantic vs_input_semantics[VK_PS4_MAX_INPUT_USAGE_SLOTS];
      uint32_t vs_input_semantic_count;
@@ -36,7 +59,7 @@ index 7634d6b..d8dade7 100644
      /* Push constant inline register mapping — extracted from
       * IMM_ALUFLOATCONST input usage slots emitted by psbc.
       * Each entry maps a push constant dword index to a user-data
-@@ -577,6 +585,11 @@ struct VkPs4DescriptorPool {
+@@ -577,6 +601,11 @@ struct VkPs4DescriptorPool {
  #define VK_PS4_MAX_POOLED_SETS 256
      VkPs4DescriptorSet *free_list[VK_PS4_MAX_POOLED_SETS];
      uint32_t free_count;
@@ -48,7 +71,7 @@ index 7634d6b..d8dade7 100644
  };
  
  struct VkPs4DescriptorSet {
-@@ -589,6 +602,10 @@ struct VkPs4DescriptorSet {
+@@ -589,6 +618,10 @@ struct VkPs4DescriptorSet {
      /* VK_EXT_descriptor_indexing: variable descriptor count for the
       * last binding (0 if layout doesn't use variable count). */
      uint32_t variable_descriptor_count;
@@ -59,7 +82,7 @@ index 7634d6b..d8dade7 100644
  };
  
  /* === Sync === */
-@@ -678,6 +695,13 @@ struct VkPs4Swapchain {
+@@ -678,6 +711,13 @@ struct VkPs4Swapchain {
  
  /* === Allocator helpers === */
  void *vk_ps4_alloc(const VkAllocationCallbacks *alloc, size_t size, size_t alignment);
@@ -73,6 +96,80 @@ index 7634d6b..d8dade7 100644
  void *vk_ps4_alloc_zero(const VkAllocationCallbacks *alloc, size_t size, size_t alignment);
  void vk_ps4_free(const VkAllocationCallbacks *alloc, void *ptr);
  
+diff --git a/shaders/blit_shaders.h b/shaders/blit_shaders.h
+new file mode 100644
+index 0000000..c886d62
+--- /dev/null
++++ b/shaders/blit_shaders.h
+@@ -0,0 +1,68 @@
++/* Driver-side present-blit shaders, reused verbatim from the in-driver
++ * self-test's PROVEN texture pipeline (psbc-compiled, samples correctly).
++ * VS: gl_VertexIndex fullscreen triangle -> position + uv.
++ * PS: samples combined-image-sampler at binding 0 at uv, outputs it. */
++#pragma once
++#include <stdint.h>
++
++const uint32_t blit_vs_spirv[] = {
++	0x07230203,0x00010000,0x0008000b,0x0000002e,0x00000000,0x00020011,0x00000001,0x0006000b,
++	0x00000001,0x4c534c47,0x6474732e,0x3035342e,0x00000000,0x0003000e,0x00000000,0x00000001,
++	0x0008000f,0x00000000,0x00000004,0x6e69616d,0x00000000,0x0000000c,0x00000018,0x00000020,
++	0x00030003,0x00000002,0x000001c2,0x00040005,0x00000004,0x6e69616d,0x00000000,0x00030005,
++	0x00000009,0x00000070,0x00060005,0x0000000c,0x565f6c67,0x65747265,0x646e4978,0x00007865,
++	0x00030005,0x00000018,0x00007675,0x00060005,0x0000001e,0x505f6c67,0x65567265,0x78657472,
++	0x00000000,0x00060006,0x0000001e,0x00000000,0x505f6c67,0x7469736f,0x006e6f69,0x00070006,
++	0x0000001e,0x00000001,0x505f6c67,0x746e696f,0x657a6953,0x00000000,0x00070006,0x0000001e,
++	0x00000002,0x435f6c67,0x4470696c,0x61747369,0x0065636e,0x00070006,0x0000001e,0x00000003,
++	0x435f6c67,0x446c6c75,0x61747369,0x0065636e,0x00030005,0x00000020,0x00000000,0x00040047,
++	0x0000000c,0x0000000b,0x0000002a,0x00040047,0x00000018,0x0000001e,0x00000000,0x00030047,
++	0x0000001e,0x00000002,0x00050048,0x0000001e,0x00000000,0x0000000b,0x00000000,0x00050048,
++	0x0000001e,0x00000001,0x0000000b,0x00000001,0x00050048,0x0000001e,0x00000002,0x0000000b,
++	0x00000003,0x00050048,0x0000001e,0x00000003,0x0000000b,0x00000004,0x00020013,0x00000002,
++	0x00030021,0x00000003,0x00000002,0x00030016,0x00000006,0x00000020,0x00040017,0x00000007,
++	0x00000006,0x00000002,0x00040020,0x00000008,0x00000007,0x00000007,0x00040015,0x0000000a,
++	0x00000020,0x00000001,0x00040020,0x0000000b,0x00000001,0x0000000a,0x0004003b,0x0000000b,
++	0x0000000c,0x00000001,0x0004002b,0x0000000a,0x0000000e,0x00000001,0x0004002b,0x0000000a,
++	0x00000010,0x00000002,0x00040020,0x00000017,0x00000003,0x00000007,0x0004003b,0x00000017,
++	0x00000018,0x00000003,0x00040017,0x0000001a,0x00000006,0x00000004,0x00040015,0x0000001b,
++	0x00000020,0x00000000,0x0004002b,0x0000001b,0x0000001c,0x00000001,0x0004001c,0x0000001d,
++	0x00000006,0x0000001c,0x0006001e,0x0000001e,0x0000001a,0x00000006,0x0000001d,0x0000001d,
++	0x00040020,0x0000001f,0x00000003,0x0000001e,0x0004003b,0x0000001f,0x00000020,0x00000003,
++	0x0004002b,0x0000000a,0x00000021,0x00000000,0x0004002b,0x00000006,0x00000023,0x40000000,
++	0x0004002b,0x00000006,0x00000025,0x3f800000,0x0004002b,0x00000006,0x00000028,0x00000000,
++	0x00040020,0x0000002c,0x00000003,0x0000001a,0x00050036,0x00000002,0x00000004,0x00000000,
++	0x00000003,0x000200f8,0x00000005,0x0004003b,0x00000008,0x00000009,0x00000007,0x0004003d,
++	0x0000000a,0x0000000d,0x0000000c,0x000500c4,0x0000000a,0x0000000f,0x0000000d,0x0000000e,
++	0x000500c7,0x0000000a,0x00000011,0x0000000f,0x00000010,0x0004006f,0x00000006,0x00000012,
++	0x00000011,0x0004003d,0x0000000a,0x00000013,0x0000000c,0x000500c7,0x0000000a,0x00000014,
++	0x00000013,0x00000010,0x0004006f,0x00000006,0x00000015,0x00000014,0x00050050,0x00000007,
++	0x00000016,0x00000012,0x00000015,0x0003003e,0x00000009,0x00000016,0x0004003d,0x00000007,
++	0x00000019,0x00000009,0x0003003e,0x00000018,0x00000019,0x0004003d,0x00000007,0x00000022,
++	0x00000009,0x0005008e,0x00000007,0x00000024,0x00000022,0x00000023,0x00050050,0x00000007,
++	0x00000026,0x00000025,0x00000025,0x00050083,0x00000007,0x00000027,0x00000024,0x00000026,
++	0x00050051,0x00000006,0x00000029,0x00000027,0x00000000,0x00050051,0x00000006,0x0000002a,
++	0x00000027,0x00000001,0x00070050,0x0000001a,0x0000002b,0x00000029,0x0000002a,0x00000028,
++	0x00000025,0x00050041,0x0000002c,0x0000002d,0x00000020,0x00000021,0x0003003e,0x0000002d,
++	0x0000002b,0x000100fd,0x00010038
++};
++
++const uint32_t blit_fs_spirv[] = {
++	0x07230203,0x00010000,0x0008000b,0x00000014,0x00000000,0x00020011,0x00000001,0x0006000b,
++	0x00000001,0x4c534c47,0x6474732e,0x3035342e,0x00000000,0x0003000e,0x00000000,0x00000001,
++	0x0007000f,0x00000004,0x00000004,0x6e69616d,0x00000000,0x00000009,0x00000011,0x00030010,
++	0x00000004,0x00000007,0x00030003,0x00000002,0x000001c2,0x00040005,0x00000004,0x6e69616d,
++	0x00000000,0x00030005,0x00000009,0x00000063,0x00030005,0x0000000d,0x00786574,0x00030005,
++	0x00000011,0x00007675,0x00040047,0x00000009,0x0000001e,0x00000000,0x00040047,0x0000000d,
++	0x00000021,0x00000000,0x00040047,0x0000000d,0x00000022,0x00000000,0x00040047,0x00000011,
++	0x0000001e,0x00000000,0x00020013,0x00000002,0x00030021,0x00000003,0x00000002,0x00030016,
++	0x00000006,0x00000020,0x00040017,0x00000007,0x00000006,0x00000004,0x00040020,0x00000008,
++	0x00000003,0x00000007,0x0004003b,0x00000008,0x00000009,0x00000003,0x00090019,0x0000000a,
++	0x00000006,0x00000001,0x00000000,0x00000000,0x00000000,0x00000001,0x00000000,0x0003001b,
++	0x0000000b,0x0000000a,0x00040020,0x0000000c,0x00000000,0x0000000b,0x0004003b,0x0000000c,
++	0x0000000d,0x00000000,0x00040017,0x0000000f,0x00000006,0x00000002,0x00040020,0x00000010,
++	0x00000001,0x0000000f,0x0004003b,0x00000010,0x00000011,0x00000001,0x00050036,0x00000002,
++	0x00000004,0x00000000,0x00000003,0x000200f8,0x00000005,0x0004003d,0x0000000b,0x0000000e,
++	0x0000000d,0x0004003d,0x0000000f,0x00000012,0x00000011,0x00050057,0x00000007,0x00000013,
++	0x0000000e,0x00000012,0x0003003e,0x00000009,0x00000013,0x000100fd,0x00010038
++};
 diff --git a/shaders/clear_push.frag b/shaders/clear_push.frag
 new file mode 100644
 index 0000000..2a54ed7
@@ -115,7 +212,7 @@ index 0000000..4f6b4aa
 +};
 +static const unsigned int g_clear_ps_binary_size = 216;
 diff --git a/src/vk_ps4_command.c b/src/vk_ps4_command.c
-index 168c1f3..9183c1d 100644
+index 168c1f3..dd0a065 100644
 --- a/src/vk_ps4_command.c
 +++ b/src/vk_ps4_command.c
 @@ -19,6 +19,16 @@
@@ -413,24 +510,170 @@ index 168c1f3..9183c1d 100644
              sceGnmDrawCmdWaitUntilSafeForRendering(
                  &cmd->gnm_cmd,
                  view->image->video_out_handle,
-@@ -2338,9 +2424,16 @@ vk_ps4_CmdBeginRenderPass(VkCommandBuffer commandBuffer, const VkRenderPassBegin
+@@ -2336,11 +2422,162 @@ vk_ps4_CmdBeginRenderPass(VkCommandBuffer commandBuffer, const VkRenderPassBegin
+     vk_ps4_bind_subpass_targets(cmd);
+ }
  
++/* ===================================================================== */
++/* Driver-side present blit.                                              */
++/*                                                                        */
++/* DXVK's own present blitter draws into the swapchain but its            */
++/* psbc-compiled shaders produce no visible pixels (confirmed on          */
++/* hardware: valid source T#, correct viewport/verts, but black; a        */
++/* driver GPU draw into the same swapchain shows up fine). So the driver  */
++/* does the fullscreen textured blit itself, reusing the self-test's      */
++/* proven texture pipeline (blit_shaders.h), sampling DXVK's backbuffer   */
++/* (bound as the blit pass's descriptor-set 0) into the swapchain.        */
++/* ===================================================================== */
++#include "../shaders/blit_shaders.h"
++
++extern VkResult vk_ps4_compile_shader_module(VkPs4ShaderModule *, VkShaderStageFlagBits,
++    const VkAllocationCallbacks *, void **, size_t *, GnmShaderMetadata *,
++    const VkPs4PipelineLayout *, const VkSpecializationInfo *);
++
++static void *blit_gpu_code(const VkAllocationCallbacks *alloc, const GnmShaderMetadata *md) {
++    if (!md || !md->shadercode || md->shadercodesize == 0) return (void *)md->shadercode;
++    void *dst = vk_ps4_alloc(alloc, md->shadercodesize, 256);
++    if (!dst) return (void *)md->shadercode;
++    memcpy(dst, md->shadercode, md->shadercodesize);
++    return dst;
++}
++
++static void vk_ps4_present_blit_init(VkPs4Device *dev) {
++    if (dev->blit_tried) return;
++    dev->blit_tried = true;
++    dev->blit_ps_settable_reg = 0xff;
++    const VkAllocationCallbacks *alloc = &dev->allocator;
++
++    /* Compile with a 1 combined-image-sampler layout (set 0, binding 0) so psbc
++     * emits a PTR_INDIRECTRESOURCETABLE slot + bakes the arena address-hi, exactly
++     * like DXVK's own pipelines. We then point that set table at DXVK's already-
++     * populated descriptor memory (the backbuffer T#+S#). */
++    VkDescriptorSetLayoutBinding b0; memset(&b0, 0, sizeof(b0));
++    b0.binding = 0;
++    b0.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
++    b0.descriptorCount = 1;
++    b0.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
++    VkPs4DescriptorSetLayout dsl; memset(&dsl, 0, sizeof(dsl));
++    dsl.device = dev; dsl.bindings = &b0; dsl.binding_count = 1;
++    dsl.variable_descriptor_binding = UINT32_MAX;
++    VkPs4DescriptorSetLayout *dslp = &dsl;
++    VkPs4PipelineLayout pl; memset(&pl, 0, sizeof(pl));
++    pl.device = dev; pl.set_layouts = &dslp; pl.set_layout_count = 1;
++
++    VkPs4ShaderModule vmod; memset(&vmod, 0, sizeof(vmod));
++    vmod.type = VK_PS4_OBJ_SHADER_MODULE; vmod.device = dev;
++    vmod.binary = (void *)blit_vs_spirv; vmod.binary_size = sizeof(blit_vs_spirv);
++    void *vbin = NULL; size_t vsz = 0; GnmShaderMetadata vmd; memset(&vmd, 0, sizeof(vmd));
++    if (vk_ps4_compile_shader_module(&vmod, VK_SHADER_STAGE_VERTEX_BIT, alloc,
++            &vbin, &vsz, &vmd, &pl, NULL) != VK_SUCCESS) return;
++    if (!(vmd.fileheader && vmd.stage)) return;
++    const GnmVsShader *vs = (const GnmVsShader *)vmd.stage;
++    dev->blit_vs_regs = vs->registers;
++    if (vmd.shadercode) sceGnmVsRegsSetAddress(&dev->blit_vs_regs, blit_gpu_code(alloc, &vmd));
++    { uint32_t n = vs->numexportsemantics;
++      const GnmVertexExportSemantic *e = sceGnmVsShaderExportSemanticTable(vs);
++      if (n > 32) n = 32;
++      if (e && n) { memcpy(dev->blit_vs_exports, e, n * sizeof(*e)); dev->blit_vs_export_count = n; } }
++    dev->blit_vs_binary = vbin;
++
++    VkPs4ShaderModule pmod; memset(&pmod, 0, sizeof(pmod));
++    pmod.type = VK_PS4_OBJ_SHADER_MODULE; pmod.device = dev;
++    pmod.binary = (void *)blit_fs_spirv; pmod.binary_size = sizeof(blit_fs_spirv);
++    void *pbin = NULL; size_t psz = 0; GnmShaderMetadata pmd; memset(&pmd, 0, sizeof(pmd));
++    if (vk_ps4_compile_shader_module(&pmod, VK_SHADER_STAGE_FRAGMENT_BIT, alloc,
++            &pbin, &psz, &pmd, &pl, NULL) != VK_SUCCESS) return;
++    if (!(pmd.fileheader && pmd.stage)) return;
++    const GnmPsShader *ps = (const GnmPsShader *)pmd.stage;
++    dev->blit_ps_regs = ps->registers;
++    if (pmd.shadercode) sceGnmPsRegsSetAddress(&dev->blit_ps_regs, blit_gpu_code(alloc, &pmd));
++    { uint32_t n = ps->numinputsemantics;
++      const GnmPixelInputSemantic *i = sceGnmPsShaderInputSemanticTable(ps);
++      if (n > 32) n = 32;
++      if (i && n) { memcpy(dev->blit_ps_inputs, i, n * sizeof(*i)); dev->blit_ps_input_count = n; } }
++    dev->blit_ps_binary = pbin;
++    { uint32_t ns = pmd.numinputusageslots; const GnmInputUsageSlot *s = pmd.inputusageslots;
++      for (uint32_t k = 0; s && k < ns; k++) {
++        if (s[k].usagetype == GNM_SHINPUTUSAGE_PTR_INDIRECTRESOURCETABLE && s[k].apislot == 0)
++            dev->blit_ps_settable_reg = s[k].startregister;
++      } }
++
++    dev->blit_ready = (dev->blit_ps_settable_reg != 0xff);
++    vk_ps4_log("present_blit_init: ready=%d settable_reg=%u vs_exp=%u ps_in=%u",
++        (int)dev->blit_ready, dev->blit_ps_settable_reg,
++        dev->blit_vs_export_count, dev->blit_ps_input_count);
++}
++
++static void vk_ps4_present_blit(VkPs4CommandBuffer *cmd, VkPs4Image *dst) {
++    VkPs4Device *dev = cmd->device;
++    if (!dev) return;
++    vk_ps4_present_blit_init(dev);
++    if (!dev->blit_ready) return;
++    VkPs4DescriptorSet *ds = cmd->bound_sets[0];
++    if (!ds || !ds->gpu_mem) return;
++
++    sceGnmDrawCmdSetRenderTarget(&cmd->gnm_cmd, 0, &dst->gnm_rt);
++    GnmDepthStencilControl ds_off; memset(&ds_off, 0, sizeof(ds_off));
++    ds_off.zfunc = GNM_DEPTH_COMPARE_NEVER;
++    ds_off.stencilfunc = GNM_DEPTH_COMPARE_NEVER;
++    ds_off.stencilbackfunc = GNM_DEPTH_COMPARE_NEVER;
++    sceGnmDrawCmdSetDepthStencilControl(&cmd->gnm_cmd, &ds_off);
++    GnmBlendControl nob; memset(&nob, 0, sizeof(nob)); nob.blendenabled = false;
++    sceGnmDrawCmdSetBlendControl(&cmd->gnm_cmd, 0, &nob);
++    float w = (float)dst->create_info.extent.width, h = (float)dst->create_info.extent.height;
++    GnmSetViewportInfo vp; memset(&vp, 0, sizeof(vp));
++    vp.dmin = 0.0f; vp.dmax = 1.0f;
++    vp.scale[0] = w * 0.5f; vp.scale[1] = -h * 0.5f; vp.scale[2] = 0.5f;
++    vp.offset[0] = w * 0.5f; vp.offset[1] = h * 0.5f; vp.offset[2] = 0.5f;
++    sceGnmDrawCmdSetViewport(&cmd->gnm_cmd, 0, &vp);
++    sceGnmDrawCmdSetScreenScissor(&cmd->gnm_cmd, 0, 0, (int)w, (int)h);
++    sceGnmDrawCmdSetRenderTargetMask(&cmd->gnm_cmd, 0xf);
++    sceGnmDrawCmdSetPrimitiveType(&cmd->gnm_cmd, GNM_PT_TRILIST);
++    sceGnmDrawCmdSetVsShader(&cmd->gnm_cmd, &dev->blit_vs_regs, 0);
++    sceGnmDrawCmdSetPsShader(&cmd->gnm_cmd, &dev->blit_ps_regs);
++    sceGnmDrawCmdSetPsInputUsage(&cmd->gnm_cmd, dev->blit_vs_exports, dev->blit_vs_export_count,
++        dev->blit_ps_inputs, dev->blit_ps_input_count);
++    /* Point the PS's set-0 descriptor table at DXVK's descriptor memory (which
++     * holds the backbuffer's T#+S# in the layout the PS was compiled for). Only
++     * the low 32 bits go in the user-data reg; the high bits are baked into the
++     * shader (arena address-hi), matching how DXVK's own pipelines bind sets. */
++    {
++        GnmCommandBuffer *gc = &cmd->gnm_cmd;
++        if ((uint32_t)(gc->endptr - gc->cmdptr) >= 3) {
++            gc->cmdptr[0] = PKT3(PKT3_SET_SH_REG, 1, 0);
++            gc->cmdptr[1] = (R_00B030_SPI_SHADER_USER_DATA_PS_0 + dev->blit_ps_settable_reg * 4
++                             - SI_SH_REG_OFFSET) >> 2;
++            gc->cmdptr[2] = (uint32_t)(uintptr_t)ds->gpu_mem;
++            gc->cmdptr += 3;
++        }
++    }
++    sceGnmDrawCmdSetNumInstances(&cmd->gnm_cmd, 1);
++    sceGnmDrawCmdDrawIndexAuto(&cmd->gnm_cmd, 3);
++    vk_ps4_log("present_blit: drew textured blit into swapchain %dx%d", (int)w, (int)h);
++}
++
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdEndRenderPass(VkCommandBuffer commandBuffer) {
 +    PCPS4_CMDLOG("EndRenderPass");
      if (!commandBuffer) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
  
-+    /* NOTE (v57 diagnostic result): forcing the driver's own draw-based clear to
-+     * GREEN on a swapchain image here DID show green on the TV, proving a GPU
-+     * draw into the swapchain RT reaches scanout. The present-blit fix (a
-+     * driver-side fullscreen textured draw sampling the backbuffer) therefore
-+     * belongs here, replacing reliance on DXVK's non-working blit shaders. */
++    /* Driver-side present blit: if this pass rendered into a swapchain image,
++     * DXVK just drew its (non-working) present blit into it. Redo the blit
++     * ourselves from the same source texture so the game image actually
++     * appears. See vk_ps4_present_blit above. */
++    {
++        VkPs4ImageView *srt = vk_ps4_get_attachment_view(cmd, 0);
++        if (srt && srt->image && srt->image->is_swapchain_image) {
++            vk_ps4_present_blit(cmd, srt->image);
++            vk_ps4_bind_subpass_targets(cmd); /* restore RT bindings */
++        }
++    }
 +
      /* Reset DB_RENDER_CONTROL clear flags.
       * The lazy clear is triggered immediately by vk_ps4_clear_depth_draw()
       * in CmdBeginRenderPass/CmdClearAttachments, so by the time we reach
-@@ -2359,6 +2452,25 @@ vk_ps4_CmdEndRenderPass(VkCommandBuffer commandBuffer) {
+@@ -2359,6 +2596,25 @@ vk_ps4_CmdEndRenderPass(VkCommandBuffer commandBuffer) {
          GNM_CACHE_FLUSH_AND_INV_TS_EVENT, 0,
          GNM_DATA_SEL_DISCARD, 0);
  
@@ -456,7 +699,7 @@ index 168c1f3..9183c1d 100644
      cmd->current_render_pass.pass = NULL;
      cmd->current_render_pass.framebuffer = NULL;
  }
-@@ -2513,14 +2625,29 @@ vk_ps4_CmdPipelineBarrier(VkCommandBuffer commandBuffer, VkPipelineStageFlags sr
+@@ -2513,14 +2769,29 @@ vk_ps4_CmdPipelineBarrier(VkCommandBuffer commandBuffer, VkPipelineStageFlags sr
                            uint32_t memoryBarrierCount, const VkMemoryBarrier *pMemoryBarriers,
                            uint32_t bufferMemoryBarrierCount, const VkBufferMemoryBarrier *pBufferMemoryBarriers,
                            uint32_t imageMemoryBarrierCount, const VkImageMemoryBarrier *pImageMemoryBarriers) {
@@ -487,7 +730,7 @@ index 168c1f3..9183c1d 100644
      /* Track image layout transitions */
      for (uint32_t i = 0; i < imageMemoryBarrierCount; i++) {
          const VkImageMemoryBarrier *b = &pImageMemoryBarriers[i];
-@@ -2609,11 +2736,12 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -2609,11 +2880,12 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdClearColorImage(VkCommandBuffer commandBuffer, VkImage image, VkImageLayout imageLayout,
                            const VkClearColorValue *pColor, uint32_t rangeCount,
                            const VkImageSubresourceRange *pRanges) {
@@ -501,7 +744,7 @@ index 168c1f3..9183c1d 100644
  
      /* Tiled render targets require a draw-based clear because FillMemory
       * writes linearly and doesn't respect the tiled memory layout.
-@@ -2777,6 +2905,7 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -2777,6 +3049,7 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdClearAttachments(VkCommandBuffer commandBuffer, uint32_t attachmentCount,
                             const VkClearAttachment *pAttachments, uint32_t rectCount,
                             const VkClearRect *pRects) {
@@ -509,7 +752,7 @@ index 168c1f3..9183c1d 100644
      if (!commandBuffer || !pAttachments) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
  
-@@ -2895,6 +3024,7 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -2895,6 +3168,7 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdPushConstants(VkCommandBuffer commandBuffer, VkPipelineLayout layout,
                          VkShaderStageFlags stageFlags, uint32_t offset, uint32_t size,
                          const void *pValues) {

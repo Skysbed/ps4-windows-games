@@ -138,6 +138,31 @@ scanout pixel probe in the logs, not the screen. Key detail: the call needs a
 non-NULL (zeroed) param struct as the 3rd arg — with NULL it returns 0x80940005;
 with a param struct it returns a positive app id and launches.
 
+## Hands-free teardown: close gracefully, never hard-kill
+
+The hands-free loop is `tools/hostdev/`: `ps4debug_launch.py` (launch), then
+`ps4debug_close.py` (close), with `ps4debug_install.py` to install a pushed pkg.
+
+Closing matters as much as launching. `ps4debug_launch.py` saves the live appId
+to `/tmp/pcps4_appid`; `ps4debug_close.py` closes the app through LncService
+(`sceLncUtilKillApp` offset `0x58d0`, `sceSystemServiceKillApp` `0x4690`) while it
+is still alive — the same teardown the shell runs when you back out of a game,
+which reclaims the big-app's reserved direct/flexible memory.
+
+A debugger hard-kill (`DebuggingContext.kill_process`) skips that teardown and
+**leaks the app's memory**: the next launch then fails with `0x8002000c` (ENOMEM),
+and because there is no user-space RPC to reclaim a dead process's direct memory,
+that only clears on a power cycle. `sceLncUtilKillApp`/`sceSystemServiceKillApp` on
+the already-dead appId return `0x80940004` (app not found) — there is no stale app
+record to clear, confirming the wedge is leaked memory, not LncService bookkeeping.
+So: always close with `ps4debug_close.py` while the app runs; never hard-kill.
+
+`ps4debug_install.py` resolves libSceAppInstUtil in SceShellUI (`Initialize`
+`0x2cd0`, `GetTitleIdFromPkg` `0x3870`, `AppInstallPkg` `0x3110`). `Initialize`
+succeeds; the open TODO is the install daemon's jail not seeing `/data`
+(`AppInstallPkg` returns `0x80020002` ENOENT for `/data/*.pkg`) — needs the
+daemon-visible staging path the shell's own installer uses.
+
 ## Intermittent worker-exit crash
 
 The DXVK worker crash (a worker reaching the sandbox-forbidden `exit` syscall ->

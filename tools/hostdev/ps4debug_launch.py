@@ -19,6 +19,12 @@ async def main():
     rax = await pd.call(pid, func, CallRegisters(rdi=mem, rsi=0, rdx=mem+24))
     v = int.from_bytes(rax,'little') if isinstance(rax,(bytes,bytearray)) else rax
     ok = (v & 0x80000000) == 0
+    if ok:
+        # Save the live appId so ps4debug_close.py can shut it down gracefully
+        # through LncService (which reclaims the big-app memory). A debugger
+        # hard-kill leaks that memory and wedges the next launch with ENOMEM
+        # (0x8002000c); always close via ps4debug_close.py instead.
+        open("/tmp/pcps4_appid", "w").write(hex(v))
     print(f"launch {'OK appId=0x%x' % v if ok else 'FAILED err=0x%08x' % (v & 0xffffffff)}")
     return 0 if ok else 1
 sys.exit(asyncio.run(main()))

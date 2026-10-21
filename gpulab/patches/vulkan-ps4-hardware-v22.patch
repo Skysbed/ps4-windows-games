@@ -115,7 +115,7 @@ index 0000000..4f6b4aa
 +};
 +static const unsigned int g_clear_ps_binary_size = 216;
 diff --git a/src/vk_ps4_command.c b/src/vk_ps4_command.c
-index 168c1f3..c359d03 100644
+index 168c1f3..9183c1d 100644
 --- a/src/vk_ps4_command.c
 +++ b/src/vk_ps4_command.c
 @@ -19,6 +19,16 @@
@@ -413,7 +413,7 @@ index 168c1f3..c359d03 100644
              sceGnmDrawCmdWaitUntilSafeForRendering(
                  &cmd->gnm_cmd,
                  view->image->video_out_handle,
-@@ -2338,6 +2424,7 @@ vk_ps4_CmdBeginRenderPass(VkCommandBuffer commandBuffer, const VkRenderPassBegin
+@@ -2338,9 +2424,16 @@ vk_ps4_CmdBeginRenderPass(VkCommandBuffer commandBuffer, const VkRenderPassBegin
  
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdEndRenderPass(VkCommandBuffer commandBuffer) {
@@ -421,7 +421,16 @@ index 168c1f3..c359d03 100644
      if (!commandBuffer) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
  
-@@ -2359,6 +2446,25 @@ vk_ps4_CmdEndRenderPass(VkCommandBuffer commandBuffer) {
++    /* NOTE (v57 diagnostic result): forcing the driver's own draw-based clear to
++     * GREEN on a swapchain image here DID show green on the TV, proving a GPU
++     * draw into the swapchain RT reaches scanout. The present-blit fix (a
++     * driver-side fullscreen textured draw sampling the backbuffer) therefore
++     * belongs here, replacing reliance on DXVK's non-working blit shaders. */
++
+     /* Reset DB_RENDER_CONTROL clear flags.
+      * The lazy clear is triggered immediately by vk_ps4_clear_depth_draw()
+      * in CmdBeginRenderPass/CmdClearAttachments, so by the time we reach
+@@ -2359,6 +2452,25 @@ vk_ps4_CmdEndRenderPass(VkCommandBuffer commandBuffer) {
          GNM_CACHE_FLUSH_AND_INV_TS_EVENT, 0,
          GNM_DATA_SEL_DISCARD, 0);
  
@@ -447,7 +456,7 @@ index 168c1f3..c359d03 100644
      cmd->current_render_pass.pass = NULL;
      cmd->current_render_pass.framebuffer = NULL;
  }
-@@ -2513,14 +2619,29 @@ vk_ps4_CmdPipelineBarrier(VkCommandBuffer commandBuffer, VkPipelineStageFlags sr
+@@ -2513,14 +2625,29 @@ vk_ps4_CmdPipelineBarrier(VkCommandBuffer commandBuffer, VkPipelineStageFlags sr
                            uint32_t memoryBarrierCount, const VkMemoryBarrier *pMemoryBarriers,
                            uint32_t bufferMemoryBarrierCount, const VkBufferMemoryBarrier *pBufferMemoryBarriers,
                            uint32_t imageMemoryBarrierCount, const VkImageMemoryBarrier *pImageMemoryBarriers) {
@@ -478,7 +487,7 @@ index 168c1f3..c359d03 100644
      /* Track image layout transitions */
      for (uint32_t i = 0; i < imageMemoryBarrierCount; i++) {
          const VkImageMemoryBarrier *b = &pImageMemoryBarriers[i];
-@@ -2609,11 +2730,12 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -2609,11 +2736,12 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdClearColorImage(VkCommandBuffer commandBuffer, VkImage image, VkImageLayout imageLayout,
                            const VkClearColorValue *pColor, uint32_t rangeCount,
                            const VkImageSubresourceRange *pRanges) {
@@ -492,7 +501,7 @@ index 168c1f3..c359d03 100644
  
      /* Tiled render targets require a draw-based clear because FillMemory
       * writes linearly and doesn't respect the tiled memory layout.
-@@ -2777,6 +2899,7 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -2777,6 +2905,7 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdClearAttachments(VkCommandBuffer commandBuffer, uint32_t attachmentCount,
                             const VkClearAttachment *pAttachments, uint32_t rectCount,
                             const VkClearRect *pRects) {
@@ -500,7 +509,7 @@ index 168c1f3..c359d03 100644
      if (!commandBuffer || !pAttachments) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
  
-@@ -2895,6 +3018,7 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -2895,6 +3024,7 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdPushConstants(VkCommandBuffer commandBuffer, VkPipelineLayout layout,
                          VkShaderStageFlags stageFlags, uint32_t offset, uint32_t size,
                          const void *pValues) {

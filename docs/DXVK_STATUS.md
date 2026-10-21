@@ -62,10 +62,54 @@ lack the GPU-visible allocator in `vulkan-ps4-hardware-v22.patch` and hard-crash
 3. C++ exception unwinding (Windows x64 SEH dispatcher) is not implemented; DXVK throws on some error paths.
 4. Only the synthetic `win_dxvk_clear.c` test has run; no real game yet.
 
+## Black-screen root cause — fully isolated on hardware (v49–v57)
+
+The synthetic `win_dxvk_clear.c` test (clear backbuffer to a cycling RED/GREEN/BLUE, present 240 frames)
+reaches scanout **black**. A systematic on-device bisection found exactly why — and exactly where it is *not*:
+
+1. **The shader-compile crash is gone.** v48 crashed at the first real `psbc_compile_shader` (`rip=0`); that was
+   the hands-free runner's PRX thread-local-storage, not psbc. The standalone package (v49+) compiles DXVK's
+   shaders fine — v49 ran to completion, flipping 478 frames.
+2. **The clear works.** The 640x360 D3D backbuffer reads `px[0]=ff0000ff` (red) via the RT probe. `ClearRenderTargetView`
+   lands correctly.
+3. **VideoOut rejects a 640x360 scanout buffer** (`VideoOutOpen` error `0x80290005`), so the swapchain must be a full
+   display mode (1920x1080) and the backbuffer is scaled into it at present — a scale is unavoidable.
+4. **DXVK presents via its own blitter draw**, not `vkCmdBlitImage` (the driver records zero Blit/Copy-image calls).
+   The blitter pass targets the 1920x1080 swapchain (`swap=1`) and issues `BindPipeline + PushConstants + Draw` with
+   `verts=3`, viewport `1920x1080` — all correct.
+5. **The blitter's source descriptor is valid.** Its combined-image-sampler T# base is `0x218a30000` — exactly the
+   red backbuffer's RT base — with the same format words as the working self-test texture.
+6. **Cache coherency is not the cause.** Adding a synchronous `ACQUIRE_MEM` (CB flush + texture-cache invalidate) at
+   both the pipeline barrier and `EndRenderPass` left scanout fully black.
+7. **The scanout path works.** A CPU memset of the VideoOut buffer to blue right before the flip **showed blue on the
+   TV** — the swapchain buffer is the scanout target and writes to it display.
+8. **A GPU draw into the swapchain reaches scanout.** Forcing the driver's own draw-based clear (embedded fullscreen VS
+   + clear PS) to GREEN on the swapchain image **showed green on the TV**. So the swapchain RT descriptor is correct and
+   GPU draws display.
+9. **psbc handles the pattern DXVK uses.** The in-driver self-test's texture pipeline uses `spv_vs_vert` (a `gl_VertexIndex`
+   fullscreen triangle, `vkCmdDraw(3,…)`, no vertex buffer) + `spv_fs_tex_frag` (combined-image-sampler) — the *same*
+   shape as DXVK's blit — and samples correctly (`D texture px=ff4080ff`).
+
+**Conclusion:** everything up to and including a driver GPU draw-into-swapchain + texture sampling works. The black screen
+is specifically **DXVK's psbc-compiled present-blit shaders producing no visible output** (something DXVK-specific:
+gamma / specialization / resource-binding model in its blitter), while the driver's own equivalent draw works.
+
+### The fix (next step): a driver-side present blit
+Bypass DXVK's blitter: when a render pass renders into a swapchain image, have the driver do the fullscreen textured blit
+itself, reusing the self-test's proven shaders (`spv_vs_vert` + `spv_fs_tex_frag`) with the backbuffer's T#/S# (available
+from the bound descriptor set at that pass) as source and the swapchain as target. All the pieces are verified to work
+(embedded fullscreen VS + texture PS, `gl_VertexIndex` geometry, texture sampling, GPU-draw-to-swapchain, scanout).
+
+### Separate issue: intermittent startup crash
+Some launches crash before/around DLL load (`rip=0`, poison registers) regardless of the graphics path; relaunching
+clears it. Enabling the GoldHEN klog/TTY server (port 3232) would let the kernel fault be captured live.
+
 ## Patches
 
 `gpulab/patches/vulkan-ps4-hardware-v22.patch` is the cumulative diff against the vendor `vulkan-ps4` checkout
-(f4d940b) used for the builds (plus the earlier `vulkan-ps4-hardware.patch`).
+(f4d940b) used for the builds (plus the earlier `vulkan-ps4-hardware.patch`). It now also carries the synchronous
+`ACQUIRE_MEM` cache-coherency fixes and the on-device diagnostics (RT-as-texture conversion, per-pass RT dims, draw
+coverage, descriptor-set dumps) used for the bisection above.
 
 ## v46 scanout acceptance gate
 

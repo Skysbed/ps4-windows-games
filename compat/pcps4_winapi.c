@@ -1209,10 +1209,16 @@ void pcps4_winapi_build_resolver(pcps4_pe_resolver *resolver)
      */
     int use_dxvk = 0;
     {
-        FILE *probe = fopen("/app0/game/d3d11.dll", "rb");
-        if (probe) {
-            use_dxvk = 1;
-            fclose(probe);
+        /* Any bundled DXVK DLL means DXVK mode — not just d3d11. A d3d9-only
+         * game still needs the DXVK Win32 support (SRW locks, condvars,
+         * semaphores, vulkan-1, ...) registered below. */
+        static const char *const dxvk_dlls[] = {
+            "/app0/game/d3d11.dll", "/app0/game/d3d9.dll", "/app0/game/dxgi.dll",
+            "/app0/game/d3d10.dll", "/app0/game/d3d10core.dll",
+        };
+        for (unsigned i = 0; i < sizeof(dxvk_dlls) / sizeof(dxvk_dlls[0]); i += 1) {
+            FILE *probe = fopen(dxvk_dlls[i], "rb");
+            if (probe) { use_dxvk = 1; fclose(probe); break; }
         }
     }
     if (!use_dxvk) {

@@ -14,11 +14,16 @@ OUT="${OUT:-$HERE/build/dxvk}"
 GAME="$OUT/game"
 mkdir -p "$GAME"
 
+# The bundled test program + the DXVK DLLs it needs are overridable so we can
+# swap in different demos (D3D11 clear, D3D9 triangle, ...) without editing this.
+GAME_SRC="${GAME_SRC:-$HERE/tests/win_dxvk_clear.c}"
+GAME_LIBS="${GAME_LIBS:--ld3d11 -luser32 -lkernel32 -ldxguid}"
+GAME_DLLS="${GAME_DLLS:-d3d11.dll dxgi.dll}"
 x86_64-w64-mingw32-gcc -std=c11 -O2 -ffreestanding -fno-stack-protector \
   -fno-asynchronous-unwind-tables -nostdlib -Wl,--entry=WinMainCRTStartup \
   -Wl,--subsystem,windows -Wl,--section-alignment,0x4000 -Wl,--file-alignment,0x200 \
-  -o "$GAME/game.exe" "$HERE/tests/win_dxvk_clear.c" -ld3d11 -luser32 -lkernel32 -ldxguid
-cp "$DXVK_DIR/x64/d3d11.dll" "$DXVK_DIR/x64/dxgi.dll" "$GAME/"
+  -o "$GAME/game.exe" "$GAME_SRC" $GAME_LIBS
+for _dll in $GAME_DLLS; do cp "$DXVK_DIR/x64/$_dll" "$GAME/"; done
 
 case "$(uname -s)" in
   Darwin) T="$OO_PS4_TOOLCHAIN/bin/macos"; FSELF="$T/create-fself-macos" ;;

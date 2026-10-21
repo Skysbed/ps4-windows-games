@@ -547,6 +547,24 @@ static MSA I32 a_RegQueryValueExA(PV k, const char *n, U32 *r, U32 *t, uint8_t *
 
 #define R(dll, name, fn) (void)pcps4_pe_resolver_register(resolver, dll, name, (void *)(fn))
 
+/* Permissive bring-up: any import PcPs4 does not implement resolves to a no-op
+ * stub that returns 0, instead of the loader refusing to run. MS x64 is
+ * caller-cleanup with the integer result in RAX, so a zero-arg stub returning 0
+ * is ABI-safe for any call. This lets a real game load and run far enough to
+ * reveal which APIs it actually calls (logged below) and reach the GPU path;
+ * a stub a game truly depends on may still misbehave, which the log will show. */
+static MSA U64 pcps4_import_stub(void) { return 0; }
+
+static void *pcps4_import_fallback(void *user, const char *dll, int by_name,
+                                   const char *name, U16 ordinal) {
+    (void)user;
+    if (by_name)
+        pcps4_status_log("[pcps4] STUB import %s!%s -> no-op", dll ? dll : "?", name ? name : "?");
+    else
+        pcps4_status_log("[pcps4] STUB import %s!#%u -> no-op", dll ? dll : "?", (unsigned)ordinal);
+    return (void *)pcps4_import_stub;
+}
+
 void pcps4_dxvk_register_win32(pcps4_pe_resolver *resolver) {
     static const char *const k32[] = {"KERNEL32.dll", "KERNELBASE.dll"};
     for (unsigned i = 0; i < 2; i += 1) {
@@ -712,4 +730,10 @@ void pcps4_dxvk_register_win32(pcps4_pe_resolver *resolver) {
             }
         }
     }
+
+    /* Permissive bring-up: unimplemented imports resolve to a logged no-op so a
+     * real game runs instead of being refused. Only fires for imports not
+     * registered above (the clear test still resolves everything). */
+    resolver->fallback = pcps4_import_fallback;
+    resolver->fallback_user = NULL;
 }

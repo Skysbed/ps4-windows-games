@@ -124,3 +124,28 @@ not replace visual inspection or a real-game test.
 The repository CI can build the core package and run host tests for this parser. The DXVK-on-PS4 package
 still requires the external patched `vulkan-ps4` / `libpsbc.orbis.a` / `libopengnm.a` libraries described by
 `tools/build_dxvk_local.sh`; the ordinary OpenOrbis workflow does not build those dependencies.
+
+## Hands-free test workflow (ps4debug, port 744)
+
+For headless iteration (no controller/TV): GoldHEN's BinLoader (9020/9090) only
+listens while the Payloader menu is open, but ps4debug (port 744) is persistent.
+`tools/hostdev/ps4debug_launch.py` connects to it, resolves
+`sceSystemServiceLaunchApp` in SceShellUI (`libSceSystemService.sprx` base +
+export offset `0x4600`, NID `l4FB3wNa-Ac`), and RPC-calls it to launch the
+installed title. The app then runs and renders normally even with the TV off
+(VideoOut scans out to memory regardless); results are read from the driver's
+scanout pixel probe in the logs, not the screen. Key detail: the call needs a
+non-NULL (zeroed) param struct as the 3rd arg — with NULL it returns 0x80940005;
+with a param struct it returns a positive app id and launches.
+
+## Intermittent worker-exit crash
+
+The DXVK worker crash (a worker reaching the sandbox-forbidden `exit` syscall ->
+uncatchable SIGSYS) is INTERMITTENT. On a clean run the whole pipeline passes:
+observed `finished: 4/4 passed` with `DXVK scanout RGB probe = PASS`
+(nonblack=15, color_changes=7) — DXVK renders correctly end to end and the app
+exits cleanly. The crash only fires on runs where a worker hits its abort/exit
+path (correlated with psbc "Unsupported SPIR-V capability" activity). SIGSYS is
+uncatchable and the exit()/abort() override did not interpose, so the durable
+fix remains stopping psbc from aborting; the scanout result is unaffected when
+it doesn't fire.

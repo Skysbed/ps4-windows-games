@@ -170,10 +170,32 @@ static void emit_context(int fd, void *uc)
     }
 }
 
+/* Marks DXVK worker threads (not the PE's main thread). A worker that trips a
+ * forbidden syscall (SIGSYS) — observed as libc exit() in an error/abort path,
+ * which this sandboxed process blocks — is ended on its own via the permitted
+ * thread-exit so the rest of the app keeps running, instead of taking the whole
+ * process down. */
+static __thread int pcps4_fault_worker;
+extern void scePthreadExit(void *value);
+void pcps4_fault_mark_worker(void) { pcps4_fault_worker = 1; }
+
+#ifndef SIGSYS
+#define SIGSYS 12
+#endif
+
 static void pcps4_fault_handler(int signal_number, void *info, void *uc)
 {
     int fd;
     (void)info;
+
+    /* SIGSYS on a worker: a blocked syscall (e.g. exit() from a DXVK worker).
+     * End just this thread with the permitted thread-exit and let the app live.
+     * Done before the one-shot guard so each worker can be handled. */
+    if (signal_number == SIGSYS && pcps4_fault_worker) {
+        fd_write_str(STDERR_FILENO, "PcPs4: SIGSYS on worker thread; ending thread, process continues\n");
+        scePthreadExit((void *)0);
+        _exit(128 + signal_number); /* only if thread-exit unexpectedly returns */
+    }
 
     if (pcps4_fault_seen)
         _exit(128 + signal_number);
@@ -216,7 +238,8 @@ int pcps4_fault_install(void)
         SIGBUS,
         SIGILL,
         SIGFPE,
-        SIGABRT
+        SIGABRT,
+        SIGSYS
     };
     struct sigaction action;
     size_t i;

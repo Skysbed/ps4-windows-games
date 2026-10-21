@@ -713,6 +713,7 @@ static void *thread_bootstrap(void *opaque)
     current_thread_id = thread_id;
     free(start);
     pcps4_fault_thread_init();
+    pcps4_fault_mark_worker(); /* SIGSYS on this thread ends only the thread */
     exit_code = function(argument);
     return (void *)(uintptr_t)exit_code;
 }

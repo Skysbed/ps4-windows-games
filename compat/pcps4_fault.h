@@ -15,6 +15,14 @@ int pcps4_fault_install(void);
 void pcps4_fault_thread_init(void);
 
 /*
+ * Mark the calling thread as a (non-main) worker. A worker that trips SIGSYS
+ * (a syscall the sandbox blocks, e.g. exit() on an error path) is ended on its
+ * own via the permitted thread-exit so the process keeps running, instead of
+ * crashing the whole app. The PE's main thread must NOT be marked.
+ */
+void pcps4_fault_mark_worker(void);
+
+/*
  * Record the stage the app is currently executing. This is a single pointer
  * store (async-signal-safe and safe to call from inside a running PE's call
  * chain - no stdio, no allocation), and `str` must point to a string literal

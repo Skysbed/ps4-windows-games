@@ -50,13 +50,27 @@ pools now track and release their sets (they previously leaked).
 An independent Codex session (see PR history) produced v34-v42 from a clean, unpatched vendor driver: those builds
 lack the GPU-visible allocator in `vulkan-ps4-hardware-v22.patch` and hard-crash for that reason; they are superseded.
 
+## On-screen output CONFIRMED on hardware (v68, 2026-10-22)
+
+With the NDEBUG psbc fix in place, v68 ran on a real PS4 and **displayed on the TV**: the synthetic
+`win_dxvk_clear.c` test cycled colour and each colour reached scanout. Breadcrumb evidence from the live
+run: `QueuePresent: scanout px[mid]=aa00aa00` (green) alternating with `=aa0000aa` (blue) across frames
+~2017/2558/3103/3644/3952 (AARRGGBB), `present_blit: drew textured blit into swapchain 1920x1080` every
+frame, past 478 frames / 4,200+ GPU submits with no crash. Also confirmed green on screen. This is the
+full chain working end to end: Windows D3D11 PE -> real DXVK -> Vulkan shim -> vulkan-ps4 (GNM) -> PS4 GPU
+-> display. The driver-side present blit and the NDEBUG shader-compile fix are both validated on hardware.
+
+Caveat: launching still needed a relaunch to get past the separate intermittent startup crash (below),
+and only the synthetic clear test has run — no real game yet.
+
 ## Open problems
 
-1. **Correct on-screen output is not yet proven.** v45 fixed a specialization-constant issue in DXVK's
-   present shader, but a clean process exit still does not prove that non-black pixels reached scanout.
-   v46 adds a separate acceptance result based on the driver's `QueuePresent: scanout ... px[mid]=...`
-   samples: at least two flips, two scanout samples, and changing non-black RGB values. This is a useful
-   visibility gate for the synthetic clear test, not proof that an arbitrary game renders correctly.
+1. **Intermittent startup crash — the next thing to kill.** Some launches SIGSEGV during DLL load
+   (v68 crash dump: `signal=11 stage="dll: begin load" rip=0x887064`, which lands in PcPs4's read-only
+   data segment, with `r14==rip` and a garbage `rsp` — a call through a bad function pointer). It is
+   intermittent; relaunching clears it (v68 displayed correctly on the second try). Root cause not yet
+   found: an import bound to the wrong address, or a callback/entry invoked with a bad pointer. Capturing
+   it live over the klog/TTY server (port 3232) or the ps4debug debugger is the way in.
 2. A filled (DMA) render-target clear on DXVK's 640x360 backbuffer hard-hangs the console at the first flip
    while the same fill is fine on a 64x64 test image — unexplained; the draw-based clear is used instead.
 3. C++ exception unwinding (Windows x64 SEH dispatcher) is not implemented; DXVK throws on some error paths.

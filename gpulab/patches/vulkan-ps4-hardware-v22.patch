@@ -90,14 +90,6 @@ index 0000000..2a54ed7
 +void main() {
 +    frag_color = pc.color;
 +}
-diff --git a/shaders/clear_push.frag.ps4.sb b/shaders/clear_push.frag.ps4.sb
-new file mode 100644
-index 0000000..b91c741
-Binary files /dev/null and b/shaders/clear_push.frag.ps4.sb differ
-diff --git a/shaders/clear_push.frag.spv b/shaders/clear_push.frag.spv
-new file mode 100644
-index 0000000..d6c1ddf
-Binary files /dev/null and b/shaders/clear_push.frag.spv differ
 diff --git a/shaders/clear_push_ps_binary.h b/shaders/clear_push_ps_binary.h
 new file mode 100644
 index 0000000..4f6b4aa
@@ -123,14 +115,18 @@ index 0000000..4f6b4aa
 +};
 +static const unsigned int g_clear_ps_binary_size = 216;
 diff --git a/src/vk_ps4_command.c b/src/vk_ps4_command.c
-index 168c1f3..72b3c0f 100644
+index 168c1f3..c359d03 100644
 --- a/src/vk_ps4_command.c
 +++ b/src/vk_ps4_command.c
-@@ -19,6 +19,12 @@
+@@ -19,6 +19,16 @@
  #include <pm4/sid.h>
  #include <pm4/amdgfxregs.h>
  
 +int pcps4_clear_variant;
++/* PcPs4: the GPU-side wait for the display to release a swapchain buffer never completes on
++ * hardware (the backbuffer stops updating after the first frames), and presentation already
++ * waits for each flip on the CPU. Off by default. */
++int pcps4_wait_flip_on_gpu = 0;
 +extern uint8_t pcps4_clear_push_reg[4];
 +extern int pcps4_clear_push_ready;
 +static unsigned pcps4_cmdlog_n;
@@ -139,7 +135,7 @@ index 168c1f3..72b3c0f 100644
  #define VK_PS4_CMD_BUFFER_SIZE (256 * 1024)  /* 256KB default PM4 buffer */
  
  /* Forward declaration from vk_ps4_pipeline.c */
-@@ -356,31 +362,29 @@ static void vk_ps4_clear_color_draw(VkPs4CommandBuffer *cmd,
+@@ -356,31 +366,29 @@ static void vk_ps4_clear_color_draw(VkPs4CommandBuffer *cmd,
          return;
      }
  
@@ -191,7 +187,7 @@ index 168c1f3..72b3c0f 100644
  
      /* Disable blending for RT0 so the clear color overwrites the RT
       * instead of being blended with existing contents.  The previous
-@@ -397,6 +401,36 @@ static void vk_ps4_clear_color_draw(VkPs4CommandBuffer *cmd,
+@@ -397,6 +405,36 @@ static void vk_ps4_clear_color_draw(VkPs4CommandBuffer *cmd,
          img->create_info.extent.width,
          img->create_info.extent.height);
  
@@ -228,7 +224,7 @@ index 168c1f3..72b3c0f 100644
      /* Bind the clear pixel shader and fullscreen VS */
      sceGnmDrawCmdSetPsShader(&cmd->gnm_cmd, &dev->clear_ps_regs);
      sceGnmDrawCmdSetEmbeddedVsShader(&cmd->gnm_cmd, GNM_EMBEDDED_VSH_FULLSCREEN, 0);
-@@ -586,6 +620,9 @@ static void vk_ps4_rebind_pipeline_state(VkPs4CommandBuffer *cmd) {
+@@ -586,6 +624,9 @@ static void vk_ps4_rebind_pipeline_state(VkPs4CommandBuffer *cmd) {
      /* Re-emit PS if present */
      if (pipe->has_ps) {
          sceGnmDrawCmdSetPsShader(&cmd->gnm_cmd, &pipe->ps_regs);
@@ -238,7 +234,7 @@ index 168c1f3..72b3c0f 100644
      }
  
      /* Re-emit fetch shader */
-@@ -938,6 +975,7 @@ vk_ps4_BeginCommandBuffer(VkCommandBuffer commandBuffer, const VkCommandBufferBe
+@@ -938,6 +979,7 @@ vk_ps4_BeginCommandBuffer(VkCommandBuffer commandBuffer, const VkCommandBufferBe
      cmd->is_begin = true;
      cmd->pm4_used = (uint32_t)(cmd->gnm_cmd.cmdptr - cmd->gnm_cmd.beginptr);
      /* Reset all tracking state */
@@ -246,7 +242,7 @@ index 168c1f3..72b3c0f 100644
      cmd->current_pipeline = NULL;
      cmd->vertex_binding_count = 0;
      cmd->vertex_buffers_dirty = false;
-@@ -1032,6 +1070,7 @@ vk_ps4_TrimCommandPool(VkDevice device, VkCommandPool commandPool, VkCommandPool
+@@ -1032,6 +1074,7 @@ vk_ps4_TrimCommandPool(VkDevice device, VkCommandPool commandPool, VkCommandPool
  
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdBindPipeline(VkCommandBuffer commandBuffer, VkPipelineBindPoint pipelineBindPoint, VkPipeline pipeline) {
@@ -254,7 +250,7 @@ index 168c1f3..72b3c0f 100644
      if (!commandBuffer || !pipeline) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      VkPs4Pipeline *pipe = (VkPs4Pipeline *)pipeline;
-@@ -1098,6 +1137,9 @@ vk_ps4_CmdBindPipeline(VkCommandBuffer commandBuffer, VkPipelineBindPoint pipeli
+@@ -1098,6 +1141,9 @@ vk_ps4_CmdBindPipeline(VkCommandBuffer commandBuffer, VkPipelineBindPoint pipeli
          /* Set pixel shader only if the pipeline has one */
          if (pipe->has_ps) {
              sceGnmDrawCmdSetPsShader(&cmd->gnm_cmd, &pipe->ps_regs);
@@ -264,7 +260,7 @@ index 168c1f3..72b3c0f 100644
          }
  
          /* Bind fetch shader if the pipeline has one */
-@@ -1191,6 +1233,7 @@ vk_ps4_CmdBindPipeline(VkCommandBuffer commandBuffer, VkPipelineBindPoint pipeli
+@@ -1191,6 +1237,7 @@ vk_ps4_CmdBindPipeline(VkCommandBuffer commandBuffer, VkPipelineBindPoint pipeli
      } else if (pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) {
          sceGnmDrawCmdSetCsShader(&cmd->gnm_cmd, &pipe->cs_regs);
      }
@@ -272,7 +268,16 @@ index 168c1f3..72b3c0f 100644
  }
  
  VKAPI_ATTR void VKAPI_CALL
-@@ -1369,6 +1412,7 @@ vk_ps4_CmdSetLineWidth(VkCommandBuffer commandBuffer, float lineWidth) {
+@@ -1213,6 +1260,8 @@ vk_ps4_CmdSetViewport(VkCommandBuffer commandBuffer, uint32_t firstViewport, uin
+         vp_info.offset[1] = vp->y + vp->height * 0.5f;
+         vp_info.offset[2] = (vp->maxDepth + vp->minDepth) * 0.5f;
+         sceGnmDrawCmdSetViewport(&cmd->gnm_cmd, firstViewport + i, &vp_info);
++        vk_ps4_log("SetViewport[%u]: x=%d y=%d w=%d h=%d", firstViewport + i,
++                   (int)vp->x, (int)vp->y, (int)vp->width, (int)vp->height);
+     }
+ }
+ 
+@@ -1369,6 +1418,7 @@ vk_ps4_CmdSetLineWidth(VkCommandBuffer commandBuffer, float lineWidth) {
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdBindVertexBuffers(VkCommandBuffer commandBuffer, uint32_t firstBinding,
                               uint32_t bindingCount, const VkBuffer *pBuffers, const VkDeviceSize *pOffsets) {
@@ -280,7 +285,7 @@ index 168c1f3..72b3c0f 100644
      if (!commandBuffer || !pBuffers) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
  
-@@ -1426,6 +1470,7 @@ vk_ps4_CmdBindVertexBuffers(VkCommandBuffer commandBuffer, uint32_t firstBinding
+@@ -1426,6 +1476,7 @@ vk_ps4_CmdBindVertexBuffers(VkCommandBuffer commandBuffer, uint32_t firstBinding
  
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdBindIndexBuffer(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDeviceSize offset, VkIndexType indexType) {
@@ -288,7 +293,7 @@ index 168c1f3..72b3c0f 100644
      if (!commandBuffer) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      cmd->index_buffer.buffer = buffer;
-@@ -1451,6 +1496,7 @@ vk_ps4_CmdBindIndexBuffer(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDevi
+@@ -1451,6 +1502,7 @@ vk_ps4_CmdBindIndexBuffer(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDevi
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdDraw(VkCommandBuffer commandBuffer, uint32_t vertexCount, uint32_t instanceCount,
                 uint32_t firstVertex, uint32_t firstInstance) {
@@ -296,7 +301,26 @@ index 168c1f3..72b3c0f 100644
      if (!commandBuffer) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
  
-@@ -1525,6 +1571,7 @@ vk_ps4_CmdDraw(VkCommandBuffer commandBuffer, uint32_t vertexCount, uint32_t ins
+@@ -1518,6 +1570,18 @@ vk_ps4_CmdDraw(VkCommandBuffer commandBuffer, uint32_t vertexCount, uint32_t ins
+         }
+     }
+ 
++    {   /* PcPs4 diag: fullscreen-blit coverage check — vertex count + whether
++         * the target is the swapchain. */
++        static unsigned draw_logs;
++        if (draw_logs++ < 40) {
++            VkPs4ImageView *rt0 = vk_ps4_get_attachment_view(cmd, 0);
++            vk_ps4_log("Draw: verts=%u inst=%u rt0=%ux%u swap=%d", vertexCount, instanceCount,
++                       (rt0 && rt0->image) ? rt0->image->create_info.extent.width : 0,
++                       (rt0 && rt0->image) ? rt0->image->create_info.extent.height : 0,
++                       (rt0 && rt0->image) ? (int)rt0->image->is_swapchain_image : -1);
++        }
++    }
++
+     GnmDrawModifier mod = {0};
+     sceGnmDrawCmdDrawIndexAuto2(&cmd->gnm_cmd, vertexCount, mod);
+ }
+@@ -1525,6 +1589,7 @@ vk_ps4_CmdDraw(VkCommandBuffer commandBuffer, uint32_t vertexCount, uint32_t ins
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdDrawIndexed(VkCommandBuffer commandBuffer, uint32_t indexCount, uint32_t instanceCount,
                        uint32_t firstIndex, int32_t vertexOffset, uint32_t firstInstance) {
@@ -304,7 +328,7 @@ index 168c1f3..72b3c0f 100644
      if (!commandBuffer) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
  
-@@ -1744,6 +1791,7 @@ vk_ps4_CmdDispatchIndirect(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDev
+@@ -1744,6 +1809,7 @@ vk_ps4_CmdDispatchIndirect(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDev
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdCopyBuffer(VkCommandBuffer commandBuffer, VkBuffer srcBuffer, VkBuffer dstBuffer,
                       uint32_t regionCount, const VkBufferCopy *pRegions) {
@@ -312,7 +336,7 @@ index 168c1f3..72b3c0f 100644
      if (!commandBuffer || !pRegions) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      VkPs4Buffer *src = (VkPs4Buffer *)srcBuffer;
-@@ -1774,6 +1822,7 @@ vk_ps4_CmdCopyBuffer(VkCommandBuffer commandBuffer, VkBuffer srcBuffer, VkBuffer
+@@ -1774,6 +1840,7 @@ vk_ps4_CmdCopyBuffer(VkCommandBuffer commandBuffer, VkBuffer srcBuffer, VkBuffer
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdFillBuffer(VkCommandBuffer commandBuffer, VkBuffer dstBuffer,
                       VkDeviceSize dstOffset, VkDeviceSize fillSize, uint32_t data) {
@@ -320,7 +344,7 @@ index 168c1f3..72b3c0f 100644
      if (!commandBuffer || !dstBuffer) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      VkPs4Buffer *dst = (VkPs4Buffer *)dstBuffer;
-@@ -1813,6 +1862,7 @@ vk_ps4_CmdFillBuffer(VkCommandBuffer commandBuffer, VkBuffer dstBuffer,
+@@ -1813,6 +1880,7 @@ vk_ps4_CmdFillBuffer(VkCommandBuffer commandBuffer, VkBuffer dstBuffer,
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdUpdateBuffer(VkCommandBuffer commandBuffer, VkBuffer dstBuffer,
                         VkDeviceSize dstOffset, VkDeviceSize dataSize, const void *pData) {
@@ -328,7 +352,7 @@ index 168c1f3..72b3c0f 100644
      if (!commandBuffer || !dstBuffer || !pData) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      VkPs4Buffer *dst = (VkPs4Buffer *)dstBuffer;
-@@ -1869,6 +1919,7 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -1869,6 +1937,7 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdCopyImage(VkCommandBuffer commandBuffer, VkImage srcImage, VkImageLayout srcImageLayout,
                      VkImage dstImage, VkImageLayout dstImageLayout,
                      uint32_t regionCount, const VkImageCopy *pRegions) {
@@ -336,7 +360,7 @@ index 168c1f3..72b3c0f 100644
      if (!commandBuffer || !pRegions) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      VkPs4Image *src = (VkPs4Image *)srcImage;
-@@ -1968,6 +2019,7 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -1968,6 +2037,7 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdBlitImage(VkCommandBuffer commandBuffer, VkImage srcImage, VkImageLayout srcImageLayout,
                      VkImage dstImage, VkImageLayout dstImageLayout,
                      uint32_t regionCount, const VkImageBlit *pRegions, VkFilter filter) {
@@ -344,7 +368,7 @@ index 168c1f3..72b3c0f 100644
      /* BlitImage with scaling/format conversion requires a shader-based blit.
       * For MVP, fall back to CmdCopyImage if regions are 1:1.
       * Full blit support is Phase 3. */
-@@ -2039,6 +2091,7 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -2039,6 +2109,7 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdCopyBufferToImage(VkCommandBuffer commandBuffer, VkBuffer srcBuffer, VkImage dstImage,
                              VkImageLayout dstImageLayout, uint32_t regionCount,
                              const VkBufferImageCopy *pRegions) {
@@ -352,7 +376,7 @@ index 168c1f3..72b3c0f 100644
      if (!commandBuffer || !pRegions) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      VkPs4Buffer *src = (VkPs4Buffer *)srcBuffer;
-@@ -2200,6 +2253,7 @@ static bool vk_ps4_attachment_used_before_subpass(VkPs4RenderPass *rp,
+@@ -2200,6 +2271,7 @@ static bool vk_ps4_attachment_used_before_subpass(VkPs4RenderPass *rp,
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdBeginRenderPass(VkCommandBuffer commandBuffer, const VkRenderPassBeginInfo *pBeginInfo,
                            VkSubpassContents contents) {
@@ -360,7 +384,36 @@ index 168c1f3..72b3c0f 100644
      (void)contents;
      if (!commandBuffer || !pBeginInfo) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
-@@ -2338,6 +2392,7 @@ vk_ps4_CmdBeginRenderPass(VkCommandBuffer commandBuffer, const VkRenderPassBegin
+@@ -2259,13 +2331,27 @@ vk_ps4_CmdBeginRenderPass(VkCommandBuffer commandBuffer, const VkRenderPassBegin
+      * attachment via pDepthStencilAttachment. */
+     vk_ps4_bind_subpass_targets(cmd);
+ 
++    /* PcPs4 diag: which image does this pass render into, and is it the
++     * swapchain? Lets us tell the backbuffer clear pass from the present
++     * blitter pass, and see whether a Draw follows. */
++    {
++        VkPs4ImageView *rt0 = vk_ps4_get_attachment_view(cmd, 0);
++        if (rt0 && rt0->image)
++            vk_ps4_log("BeginRenderPass: rt0 %ux%u swap=%d area=%ux%u",
++                       rt0->image->create_info.extent.width,
++                       rt0->image->create_info.extent.height,
++                       (int)rt0->image->is_swapchain_image,
++                       pBeginInfo->renderArea.extent.width,
++                       pBeginInfo->renderArea.extent.height);
++    }
++
+     /* If any framebuffer attachment is a swapchain image, emit
+      * WaitUntilSafeForRendering so the GPU waits until the display
+      * engine has finished reading the buffer before we render to it.
+      * This prevents tearing and GPU/display races on swapchain images. */
+     for (uint32_t i = 0; i < fb->attachment_count; i++) {
+         VkPs4ImageView *view = vk_ps4_get_attachment_view(cmd, i);
+-        if (view && view->image && view->image->is_swapchain_image) {
++        if (view && view->image && view->image->is_swapchain_image && pcps4_wait_flip_on_gpu) {
+             sceGnmDrawCmdWaitUntilSafeForRendering(
+                 &cmd->gnm_cmd,
+                 view->image->video_out_handle,
+@@ -2338,6 +2424,7 @@ vk_ps4_CmdBeginRenderPass(VkCommandBuffer commandBuffer, const VkRenderPassBegin
  
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdEndRenderPass(VkCommandBuffer commandBuffer) {
@@ -368,7 +421,33 @@ index 168c1f3..72b3c0f 100644
      if (!commandBuffer) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
  
-@@ -2513,6 +2568,7 @@ vk_ps4_CmdPipelineBarrier(VkCommandBuffer commandBuffer, VkPipelineStageFlags sr
+@@ -2359,6 +2446,25 @@ vk_ps4_CmdEndRenderPass(VkCommandBuffer commandBuffer) {
+         GNM_CACHE_FLUSH_AND_INV_TS_EVENT, 0,
+         GNM_DATA_SEL_DISCARD, 0);
+ 
++    /* Synchronous ACQUIRE_MEM: flush the colour caches to memory AND invalidate
++     * the texture caches, so a later pass that SAMPLES this render target (e.g.
++     * DXVK's present blitter sampling the just-cleared backbuffer, in a separate
++     * submit) reads fresh texels. Only emit it for passes that actually rendered
++     * a colour attachment — a blanket flush on every pass (incl. ones with no RT)
++     * adds needless full-pipe stalls. */
++    {
++        VkPs4RenderPass *erp = cmd->current_render_pass.pass;
++        uint32_t spi = cmd->current_render_pass.current_subpass;
++        bool had_color = erp && spi < erp->subpass_count &&
++                         erp->subpasses[spi].colorAttachmentCount > 0;
++        if (had_color) {
++            sceGnmDrawCmdWaitGraphicsWrite(&cmd->gnm_cmd,
++                (GnmAcquireTargetFlags)(GNM_ACQUIRE_TARGET_CB0 | GNM_ACQUIRE_TARGET_CB1 |
++                    GNM_ACQUIRE_TARGET_CB2 | GNM_ACQUIRE_TARGET_CB3 | GNM_ACQUIRE_TARGET_CB4 |
++                    GNM_ACQUIRE_TARGET_CB5 | GNM_ACQUIRE_TARGET_CB6 | GNM_ACQUIRE_TARGET_CB7));
++        }
++    }
++
+     cmd->current_render_pass.pass = NULL;
+     cmd->current_render_pass.framebuffer = NULL;
+ }
+@@ -2513,14 +2619,29 @@ vk_ps4_CmdPipelineBarrier(VkCommandBuffer commandBuffer, VkPipelineStageFlags sr
                            uint32_t memoryBarrierCount, const VkMemoryBarrier *pMemoryBarriers,
                            uint32_t bufferMemoryBarrierCount, const VkBufferMemoryBarrier *pBufferMemoryBarriers,
                            uint32_t imageMemoryBarrierCount, const VkImageMemoryBarrier *pImageMemoryBarriers) {
@@ -376,7 +455,30 @@ index 168c1f3..72b3c0f 100644
      if (!commandBuffer) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
  
-@@ -2609,11 +2665,12 @@ VKAPI_ATTR void VKAPI_CALL
+-    /* For MVP, emit a cache flush EOP event as a full barrier */
++    /* Emit a cache flush EOP event: drains the pipe and flushes/invalidates
++     * the CB/DB caches to memory. */
+     sceGnmDrawCmdEventWriteEop(&cmd->gnm_cmd,
+         GNM_CACHE_FLUSH_AND_INV_TS_EVENT, 0,
+         GNM_DATA_SEL_DISCARD, 0);
+ 
++    /* The EOP event above is fire-and-forget and does NOT invalidate the
++     * texture caches (TCL1/TC). Without that, a shader that samples a render
++     * target just written (e.g. DXVK's present blitter sampling the game's
++     * backbuffer) fetches STALE texels — the backbuffer reads as black even
++     * though the clear wrote colour. Emit a synchronous ACQUIRE_MEM that stalls
++     * the CP until the colour/depth caches are flushed AND the texture caches
++     * are invalidated, so the next sample reads fresh data. */
++    sceGnmDrawCmdWaitGraphicsWrite(&cmd->gnm_cmd,
++        (GnmAcquireTargetFlags)(GNM_ACQUIRE_TARGET_CB0 | GNM_ACQUIRE_TARGET_CB1 |
++            GNM_ACQUIRE_TARGET_CB2 | GNM_ACQUIRE_TARGET_CB3 | GNM_ACQUIRE_TARGET_CB4 |
++            GNM_ACQUIRE_TARGET_CB5 | GNM_ACQUIRE_TARGET_CB6 | GNM_ACQUIRE_TARGET_CB7 |
++            GNM_ACQUIRE_TARGET_DB));
++
+     /* Track image layout transitions */
+     for (uint32_t i = 0; i < imageMemoryBarrierCount; i++) {
+         const VkImageMemoryBarrier *b = &pImageMemoryBarriers[i];
+@@ -2609,11 +2730,12 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdClearColorImage(VkCommandBuffer commandBuffer, VkImage image, VkImageLayout imageLayout,
                            const VkClearColorValue *pColor, uint32_t rangeCount,
                            const VkImageSubresourceRange *pRanges) {
@@ -390,7 +492,7 @@ index 168c1f3..72b3c0f 100644
  
      /* Tiled render targets require a draw-based clear because FillMemory
       * writes linearly and doesn't respect the tiled memory layout.
-@@ -2777,6 +2834,7 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -2777,6 +2899,7 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdClearAttachments(VkCommandBuffer commandBuffer, uint32_t attachmentCount,
                             const VkClearAttachment *pAttachments, uint32_t rectCount,
                             const VkClearRect *pRects) {
@@ -398,7 +500,7 @@ index 168c1f3..72b3c0f 100644
      if (!commandBuffer || !pAttachments) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
  
-@@ -2895,6 +2953,7 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -2895,6 +3018,7 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdPushConstants(VkCommandBuffer commandBuffer, VkPipelineLayout layout,
                          VkShaderStageFlags stageFlags, uint32_t offset, uint32_t size,
                          const void *pValues) {
@@ -829,7 +931,7 @@ index 24ef0d4..cd63bf3 100644
      free(((void **)ptr)[-1]);
  #else
 diff --git a/src/vk_ps4_image.c b/src/vk_ps4_image.c
-index 6545469..5efa78b 100644
+index 6545469..12cd064 100644
 --- a/src/vk_ps4_image.c
 +++ b/src/vk_ps4_image.c
 @@ -208,6 +208,9 @@ vk_ps4_GetImageMemoryRequirements(VkDevice device, VkImage image, VkMemoryRequir
@@ -859,8 +961,16 @@ index 6545469..5efa78b 100644
      if (img->is_render_target) {
          sceGnmRtSetBaseAddr(&img->gnm_rt, gpu_addr);
      } else {
-@@ -290,6 +303,11 @@ vk_ps4_CreateImageView(VkDevice device, const VkImageViewCreateInfo *pCreateInfo
+@@ -288,8 +301,19 @@ vk_ps4_CreateImageView(VkDevice device, const VkImageViewCreateInfo *pCreateInfo
+              * correctly but won't crash. */
+             memset(&view->gnm_view, 0, sizeof(GnmTexture));
          }
++        /* PcPs4 diag: why does the blitter sample a render target as black?
++         * Report the conversion result and the resulting T# base address. */
++        vk_ps4_log("RTtex: err=%d rt_base=%p tm=%d %ux%u -> Tbase=%p",
++                   (int)tex_err, rt_base, (int)rt_info.tm,
++                   rt_width, rt_height,
++                   (tex_err == GNM_ERROR_OK) ? sceGnmTexGetBaseAddress(&view->gnm_view) : (void *)0);
      }
  
 +    vk_ps4_log("CreateImageView: img=%p rt=%d base=%p fmt=%d", (void *)view->image,
@@ -1442,10 +1552,10 @@ index 151a536..dfd7977 100644
      if (result != PSBC_RESULT_OK) {
          vk_ps4_log("compile_shader: %s FAILED psbc_result=%d", stage_name, (int)result);
 diff --git a/src/vk_ps4_swapchain.c b/src/vk_ps4_swapchain.c
-index bc36c63..0bfad35 100644
+index bc36c63..b1826c2 100644
 --- a/src/vk_ps4_swapchain.c
 +++ b/src/vk_ps4_swapchain.c
-@@ -11,6 +11,12 @@
+@@ -11,6 +11,24 @@
  
  #include <string.h>
  
@@ -1455,13 +1565,67 @@ index bc36c63..0bfad35 100644
 +int pcps4_vk_skip_submit_done = 0;
 +#define PCPS4_VKTRACE(m) do { if (pcps4_vk_trace) pcps4_vk_trace(m); } while (0)
 +
++/* PcPs4: swapchains currently holding the display, so an abandoned run can release it. */
++static VkPs4Swapchain *g_pcps4_open_sc[8];
++
++void vk_ps4_force_close_video_out(void) {
++    for (int k = 0; k < 8; k++) {
++        if (g_pcps4_open_sc[k]) {
++            sceGnmVideoOutClose(&g_pcps4_open_sc[k]->video_out);
++            g_pcps4_open_sc[k] = NULL;
++        }
++    }
++}
++
  VKAPI_ATTR VkResult VKAPI_CALL
  vk_ps4_CreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR *pCreateInfo,
                            const VkAllocationCallbacks *pAllocator, VkSwapchainKHR *pSwapchain) {
-@@ -342,12 +348,42 @@ vk_ps4_QueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *pPresentInfo) {
+@@ -76,7 +94,9 @@ vk_ps4_CreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR *pCrea
+     sc->image_count = vo_info.numbuffers;
+     sc->images = vk_ps4_alloc_zero(alloc, sc->image_count * sizeof(VkPs4Image), 16);
+     if (!sc->images) {
+-        sceGnmVideoOutClose(&sc->video_out);
++        for (int k = 0; k < 8; k++)
++        if (g_pcps4_open_sc[k] == sc) g_pcps4_open_sc[k] = NULL;
++    sceGnmVideoOutClose(&sc->video_out);
+         vk_ps4_free(alloc, sc);
+         return VK_ERROR_OUT_OF_HOST_MEMORY;
+     }
+@@ -130,11 +150,15 @@ vk_ps4_CreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR *pCrea
+ 
+     if (!rt_ok) {
+         vk_ps4_free(alloc, sc->images);
+-        sceGnmVideoOutClose(&sc->video_out);
++        for (int k = 0; k < 8; k++)
++        if (g_pcps4_open_sc[k] == sc) g_pcps4_open_sc[k] = NULL;
++    sceGnmVideoOutClose(&sc->video_out);
+         vk_ps4_free(alloc, sc);
+         return VK_ERROR_INITIALIZATION_FAILED;
+     }
+ 
++    for (int k = 0; k < 8; k++)
++        if (!g_pcps4_open_sc[k]) { g_pcps4_open_sc[k] = sc; break; }
+     *pSwapchain = (VkSwapchainKHR)sc;
+     return VK_SUCCESS;
+ }
+@@ -155,6 +179,8 @@ vk_ps4_DestroySwapchainKHR(VkDevice device, VkSwapchainKHR swapchain, const VkAl
+     if (sc->images) {
+         vk_ps4_free(alloc, sc->images);
+     }
++    for (int k = 0; k < 8; k++)
++        if (g_pcps4_open_sc[k] == sc) g_pcps4_open_sc[k] = NULL;
+     sceGnmVideoOutClose(&sc->video_out);
+     vk_ps4_free(alloc, sc);
+ }
+@@ -342,12 +368,47 @@ vk_ps4_QueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *pPresentInfo) {
          if (image_index < sc->image_count) {
              vk_ps4_log("QueuePresent: flip img=%u frame=%lld",
                         image_index, (long long)sc->video_out.frame);
++            /* NOTE (v56 diagnostic result): a CPU memset of this buffer to solid
++             * blue here DID appear on the TV, proving the swapchain buffer IS the
++             * scanout target and CPU writes reach the display. The black screen is
++             * therefore the GPU present-blit (psbc-compiled DXVK shaders) not
++             * writing visible pixels here — not a buffer-mapping problem. */
 +            PCPS4_VKTRACE("present: SubmitFlipAndWait begin");
              sceGnmVideoOutSubmitFlipAndWait(
                  &sc->video_out, image_index, (int64_t)sc->video_out.frame,

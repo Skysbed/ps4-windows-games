@@ -63,8 +63,10 @@ static MSA VkResult shim_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(VkPhysicalDev
     memset(c, 0, sizeof(*c));
     c->minImageCount = 2;
     c->maxImageCount = 3;
-    /* The console scans out one fixed mode; pin every extent to it so DXVK
-     * always creates a 1920x1080 swapchain and scales the game into it. */
+    /* The console's VideoOut only accepts standard display modes (1920x1080,
+     * 1280x720, ...) — it rejects a 640x360 scanout buffer (VideoOutOpen error
+     * 0x80290005, confirmed v50). So the swapchain must be a full display mode
+     * and the game's smaller backbuffer is scaled into it at present time. */
     c->currentExtent = {kWidth, kHeight};
     c->minImageExtent = {kWidth, kHeight};
     c->maxImageExtent = {kWidth, kHeight};

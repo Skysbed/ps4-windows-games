@@ -163,14 +163,37 @@ succeeds; the open TODO is the install daemon's jail not seeing `/data`
 (`AppInstallPkg` returns `0x80020002` ENOENT for `/data/*.pkg`) — needs the
 daemon-visible staging path the shell's own installer uses.
 
-## Intermittent worker-exit crash
+## Intermittent worker-exit crash — root-caused and fixed (v68)
 
-The DXVK worker crash (a worker reaching the sandbox-forbidden `exit` syscall ->
-uncatchable SIGSYS) is INTERMITTENT. On a clean run the whole pipeline passes:
-observed `finished: 4/4 passed` with `DXVK scanout RGB probe = PASS`
-(nonblack=15, color_changes=7) — DXVK renders correctly end to end and the app
-exits cleanly. The crash only fires on runs where a worker hits its abort/exit
-path (correlated with psbc "Unsupported SPIR-V capability" activity). SIGSYS is
-uncatchable and the exit()/abort() override did not interpose, so the durable
-fix remains stopping psbc from aborting; the scanout result is unaffected when
-it doesn't fire.
+The crash was a live `assert()` inside Mesa's shader compiler. `libpsbc.orbis.a`
+was built `-O2 -g` with **no `-DNDEBUG`**, so every assert across spirv_to_nir /
+nir / the amd compiler was active. When a DXVK-generated shader tripped a
+debug-only sanity assert, `assert` called `abort()`, and `abort()` in this PS4
+sandbox reaches a process-exit syscall that is blocked and turns into an
+uncatchable `SIGSYS` — taking the whole app down. It was intermittent because
+only some shader variants trip an assert; clean runs (`4/4 passed`, scanout
+`PASS`) are the runs where none fired. The exit()/abort() override in
+`compat/pcps4_fault.c` never helped because psbc resolves libc `abort`/`exit`
+through the ELF dynamic linker to libkernel, not the PE-side override.
+
+**Fix:** build psbc in release mode (`-DNDEBUG`), the same configuration Mesa /
+RADV ship to production, which handles these shaders without the debug asserts.
+`vtn_fail()` still fails a genuinely unsupported shader gracefully (it longjmps
+to the `spirv_to_nir` setjmp and returns NULL), so a bad compile no longer
+aborts either. See `gpulab/patches/opengnm-psbc-ndebug.patch`:
+
+- `config.orbis.mak`: add `-DNDEBUG`; restore `-Wno-error=` for the C warnings
+  clang 16+ promotes to errors (they fire only in GFX11/GFX12 code paths that
+  never run on the PS4's older GPU), matching the clang the lib built under before.
+- `psbc_ndebug_stubs.c` (new): no-op out-of-line definitions of the NIR
+  validation/debug symbols (`nir_validate_shader`, the `nir_metadata_*`
+  validation helpers, `nir_validate_progress_*`, and the globals `nir_debug` /
+  `nir_debug_print_shader`). Under NDEBUG these become static-inline no-ops, so
+  NDEBUG units stop referencing them, but the prebuilt non-NDEBUG driver and
+  `psbc_compile.c` still do. The stubs reproduce the NDEBUG no-op behaviour so
+  the two link together; `struct blob` uses Mesa's real layout for an ABI-correct
+  by-value return.
+
+The rebuilt `libpsbc.orbis.a` drops from 176 MB to 164 MB and from 396 to 2
+undefined `__assert` references (the 2 remaining are in crc32 / psbc_stubs glue,
+off the shader-compile path). Packaged as v68.

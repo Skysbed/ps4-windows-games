@@ -1,0 +1,132 @@
+diff --git a/Makefile b/Makefile
+index 21c97d3..71296c3 100644
+--- a/Makefile
++++ b/Makefile
+@@ -147,7 +147,8 @@ src/amd/common/sid_tables.h: src/amd/common/sid_tables.py src/amd/registers/pkt3
+ PSBC_SRCS = \
+ 	libpsbc/psbc_compile.c \
+ 	cmd/psbc/crc32_sb.c \
+-	psbc_stubs.c
++	psbc_stubs.c \
++	psbc_ndebug_stubs.c
+ 
+ # CLI wrapper sources — thin main() that calls libpsbc
+ CLI_SRCS = cmd/psbc/main.c
+diff --git a/config.orbis.mak b/config.orbis.mak
+index 621e256..4ecfe70 100644
+--- a/config.orbis.mak
++++ b/config.orbis.mak
+@@ -65,15 +65,30 @@ AR := /opt/homebrew/opt/llvm/bin/llvm-ar
+ else
+ AR := llvm-ar
+ endif
+-CFLAGS=-std=gnu11 -Wall -O2 -g $(ARCHFLAGS) $(SHARED_FLAGS) \
++# -DNDEBUG: build Mesa/spirv/nir in release mode so assert() is compiled out.
++# A live assert() on the shader-compile path calls abort(), and abort() in this
++# PS4 sandbox reaches a process-exit syscall that is blocked and turns into an
++# uncatchable SIGSYS — crashing the whole app when a DXVK shader trips a
++# debug-only sanity assert. Production Mesa/RADV ships with NDEBUG and handles
++# these shaders fine; vtn_fail() still fails a bad compile gracefully (longjmp).
++# clang 16+ promotes several C warnings to errors by default; the Mesa tree was
++# built (Oct 2024) under an older clang that treated them as warnings. Restore
++# that so the release build matches the known-good library. These fire only in
++# GFX11/GFX12 code paths that never execute on the PS4's older GPU.
++WARN_COMPAT=-Wno-error=incompatible-pointer-types \
++            -Wno-error=incompatible-function-pointer-types \
++            -Wno-error=int-conversion \
++            -Wno-error=implicit-function-declaration \
++            -Wno-error=implicit-int
++CFLAGS=-std=gnu11 -Wall -O2 -g -DNDEBUG $(ARCHFLAGS) $(SHARED_FLAGS) \
+        -Wno-macro-redefined -Wno-typedef-redefinition \
+-       -Wno-unused-function -Wno-unused-variable \
++       -Wno-unused-function -Wno-unused-variable $(WARN_COMPAT) \
+        -Dalloca=__builtin_alloca \
+        -DHAVE_SYSCONF=1 \
+        -include strings.h
+-CXXFLAGS=-std=c++17 -Wall -O2 -g $(ARCHFLAGS) $(SHARED_FLAGS) \
++CXXFLAGS=-std=c++17 -Wall -O2 -g -DNDEBUG $(ARCHFLAGS) $(SHARED_FLAGS) \
+          -Wno-macro-redefined -Wno-typedef-redefinition \
+-         -Wno-unused-function -Wno-unused-variable \
++         -Wno-unused-function -Wno-unused-variable $(WARN_COMPAT) \
+          -Dalloca=__builtin_alloca \
+          -DHAVE_SYSCONF=1 \
+          -include strings.h
+diff --git a/psbc_ndebug_stubs.c b/psbc_ndebug_stubs.c
+new file mode 100644
+index 0000000..506dee0
+--- /dev/null
++++ b/psbc_ndebug_stubs.c
+@@ -0,0 +1,73 @@
++/*
++ * NDEBUG diagnostic stubs.
++ *
++ * libpsbc is built with -DNDEBUG (release) so that assert() is compiled out:
++ * a live assert on the shader-compile path calls abort(), and abort() in the
++ * PS4 sandbox hits a blocked process-exit syscall that becomes an uncatchable
++ * SIGSYS, crashing the whole app when a DXVK shader trips a debug-only assert.
++ *
++ * Under NDEBUG, Mesa turns nir_validate_shader() and the nir_metadata
++ * validation/debug helpers into static-inline no-ops, so NDEBUG translation
++ * units never reference them. The prebuilt vulkan-ps4 driver (libvulkan_ps4.a)
++ * and psbc_compile.c were compiled WITHOUT NDEBUG, so they still reference the
++ * out-of-line symbols. Provide them here as no-ops with identical behaviour to
++ * the NDEBUG inline versions, so the two link together.
++ *
++ * Deliberately does NOT include nir.h: under NDEBUG that header declares these
++ * as static inline, which would conflict with external definitions. nir_shader
++ * is opaque here (only ever passed by pointer); struct blob uses Mesa's real
++ * layout so the by-value return of nir_validate_progress_setup is ABI-correct.
++ */
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <string.h>
++
++#include "blob.h" /* struct blob — exact layout for the by-value return */
++
++struct nir_shader;
++
++void nir_validate_shader(struct nir_shader *shader, const char *when)
++{
++   (void)shader;
++   (void)when;
++}
++
++void nir_metadata_set_validation_flag(struct nir_shader *shader)
++{
++   (void)shader;
++}
++
++void nir_metadata_check_validation_flag(struct nir_shader *shader)
++{
++   (void)shader;
++}
++
++void nir_metadata_require_most(struct nir_shader *shader)
++{
++   (void)shader;
++}
++
++struct blob nir_validate_progress_setup(struct nir_shader *shader)
++{
++   struct blob b;
++   (void)shader;
++   memset(&b, 0, sizeof b);
++   return b;
++}
++
++void nir_validate_progress_finish(struct nir_shader *shader, struct blob *setup_blob,
++                                  bool progress, const char *when)
++{
++   (void)shader;
++   (void)setup_blob;
++   (void)progress;
++   (void)when;
++}
++
++/* nir.c defines these inside #ifndef NDEBUG, so this release build drops them,
++ * yet NIR_DEBUG() and should_print_nir() (inlined into non-NDEBUG callers)
++ * still read them. Zero keeps every debug path off, matching release behaviour.
++ * MESA_SHADER_KERNEL == 14, so the array is [KERNEL + 1] == 15 entries. */
++uint32_t nir_debug = 0;
++bool nir_debug_print_shader[15] = { 0 };

@@ -49,13 +49,27 @@ static volatile int pcps4_pe_exit_armed;
 static volatile int pcps4_pe_exit_code;
 static volatile int pcps4_pe_exit_requested;
 
+/* Set to 1 only on the thread that armed the exit jmp_buf (the PE's main
+ * thread). longjmp is only valid on that thread; a worker thread that calls
+ * ExitProcess/abort/_amsg_exit (e.g. on a DXVK shader-compile error) must NOT
+ * longjmp into another thread's saved context — doing so slams the main
+ * thread's rsp/rip onto the worker and corrupts it, which the kernel then kills
+ * with SIGSYS (observed: pcps4-worker faulting in libkernel's exit stub). */
+static __thread int pcps4_pe_exit_owner;
+
+extern void _exit(int);
+
 void pcps4_pe_exit_process(uint32_t code)
 {
-    if (pcps4_pe_exit_armed) {
+    if (pcps4_pe_exit_armed && pcps4_pe_exit_owner) {
+        /* Main thread: unwind cleanly back to the loader. */
         pcps4_pe_exit_code = (int)code;
         pcps4_pe_exit_requested = 1;
         longjmp(pcps4_pe_exit_jmp, 1);
     }
+    /* Any other thread (or before arming): the process really is terminating,
+     * but we cannot longjmp across threads. End the whole process directly. */
+    _exit((int)code);
 }
 
 /* Round a size up to the 16 KiB PS4 page granule. */
@@ -406,6 +420,7 @@ pcps4_loader_status pcps4_loader_run(const uint8_t *exe, size_t exe_size,
     pcps4_status_log("[pcps4] entering binary at %p", (void *)entry);
     pcps4_fault_stage("loader: PE entry (before WinMainCRTStartup)");
     pcps4_pe_exit_armed = 1;
+    pcps4_pe_exit_owner = 1; /* this (main) thread owns the exit jmp_buf */
     pcps4_pe_exit_code = 0;
     pcps4_pe_exit_requested = 0;
     {

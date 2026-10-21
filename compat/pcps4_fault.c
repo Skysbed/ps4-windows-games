@@ -179,6 +179,41 @@ static __thread int pcps4_fault_worker;
 extern void scePthreadExit(void *value);
 void pcps4_fault_mark_worker(void) { pcps4_fault_worker = 1; }
 
+/*
+ * Override libc exit()/abort(). The Mesa-based psbc shader compiler (native
+ * code linked into the app) calls these on error paths from DXVK worker
+ * threads; the underlying process-exit syscall is forbidden from a non-main
+ * thread in this sandbox and is killed with an UNCATCHABLE SIGSYS (a signal
+ * handler never runs). Interpose our own: a worker ends ONLY itself via the
+ * permitted thread-exit, so the rest of the app keeps running; the main thread
+ * unwinds to the loader as before.
+ */
+extern void pcps4_pe_exit_process(uint32_t code);
+
+__attribute__((noreturn)) void exit(int code)
+{
+    fd_write_str(STDERR_FILENO, pcps4_fault_worker
+        ? "PcPs4: exit() override on worker -> thread-exit\n"
+        : "PcPs4: exit() override on main\n");
+    if (pcps4_fault_worker)
+        scePthreadExit((void *)(intptr_t)code);
+    pcps4_pe_exit_process((uint32_t)code); /* main thread: longjmp to loader if armed */
+    _exit(code);
+    for (;;) { }
+}
+
+__attribute__((noreturn)) void abort(void)
+{
+    fd_write_str(STDERR_FILENO, pcps4_fault_worker
+        ? "PcPs4: abort() override on worker -> thread-exit\n"
+        : "PcPs4: abort() override on main\n");
+    if (pcps4_fault_worker)
+        scePthreadExit((void *)(intptr_t)1);
+    pcps4_pe_exit_process(134);
+    _exit(134);
+    for (;;) { }
+}
+
 #ifndef SIGSYS
 #define SIGSYS 12
 #endif

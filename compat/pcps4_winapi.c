@@ -34,6 +34,13 @@ static int module_name_normalize(
     char *output,
     size_t output_size);
 
+/* Permissive bring-up stub: an import we cannot resolve any other way binds to
+ * this no-op instead of the loader refusing to run. MS x64 is caller-cleanup
+ * with the integer result in RAX, so a zero-arg stub returning 0 is ABI-safe
+ * for any call. Lets a real game load and run far enough to reveal (via the log)
+ * which APIs it actually calls and reach the GPU path. */
+static PCPS4_MS_ABI uint64_t pcps4_permissive_import_stub(void) { return 0; }
+
 static void *pcps4_dynamic_resolve(
     void *user,
     const char *dll,
@@ -99,17 +106,26 @@ static void *pcps4_dynamic_resolve(
             return NULL;
 
         module = pcps4_dll_load(path, g_resolver);
-        if (module == NULL)
-            return NULL;
+        if (module == NULL) {
+            /* DLL not bundled and not implemented: stub it so the game still
+             * runs (permissive bring-up). */
+            pcps4_status_log("[pcps4] STUB import (no module) %s!%s%s -> no-op",
+                dll, by_name ? name : "#", by_name ? "" : "(ordinal)");
+            return (void *)pcps4_permissive_import_stub;
+        }
     }
 
     fn = pcps4_dll_get_export(module, by_name ? name : NULL, ordinal);
-    if (fn == NULL)
+    if (fn == NULL) {
+        /* Module is loaded (e.g. DXVK's d3d11.dll) but lacks this export: stub
+         * it rather than refusing the whole game. */
         pcps4_status_log(
-            "[pcps4] unresolved dynamic export: %s!%s%s",
+            "[pcps4] STUB import (no export) %s!%s%s -> no-op",
             dll,
             by_name ? name : "#",
             by_name ? "" : "(ordinal)");
+        return (void *)pcps4_permissive_import_stub;
+    }
 
     return fn;
 }

@@ -547,44 +547,6 @@ static MSA I32 a_RegQueryValueExA(PV k, const char *n, U32 *r, U32 *t, uint8_t *
 
 #define R(dll, name, fn) (void)pcps4_pe_resolver_register(resolver, dll, name, (void *)(fn))
 
-/* Permissive bring-up: any import PcPs4 does not implement resolves to a no-op
- * stub that returns 0, instead of the loader refusing to run. MS x64 is
- * caller-cleanup with the integer result in RAX, so a zero-arg stub returning 0
- * is ABI-safe for any call. This lets a real game load and run far enough to
- * reveal which APIs it actually calls (logged below) and reach the GPU path;
- * a stub a game truly depends on may still misbehave, which the log will show. */
-static MSA U64 pcps4_import_stub(void) { return 0; }
-
-/* DLLs that are REAL loaded modules (DXVK's own libraries): their exports must
- * resolve to the actual loaded code, never a stub. Stubbing e.g.
- * d3d11.dll!D3D11CreateDeviceAndSwapChain hands the game a null device and it
- * crashes. The permissive stub is only for gaps in system DLLs PcPs4 provides. */
-static int pcps4_dll_is_real_module(const char *dll) {
-    static const char *const real[] = {
-        "d3d11.dll", "d3d10.dll", "d3d10_1.dll", "d3d10core.dll",
-        "d3d9.dll", "dxgi.dll", "d3dcompiler_47.dll",
-    };
-    if (!dll) return 0;
-    for (unsigned i = 0; i < sizeof(real) / sizeof(real[0]); i += 1) {
-        const char *a = dll, *b = real[i];
-        while (*a && *b && ((*a | 0x20) == (*b | 0x20))) { a += 1; b += 1; }
-        if (*a == '\0' && *b == '\0') return 1;
-    }
-    return 0;
-}
-
-static void *pcps4_import_fallback(void *user, const char *dll, int by_name,
-                                   const char *name, U16 ordinal) {
-    (void)user;
-    /* Never stub a real loaded module's export — let normal resolution bind it. */
-    if (pcps4_dll_is_real_module(dll)) return NULL;
-    if (by_name)
-        pcps4_status_log("[pcps4] STUB import %s!%s -> no-op", dll ? dll : "?", name ? name : "?");
-    else
-        pcps4_status_log("[pcps4] STUB import %s!#%u -> no-op", dll ? dll : "?", (unsigned)ordinal);
-    return (void *)pcps4_import_stub;
-}
-
 void pcps4_dxvk_register_win32(pcps4_pe_resolver *resolver) {
     static const char *const k32[] = {"KERNEL32.dll", "KERNELBASE.dll"};
     for (unsigned i = 0; i < 2; i += 1) {
@@ -750,10 +712,8 @@ void pcps4_dxvk_register_win32(pcps4_pe_resolver *resolver) {
             }
         }
     }
-
-    /* Permissive bring-up: unimplemented imports resolve to a logged no-op so a
-     * real game runs instead of being refused. Only fires for imports not
-     * registered above (the clear test still resolves everything). */
-    resolver->fallback = pcps4_import_fallback;
-    resolver->fallback_user = NULL;
+    /* NOTE: permissive import stubbing lives in pcps4_dynamic_resolve (the
+     * resolver's fallback). Do NOT set resolver->fallback here — build_resolver
+     * already installs the runtime DLL loader there, and overwriting it breaks
+     * resolution of DXVK's real d3d11.dll/dxgi.dll exports. */
 }

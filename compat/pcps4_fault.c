@@ -168,6 +168,46 @@ static void emit_context(int fd, void *uc)
         }
         (void)write(fd, crash_dump, crash_dump_len);
     }
+
+    /*
+     * Backtrace recovery when rsp is trashed (a call through a bad function
+     * pointer can corrupt rsp, so the dump above shows nothing). PcPs4.elf is
+     * fixed-loaded at base 0, so any stack slot whose value lands in the
+     * executable range is a return address = a frame on the real call chain.
+     * Scan from the registers most likely to still point near the live stack
+     * (rbp, r15) and print the code-range hits in order - that names the
+     * callers even when rsp is garbage. Guards keep a wild pointer from
+     * faulting the handler itself.
+     */
+    {
+        static const int cand_slots[] = {9 /*rbp*/, 15 /*r15*/, 22 /*rsp*/};
+        const uint64_t TEXT_LO = 0x1000u, TEXT_HI = 0x428000u; /* .text + .plt */
+        size_t c;
+        int hits = 0;
+        dump_str("-- backtrace scan (code-range return addresses) --\n");
+        for (c = 0; c < sizeof(cand_slots) / sizeof(cand_slots[0]); ++c) {
+            uint64_t v = mc[cand_slots[c]];
+            const uint64_t *s = (const uint64_t *)(uintptr_t)v;
+            if (v < 0x10000u || v > 0x0000800000000000ull ||
+                ((uintptr_t)s & 7u) != 0u)
+                continue; /* not a plausible, aligned stack pointer */
+            for (i = 0; i < 2048 && hits < 40; ++i) {
+                uint64_t slot = s[i];
+                if (slot >= TEXT_LO && slot < TEXT_HI) {
+                    dump_str("bt[");
+                    dump_hex((uint64_t)cand_slots[c]);
+                    dump_str("]+");
+                    dump_hex((uint64_t)(i * 8));
+                    dump_str("=");
+                    dump_hex(slot);
+                    dump_str("\n");
+                    ++hits;
+                }
+            }
+        }
+        (void)write(fd, crash_dump, crash_dump_len);
+        crash_dump_len = 0;
+    }
 }
 
 /* Marks DXVK worker threads (not the PE's main thread). A worker that trips a

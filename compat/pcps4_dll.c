@@ -72,6 +72,48 @@ static void unlock(void)
     __atomic_store_n(&g_lock, 0, __ATOMIC_RELEASE);
 }
 
+/*
+ * Reentrant load serialization. The module-table lock above is only held for
+ * the quick find/reserve/publish steps; the heavy work of a load (file read,
+ * mmap, PE parse, import binding, TEB setup, protections, TLS callbacks,
+ * DllMain) runs without it so that a dependency can be loaded recursively.
+ * But DXVK loads DLLs from several worker threads at once, and that heavy work
+ * touches shared state (the module table slots, the shared file buffer, the
+ * per-image TEB). Interleaving two loads corrupts it - which surfaced as an
+ * intermittent bad-pointer crash OR a hang during "dll: begin load".
+ *
+ * Serialize whole loads the way the Windows loader lock does: only one thread
+ * loads at a time, but a recursive load from the SAME thread (a dependency
+ * pulled in while binding imports) is allowed through, so it cannot self-
+ * deadlock. g_load_owner is the owning thread handle; g_load_depth the
+ * recursion count.
+ */
+extern void *scePthreadSelf(void);
+static volatile int g_load_spin;
+static volatile uintptr_t g_load_owner;
+static int g_load_depth;
+
+static void load_lock(void)
+{
+    uintptr_t me = (uintptr_t)scePthreadSelf();
+    if (__atomic_load_n(&g_load_owner, __ATOMIC_ACQUIRE) == me) {
+        ++g_load_depth; /* same thread, already holding it */
+        return;
+    }
+    while (__atomic_exchange_n(&g_load_spin, 1, __ATOMIC_ACQUIRE) != 0)
+        (void)sceKernelUsleep(100);
+    __atomic_store_n(&g_load_owner, me, __ATOMIC_RELEASE);
+    g_load_depth = 1;
+}
+
+static void load_unlock(void)
+{
+    if (--g_load_depth == 0) {
+        __atomic_store_n(&g_load_owner, 0, __ATOMIC_RELEASE);
+        __atomic_store_n(&g_load_spin, 0, __ATOMIC_RELEASE);
+    }
+}
+
 static void normalize_name(const char *path, char *out, size_t out_size)
 {
     const char *base;
@@ -266,7 +308,7 @@ int pcps4_dll_free(void *module)
     return result;
 }
 
-void *pcps4_dll_load(
+static void *pcps4_dll_load_inner(
     const char *path,
     const pcps4_pe_resolver *resolver)
 {
@@ -488,4 +530,20 @@ void *pcps4_dll_load(
         name, mem, map_size);
 
     return mem;
+}
+
+/*
+ * Public entry point: serialize the whole load (reentrant for recursive
+ * dependency loads on the same thread) so concurrent DXVK worker-thread loads
+ * cannot interleave and corrupt the loader's shared state.
+ */
+void *pcps4_dll_load(
+    const char *path,
+    const pcps4_pe_resolver *resolver)
+{
+    void *result;
+    load_lock();
+    result = pcps4_dll_load_inner(path, resolver);
+    load_unlock();
+    return result;
 }

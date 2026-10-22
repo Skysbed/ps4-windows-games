@@ -63,14 +63,26 @@ full chain working end to end: Windows D3D11 PE -> real DXVK -> Vulkan shim -> v
 Caveat: launching still needed a relaunch to get past the separate intermittent startup crash (below),
 and only the synthetic clear test has run — no real game yet.
 
+## Intermittent startup crash — FIXED (v71, 2026-10-22)
+
+Root-caused from the crash dump: `r14` held the driver's breadcrumb format string
+`"BeginRenderPass: rt0 %ux%u swap=%d area=%ux%u"` and the fault was inside `%u` number formatting
+(deterministic registers: `rbp=0x4`, `rax=0xa`, `r12=0xcccccccccccccccd` = the divide-by-10 magic).
+The driver's `vk_ps4_log` wrote to one shared `FILE*` + counter with **no locking**, and DXVK logs
+from several threads at once; two concurrent `vfprintf`s corrupted the stream's internal state and
+crashed inside the formatter. Deterministic in its registers, intermittent in when it fired (only on a
+collision), and it surfaced either as the SIGSEGV or as a hang mid-write. Fixed by guarding every
+`vk_ps4_log*` operation with a mutex (vulkan-ps4 `src/vk_ps4_log.c`). v70 had also serialized the PcPs4
+DLL loader (reentrant lock, `compat/pcps4_dll.c`) — kept as hygiene, but it was not the cause.
+
+Verified on hardware: v71 launched first try with no crash, ran the full test to completion, and the
+bundled Windows PE called `ExitProcess(0)` and returned cleanly (no on-close crash either):
+`finished: 4/4 passed`, `DXVK scanout RGB probe = PASS` (flips=240, nonblack=15, color_changes=7).
+
 ## Open problems
 
-1. **Intermittent startup crash — the next thing to kill.** Some launches SIGSEGV during DLL load
-   (v68 crash dump: `signal=11 stage="dll: begin load" rip=0x887064`, which lands in PcPs4's read-only
-   data segment, with `r14==rip` and a garbage `rsp` — a call through a bad function pointer). It is
-   intermittent; relaunching clears it (v68 displayed correctly on the second try). Root cause not yet
-   found: an import bound to the wrong address, or a callback/entry invoked with a bad pointer. Capturing
-   it live over the klog/TTY server (port 3232) or the ps4debug debugger is the way in.
+1. **Only the synthetic clear test has run — no real game yet.** The next milestone is driving a real
+   D3D11/D3D9 title (or a heavier sample) through the same path.
 2. A filled (DMA) render-target clear on DXVK's 640x360 backbuffer hard-hangs the console at the first flip
    while the same fill is fine on a 64x64 test image — unexplained; the draw-based clear is used instead.
 3. C++ exception unwinding (Windows x64 SEH dispatcher) is not implemented; DXVK throws on some error paths.

@@ -1,218 +1,5 @@
-diff --git a/Makefile.orbis b/Makefile.orbis
-index e104443..ead0c85 100644
---- a/Makefile.orbis
-+++ b/Makefile.orbis
-@@ -86,6 +86,7 @@ VK_PS4_SRCS := \
- 	src/vk_ps4_shader.c \
- 	src/vk_ps4_pipeline.c \
- 	src/vk_ps4_descriptor.c \
-+	src/vk_ps4_desc_tables.c \
- 	src/vk_ps4_command.c \
- 	src/vk_ps4_swapchain.c \
- 	src/vk_ps4_queue.c \
-diff --git a/include/vk_ps4_internal.h b/include/vk_ps4_internal.h
-index 7634d6b..969b3e2 100644
---- a/include/vk_ps4_internal.h
-+++ b/include/vk_ps4_internal.h
-@@ -182,6 +182,22 @@ struct VkPs4Device {
-     void *clear_ps_binary;
-     GnmPsStageRegisters clear_ps_regs;
-     bool clear_ps_ready;
-+
-+    /* Driver-side present blit: a fullscreen textured draw that samples a
-+     * source texture into a swapchain image, bypassing DXVK's own present
-+     * blitter (whose psbc-compiled shaders produce no visible output). Built
-+     * lazily from the proven self-test texture shaders (blit_shaders.h). */
-+    bool blit_ready;
-+    bool blit_tried;
-+    void *blit_vs_binary;
-+    void *blit_ps_binary;
-+    GnmVsStageRegisters blit_vs_regs;
-+    GnmPsStageRegisters blit_ps_regs;
-+    GnmVertexExportSemantic blit_vs_exports[32];
-+    uint32_t blit_vs_export_count;
-+    GnmPixelInputSemantic blit_ps_inputs[32];
-+    uint32_t blit_ps_input_count;
-+    uint8_t blit_ps_settable_reg; /* PS user-data reg for the set-0 table ptr, 0xff=none */
- };
- 
- /* === Queue === */
-@@ -269,6 +285,8 @@ struct VkPs4CommandBuffer {
-     uint32_t stencil_refmask_front;   /* DB_STENCILREFMASK shadow */
-     uint32_t stencil_refmask_back;    /* DB_STENCILREFMASK_BF shadow */
-     bool stencil_shadow_valid;        /* initialized from pipeline bind */
-+    /* Descriptor sets currently bound by index; their addresses go into shader user-data. */
-+    VkPs4DescriptorSet *bound_sets[8];
- };
- 
- /* === Memory === */
-@@ -515,6 +533,12 @@ struct VkPs4Pipeline {
-     /* Vertex input semantics extracted from VS shader binary */
-     GnmVertexInputSemantic vs_input_semantics[VK_PS4_MAX_INPUT_USAGE_SLOTS];
-     uint32_t vs_input_semantic_count;
-+    /* VS export / PS input semantic tables: link VS outputs to PS inputs
-+     * (SPI_PS_INPUT_CNTL). Without them every interpolant reads as zero. */
-+    GnmVertexExportSemantic vs_export_semantics[32];
-+    uint32_t vs_export_semantic_count;
-+    GnmPixelInputSemantic ps_input_semantics[32];
-+    uint32_t ps_input_semantic_count;
-     /* Push constant inline register mapping — extracted from
-      * IMM_ALUFLOATCONST input usage slots emitted by psbc.
-      * Each entry maps a push constant dword index to a user-data
-@@ -577,6 +601,11 @@ struct VkPs4DescriptorPool {
- #define VK_PS4_MAX_POOLED_SETS 256
-     VkPs4DescriptorSet *free_list[VK_PS4_MAX_POOLED_SETS];
-     uint32_t free_count;
-+    /* Every set ever allocated from this pool, so a pool reset/destroy can release them
-+     * (including their GPU-visible descriptor memory). */
-+    VkPs4DescriptorSet **tracked;
-+    uint32_t tracked_count;
-+    uint32_t tracked_cap;
- };
- 
- struct VkPs4DescriptorSet {
-@@ -589,6 +618,10 @@ struct VkPs4DescriptorSet {
-     /* VK_EXT_descriptor_indexing: variable descriptor count for the
-      * last binding (0 if layout doesn't use variable count). */
-     uint32_t variable_descriptor_count;
-+    /* GPU-visible copy of the descriptors in the layout the compiled shaders expect
-+     * (see vk_ps4_desc_tables.c). */
-+    uint8_t *gpu_mem;
-+    uint32_t gpu_size;
- };
- 
- /* === Sync === */
-@@ -678,6 +711,13 @@ struct VkPs4Swapchain {
- 
- /* === Allocator helpers === */
- void *vk_ps4_alloc(const VkAllocationCallbacks *alloc, size_t size, size_t alignment);
-+
-+/* Descriptor-set byte layout shared with the shader compiler (vk_ps4_desc_tables.c). */
-+uint32_t vk_ps4_desc_elem_size(VkDescriptorType t);
-+void vk_ps4_layout_compute(const VkPs4DescriptorSetLayout *l, uint32_t *offsets, uint32_t *sizes, uint32_t *total);
-+void vk_ps4_flush_set(VkPs4DescriptorSet *set, const uint32_t **dyn, uint32_t *dyn_left);
-+void vk_ps4_emit_set_tables(VkPs4CommandBuffer *cmd, const VkPs4Pipeline *pipe);
-+uint32_t vk_ps4_arena_hi32(void);
- void *vk_ps4_alloc_zero(const VkAllocationCallbacks *alloc, size_t size, size_t alignment);
- void vk_ps4_free(const VkAllocationCallbacks *alloc, void *ptr);
- 
-diff --git a/shaders/blit_shaders.h b/shaders/blit_shaders.h
-new file mode 100644
-index 0000000..c886d62
---- /dev/null
-+++ b/shaders/blit_shaders.h
-@@ -0,0 +1,68 @@
-+/* Driver-side present-blit shaders, reused verbatim from the in-driver
-+ * self-test's PROVEN texture pipeline (psbc-compiled, samples correctly).
-+ * VS: gl_VertexIndex fullscreen triangle -> position + uv.
-+ * PS: samples combined-image-sampler at binding 0 at uv, outputs it. */
-+#pragma once
-+#include <stdint.h>
-+
-+const uint32_t blit_vs_spirv[] = {
-+	0x07230203,0x00010000,0x0008000b,0x0000002e,0x00000000,0x00020011,0x00000001,0x0006000b,
-+	0x00000001,0x4c534c47,0x6474732e,0x3035342e,0x00000000,0x0003000e,0x00000000,0x00000001,
-+	0x0008000f,0x00000000,0x00000004,0x6e69616d,0x00000000,0x0000000c,0x00000018,0x00000020,
-+	0x00030003,0x00000002,0x000001c2,0x00040005,0x00000004,0x6e69616d,0x00000000,0x00030005,
-+	0x00000009,0x00000070,0x00060005,0x0000000c,0x565f6c67,0x65747265,0x646e4978,0x00007865,
-+	0x00030005,0x00000018,0x00007675,0x00060005,0x0000001e,0x505f6c67,0x65567265,0x78657472,
-+	0x00000000,0x00060006,0x0000001e,0x00000000,0x505f6c67,0x7469736f,0x006e6f69,0x00070006,
-+	0x0000001e,0x00000001,0x505f6c67,0x746e696f,0x657a6953,0x00000000,0x00070006,0x0000001e,
-+	0x00000002,0x435f6c67,0x4470696c,0x61747369,0x0065636e,0x00070006,0x0000001e,0x00000003,
-+	0x435f6c67,0x446c6c75,0x61747369,0x0065636e,0x00030005,0x00000020,0x00000000,0x00040047,
-+	0x0000000c,0x0000000b,0x0000002a,0x00040047,0x00000018,0x0000001e,0x00000000,0x00030047,
-+	0x0000001e,0x00000002,0x00050048,0x0000001e,0x00000000,0x0000000b,0x00000000,0x00050048,
-+	0x0000001e,0x00000001,0x0000000b,0x00000001,0x00050048,0x0000001e,0x00000002,0x0000000b,
-+	0x00000003,0x00050048,0x0000001e,0x00000003,0x0000000b,0x00000004,0x00020013,0x00000002,
-+	0x00030021,0x00000003,0x00000002,0x00030016,0x00000006,0x00000020,0x00040017,0x00000007,
-+	0x00000006,0x00000002,0x00040020,0x00000008,0x00000007,0x00000007,0x00040015,0x0000000a,
-+	0x00000020,0x00000001,0x00040020,0x0000000b,0x00000001,0x0000000a,0x0004003b,0x0000000b,
-+	0x0000000c,0x00000001,0x0004002b,0x0000000a,0x0000000e,0x00000001,0x0004002b,0x0000000a,
-+	0x00000010,0x00000002,0x00040020,0x00000017,0x00000003,0x00000007,0x0004003b,0x00000017,
-+	0x00000018,0x00000003,0x00040017,0x0000001a,0x00000006,0x00000004,0x00040015,0x0000001b,
-+	0x00000020,0x00000000,0x0004002b,0x0000001b,0x0000001c,0x00000001,0x0004001c,0x0000001d,
-+	0x00000006,0x0000001c,0x0006001e,0x0000001e,0x0000001a,0x00000006,0x0000001d,0x0000001d,
-+	0x00040020,0x0000001f,0x00000003,0x0000001e,0x0004003b,0x0000001f,0x00000020,0x00000003,
-+	0x0004002b,0x0000000a,0x00000021,0x00000000,0x0004002b,0x00000006,0x00000023,0x40000000,
-+	0x0004002b,0x00000006,0x00000025,0x3f800000,0x0004002b,0x00000006,0x00000028,0x00000000,
-+	0x00040020,0x0000002c,0x00000003,0x0000001a,0x00050036,0x00000002,0x00000004,0x00000000,
-+	0x00000003,0x000200f8,0x00000005,0x0004003b,0x00000008,0x00000009,0x00000007,0x0004003d,
-+	0x0000000a,0x0000000d,0x0000000c,0x000500c4,0x0000000a,0x0000000f,0x0000000d,0x0000000e,
-+	0x000500c7,0x0000000a,0x00000011,0x0000000f,0x00000010,0x0004006f,0x00000006,0x00000012,
-+	0x00000011,0x0004003d,0x0000000a,0x00000013,0x0000000c,0x000500c7,0x0000000a,0x00000014,
-+	0x00000013,0x00000010,0x0004006f,0x00000006,0x00000015,0x00000014,0x00050050,0x00000007,
-+	0x00000016,0x00000012,0x00000015,0x0003003e,0x00000009,0x00000016,0x0004003d,0x00000007,
-+	0x00000019,0x00000009,0x0003003e,0x00000018,0x00000019,0x0004003d,0x00000007,0x00000022,
-+	0x00000009,0x0005008e,0x00000007,0x00000024,0x00000022,0x00000023,0x00050050,0x00000007,
-+	0x00000026,0x00000025,0x00000025,0x00050083,0x00000007,0x00000027,0x00000024,0x00000026,
-+	0x00050051,0x00000006,0x00000029,0x00000027,0x00000000,0x00050051,0x00000006,0x0000002a,
-+	0x00000027,0x00000001,0x00070050,0x0000001a,0x0000002b,0x00000029,0x0000002a,0x00000028,
-+	0x00000025,0x00050041,0x0000002c,0x0000002d,0x00000020,0x00000021,0x0003003e,0x0000002d,
-+	0x0000002b,0x000100fd,0x00010038
-+};
-+
-+const uint32_t blit_fs_spirv[] = {
-+	0x07230203,0x00010000,0x0008000b,0x00000014,0x00000000,0x00020011,0x00000001,0x0006000b,
-+	0x00000001,0x4c534c47,0x6474732e,0x3035342e,0x00000000,0x0003000e,0x00000000,0x00000001,
-+	0x0007000f,0x00000004,0x00000004,0x6e69616d,0x00000000,0x00000009,0x00000011,0x00030010,
-+	0x00000004,0x00000007,0x00030003,0x00000002,0x000001c2,0x00040005,0x00000004,0x6e69616d,
-+	0x00000000,0x00030005,0x00000009,0x00000063,0x00030005,0x0000000d,0x00786574,0x00030005,
-+	0x00000011,0x00007675,0x00040047,0x00000009,0x0000001e,0x00000000,0x00040047,0x0000000d,
-+	0x00000021,0x00000000,0x00040047,0x0000000d,0x00000022,0x00000000,0x00040047,0x00000011,
-+	0x0000001e,0x00000000,0x00020013,0x00000002,0x00030021,0x00000003,0x00000002,0x00030016,
-+	0x00000006,0x00000020,0x00040017,0x00000007,0x00000006,0x00000004,0x00040020,0x00000008,
-+	0x00000003,0x00000007,0x0004003b,0x00000008,0x00000009,0x00000003,0x00090019,0x0000000a,
-+	0x00000006,0x00000001,0x00000000,0x00000000,0x00000000,0x00000001,0x00000000,0x0003001b,
-+	0x0000000b,0x0000000a,0x00040020,0x0000000c,0x00000000,0x0000000b,0x0004003b,0x0000000c,
-+	0x0000000d,0x00000000,0x00040017,0x0000000f,0x00000006,0x00000002,0x00040020,0x00000010,
-+	0x00000001,0x0000000f,0x0004003b,0x00000010,0x00000011,0x00000001,0x00050036,0x00000002,
-+	0x00000004,0x00000000,0x00000003,0x000200f8,0x00000005,0x0004003d,0x0000000b,0x0000000e,
-+	0x0000000d,0x0004003d,0x0000000f,0x00000012,0x00000011,0x00050057,0x00000007,0x00000013,
-+	0x0000000e,0x00000012,0x0003003e,0x00000009,0x00000013,0x000100fd,0x00010038
-+};
-diff --git a/shaders/clear_push.frag b/shaders/clear_push.frag
-new file mode 100644
-index 0000000..2a54ed7
---- /dev/null
-+++ b/shaders/clear_push.frag
-@@ -0,0 +1,11 @@
-+#version 450
-+
-+layout(location = 0) out vec4 frag_color;
-+
-+layout(push_constant) uniform ClearColor {
-+    vec4 color;
-+} pc;
-+
-+void main() {
-+    frag_color = pc.color;
-+}
-diff --git a/shaders/clear_push_ps_binary.h b/shaders/clear_push_ps_binary.h
-new file mode 100644
-index 0000000..4f6b4aa
---- /dev/null
-+++ b/shaders/clear_push_ps_binary.h
-@@ -0,0 +1,18 @@
-+/* Auto-generated from clear_push.frag (push-constant clear colour, no UBO) */
-+static const unsigned char g_clear_ps_binary[216] = {
-+    0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00,
-+    0x98, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-+    0x00, 0x00, 0x00, 0x00, 0x53, 0x68, 0x64, 0x72, 0x07, 0x00, 0x02, 0x00, 0x02, 0x0f, 0x00, 0x01,
-+    0x00, 0x00, 0x00, 0x00, 0x4c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3c, 0x00, 0x00, 0x00,
-+    0xff, 0xff, 0xff, 0xff, 0x40, 0x00, 0x2c, 0x00, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-+    0x04, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-+    0x00, 0x00, 0x00, 0x01, 0x10, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-+    0x03, 0x02, 0x00, 0x7e, 0x05, 0x02, 0x02, 0x7e, 0x02, 0x00, 0x00, 0x5e, 0x04, 0x02, 0x02, 0x5e,
-+    0x0f, 0x1c, 0x00, 0xf8, 0x00, 0x01, 0x80, 0x80, 0x00, 0x00, 0x81, 0xbf, 0x00, 0x00, 0x9f, 0xbf,
-+    0x00, 0x00, 0x9f, 0xbf, 0x00, 0x00, 0x9f, 0xbf, 0x00, 0x00, 0x9f, 0xbf, 0x00, 0x00, 0x9f, 0xbf,
-+    0x4f, 0x72, 0x62, 0x53, 0x68, 0x64, 0x72, 0x07, 0x01, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-+    0x98, 0x9e, 0xd7, 0x66, 0x45, 0xf3, 0x68, 0x94, 0xa6, 0x4b, 0x03, 0xeb, 0x00, 0x00, 0x00, 0x00,
-+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-+};
-+static const unsigned int g_clear_ps_binary_size = 216;
 diff --git a/src/vk_ps4_command.c b/src/vk_ps4_command.c
-index 168c1f3..dd0a065 100644
+index 168c1f3..6ddacc7 100644
 --- a/src/vk_ps4_command.c
 +++ b/src/vk_ps4_command.c
 @@ -19,6 +19,16 @@
@@ -365,16 +152,42 @@ index 168c1f3..dd0a065 100644
  }
  
  VKAPI_ATTR void VKAPI_CALL
-@@ -1213,6 +1260,8 @@ vk_ps4_CmdSetViewport(VkCommandBuffer commandBuffer, uint32_t firstViewport, uin
-         vp_info.offset[1] = vp->y + vp->height * 0.5f;
+@@ -1206,13 +1253,30 @@ vk_ps4_CmdSetViewport(VkCommandBuffer commandBuffer, uint32_t firstViewport, uin
+         vp_info.dmax = vp->maxDepth;
+         /* Vulkan viewport: x, y is top-left, width/height extend right/down
+          * GNM viewport: scale = half-dimension, offset = center */
+-        vp_info.scale[0] = vp->width * 0.5f;
+-        vp_info.scale[1] = vp->height * 0.5f;
++        /* DXVK renders with a negative-height (Y-flipped) viewport, which is the
++         * Vulkan (VK_KHR_maintenance1) convention for matching D3D's framebuffer
++         * orientation. GCN/GNM does NOT rasterize with a negative Y scale as
++         * programmed here (confirmed on hardware: the triangle vanished), and the
++         * PS4 framebuffer already matches D3D's orientation, so the flip is not
++         * only unsupported but unnecessary. Normalize a negative-height viewport
++         * to its equivalent positive-height rectangle: geometry then rasterizes
++         * and comes out correctly oriented (verified v74 on hardware).
++         *
++         * TODO (culled content): dropping the flip inverts front/back-face sense
++         * relative to what DXVK set for the flipped case. With cull disabled this
++         * is invisible; a culled test may need the pipeline's front-face inverted
++         * to compensate. Needs a culled-geometry test to verify. */
++        float vx = vp->x, vy = vp->y, vw = vp->width, vh = vp->height;
++        if (vh < 0.0f) { vy = vp->y + vp->height; vh = -vp->height; }
++        vp_info.scale[0] = vw * 0.5f;
++        vp_info.scale[1] = vh * 0.5f;
+         vp_info.scale[2] = (vp->maxDepth - vp->minDepth) * 0.5f;
+-        vp_info.offset[0] = vp->x + vp->width * 0.5f;
+-        vp_info.offset[1] = vp->y + vp->height * 0.5f;
++        vp_info.offset[0] = vx + vw * 0.5f;
++        vp_info.offset[1] = vy + vh * 0.5f;
          vp_info.offset[2] = (vp->maxDepth + vp->minDepth) * 0.5f;
          sceGnmDrawCmdSetViewport(&cmd->gnm_cmd, firstViewport + i, &vp_info);
-+        vk_ps4_log("SetViewport[%u]: x=%d y=%d w=%d h=%d", firstViewport + i,
-+                   (int)vp->x, (int)vp->y, (int)vp->width, (int)vp->height);
++        vk_ps4_log("SetViewport[%u]: x=%d y=%d w=%d h=%d (gnm y=%d h=%d)", firstViewport + i,
++                   (int)vp->x, (int)vp->y, (int)vp->width, (int)vp->height, (int)vy, (int)vh);
      }
  }
  
-@@ -1369,6 +1418,7 @@ vk_ps4_CmdSetLineWidth(VkCommandBuffer commandBuffer, float lineWidth) {
+@@ -1369,6 +1433,7 @@ vk_ps4_CmdSetLineWidth(VkCommandBuffer commandBuffer, float lineWidth) {
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdBindVertexBuffers(VkCommandBuffer commandBuffer, uint32_t firstBinding,
                               uint32_t bindingCount, const VkBuffer *pBuffers, const VkDeviceSize *pOffsets) {
@@ -382,7 +195,7 @@ index 168c1f3..dd0a065 100644
      if (!commandBuffer || !pBuffers) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
  
-@@ -1426,6 +1476,7 @@ vk_ps4_CmdBindVertexBuffers(VkCommandBuffer commandBuffer, uint32_t firstBinding
+@@ -1426,6 +1491,7 @@ vk_ps4_CmdBindVertexBuffers(VkCommandBuffer commandBuffer, uint32_t firstBinding
  
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdBindIndexBuffer(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDeviceSize offset, VkIndexType indexType) {
@@ -390,7 +203,7 @@ index 168c1f3..dd0a065 100644
      if (!commandBuffer) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      cmd->index_buffer.buffer = buffer;
-@@ -1451,6 +1502,7 @@ vk_ps4_CmdBindIndexBuffer(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDevi
+@@ -1451,6 +1517,7 @@ vk_ps4_CmdBindIndexBuffer(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDevi
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdDraw(VkCommandBuffer commandBuffer, uint32_t vertexCount, uint32_t instanceCount,
                 uint32_t firstVertex, uint32_t firstInstance) {
@@ -398,7 +211,7 @@ index 168c1f3..dd0a065 100644
      if (!commandBuffer) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
  
-@@ -1518,6 +1570,18 @@ vk_ps4_CmdDraw(VkCommandBuffer commandBuffer, uint32_t vertexCount, uint32_t ins
+@@ -1518,6 +1585,18 @@ vk_ps4_CmdDraw(VkCommandBuffer commandBuffer, uint32_t vertexCount, uint32_t ins
          }
      }
  
@@ -417,7 +230,7 @@ index 168c1f3..dd0a065 100644
      GnmDrawModifier mod = {0};
      sceGnmDrawCmdDrawIndexAuto2(&cmd->gnm_cmd, vertexCount, mod);
  }
-@@ -1525,6 +1589,7 @@ vk_ps4_CmdDraw(VkCommandBuffer commandBuffer, uint32_t vertexCount, uint32_t ins
+@@ -1525,6 +1604,7 @@ vk_ps4_CmdDraw(VkCommandBuffer commandBuffer, uint32_t vertexCount, uint32_t ins
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdDrawIndexed(VkCommandBuffer commandBuffer, uint32_t indexCount, uint32_t instanceCount,
                        uint32_t firstIndex, int32_t vertexOffset, uint32_t firstInstance) {
@@ -425,7 +238,7 @@ index 168c1f3..dd0a065 100644
      if (!commandBuffer) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
  
-@@ -1744,6 +1809,7 @@ vk_ps4_CmdDispatchIndirect(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDev
+@@ -1744,6 +1824,7 @@ vk_ps4_CmdDispatchIndirect(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDev
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdCopyBuffer(VkCommandBuffer commandBuffer, VkBuffer srcBuffer, VkBuffer dstBuffer,
                       uint32_t regionCount, const VkBufferCopy *pRegions) {
@@ -433,7 +246,7 @@ index 168c1f3..dd0a065 100644
      if (!commandBuffer || !pRegions) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      VkPs4Buffer *src = (VkPs4Buffer *)srcBuffer;
-@@ -1774,6 +1840,7 @@ vk_ps4_CmdCopyBuffer(VkCommandBuffer commandBuffer, VkBuffer srcBuffer, VkBuffer
+@@ -1774,6 +1855,7 @@ vk_ps4_CmdCopyBuffer(VkCommandBuffer commandBuffer, VkBuffer srcBuffer, VkBuffer
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdFillBuffer(VkCommandBuffer commandBuffer, VkBuffer dstBuffer,
                       VkDeviceSize dstOffset, VkDeviceSize fillSize, uint32_t data) {
@@ -441,7 +254,7 @@ index 168c1f3..dd0a065 100644
      if (!commandBuffer || !dstBuffer) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      VkPs4Buffer *dst = (VkPs4Buffer *)dstBuffer;
-@@ -1813,6 +1880,7 @@ vk_ps4_CmdFillBuffer(VkCommandBuffer commandBuffer, VkBuffer dstBuffer,
+@@ -1813,6 +1895,7 @@ vk_ps4_CmdFillBuffer(VkCommandBuffer commandBuffer, VkBuffer dstBuffer,
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdUpdateBuffer(VkCommandBuffer commandBuffer, VkBuffer dstBuffer,
                         VkDeviceSize dstOffset, VkDeviceSize dataSize, const void *pData) {
@@ -449,7 +262,7 @@ index 168c1f3..dd0a065 100644
      if (!commandBuffer || !dstBuffer || !pData) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      VkPs4Buffer *dst = (VkPs4Buffer *)dstBuffer;
-@@ -1869,6 +1937,7 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -1869,6 +1952,7 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdCopyImage(VkCommandBuffer commandBuffer, VkImage srcImage, VkImageLayout srcImageLayout,
                      VkImage dstImage, VkImageLayout dstImageLayout,
                      uint32_t regionCount, const VkImageCopy *pRegions) {
@@ -457,7 +270,7 @@ index 168c1f3..dd0a065 100644
      if (!commandBuffer || !pRegions) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      VkPs4Image *src = (VkPs4Image *)srcImage;
-@@ -1968,6 +2037,7 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -1968,6 +2052,7 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdBlitImage(VkCommandBuffer commandBuffer, VkImage srcImage, VkImageLayout srcImageLayout,
                      VkImage dstImage, VkImageLayout dstImageLayout,
                      uint32_t regionCount, const VkImageBlit *pRegions, VkFilter filter) {
@@ -465,7 +278,7 @@ index 168c1f3..dd0a065 100644
      /* BlitImage with scaling/format conversion requires a shader-based blit.
       * For MVP, fall back to CmdCopyImage if regions are 1:1.
       * Full blit support is Phase 3. */
-@@ -2039,6 +2109,7 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -2039,6 +2124,7 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdCopyBufferToImage(VkCommandBuffer commandBuffer, VkBuffer srcBuffer, VkImage dstImage,
                              VkImageLayout dstImageLayout, uint32_t regionCount,
                              const VkBufferImageCopy *pRegions) {
@@ -473,7 +286,7 @@ index 168c1f3..dd0a065 100644
      if (!commandBuffer || !pRegions) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      VkPs4Buffer *src = (VkPs4Buffer *)srcBuffer;
-@@ -2200,6 +2271,7 @@ static bool vk_ps4_attachment_used_before_subpass(VkPs4RenderPass *rp,
+@@ -2200,6 +2286,7 @@ static bool vk_ps4_attachment_used_before_subpass(VkPs4RenderPass *rp,
  VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdBeginRenderPass(VkCommandBuffer commandBuffer, const VkRenderPassBeginInfo *pBeginInfo,
                            VkSubpassContents contents) {
@@ -481,7 +294,7 @@ index 168c1f3..dd0a065 100644
      (void)contents;
      if (!commandBuffer || !pBeginInfo) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
-@@ -2259,13 +2331,27 @@ vk_ps4_CmdBeginRenderPass(VkCommandBuffer commandBuffer, const VkRenderPassBegin
+@@ -2259,13 +2346,27 @@ vk_ps4_CmdBeginRenderPass(VkCommandBuffer commandBuffer, const VkRenderPassBegin
       * attachment via pDepthStencilAttachment. */
      vk_ps4_bind_subpass_targets(cmd);
  
@@ -510,7 +323,7 @@ index 168c1f3..dd0a065 100644
              sceGnmDrawCmdWaitUntilSafeForRendering(
                  &cmd->gnm_cmd,
                  view->image->video_out_handle,
-@@ -2336,11 +2422,162 @@ vk_ps4_CmdBeginRenderPass(VkCommandBuffer commandBuffer, const VkRenderPassBegin
+@@ -2336,11 +2437,162 @@ vk_ps4_CmdBeginRenderPass(VkCommandBuffer commandBuffer, const VkRenderPassBegin
      vk_ps4_bind_subpass_targets(cmd);
  }
  
@@ -673,7 +486,7 @@ index 168c1f3..dd0a065 100644
      /* Reset DB_RENDER_CONTROL clear flags.
       * The lazy clear is triggered immediately by vk_ps4_clear_depth_draw()
       * in CmdBeginRenderPass/CmdClearAttachments, so by the time we reach
-@@ -2359,6 +2596,25 @@ vk_ps4_CmdEndRenderPass(VkCommandBuffer commandBuffer) {
+@@ -2359,6 +2611,25 @@ vk_ps4_CmdEndRenderPass(VkCommandBuffer commandBuffer) {
          GNM_CACHE_FLUSH_AND_INV_TS_EVENT, 0,
          GNM_DATA_SEL_DISCARD, 0);
  
@@ -699,7 +512,7 @@ index 168c1f3..dd0a065 100644
      cmd->current_render_pass.pass = NULL;
      cmd->current_render_pass.framebuffer = NULL;
  }
-@@ -2513,14 +2769,29 @@ vk_ps4_CmdPipelineBarrier(VkCommandBuffer commandBuffer, VkPipelineStageFlags sr
+@@ -2513,14 +2784,29 @@ vk_ps4_CmdPipelineBarrier(VkCommandBuffer commandBuffer, VkPipelineStageFlags sr
                            uint32_t memoryBarrierCount, const VkMemoryBarrier *pMemoryBarriers,
                            uint32_t bufferMemoryBarrierCount, const VkBufferMemoryBarrier *pBufferMemoryBarriers,
                            uint32_t imageMemoryBarrierCount, const VkImageMemoryBarrier *pImageMemoryBarriers) {
@@ -730,7 +543,7 @@ index 168c1f3..dd0a065 100644
      /* Track image layout transitions */
      for (uint32_t i = 0; i < imageMemoryBarrierCount; i++) {
          const VkImageMemoryBarrier *b = &pImageMemoryBarriers[i];
-@@ -2609,11 +2880,12 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -2609,11 +2895,12 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdClearColorImage(VkCommandBuffer commandBuffer, VkImage image, VkImageLayout imageLayout,
                            const VkClearColorValue *pColor, uint32_t rangeCount,
                            const VkImageSubresourceRange *pRanges) {
@@ -744,7 +557,7 @@ index 168c1f3..dd0a065 100644
  
      /* Tiled render targets require a draw-based clear because FillMemory
       * writes linearly and doesn't respect the tiled memory layout.
-@@ -2777,6 +3049,7 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -2777,6 +3064,7 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdClearAttachments(VkCommandBuffer commandBuffer, uint32_t attachmentCount,
                             const VkClearAttachment *pAttachments, uint32_t rectCount,
                             const VkClearRect *pRects) {
@@ -752,7 +565,7 @@ index 168c1f3..dd0a065 100644
      if (!commandBuffer || !pAttachments) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
  
-@@ -2895,6 +3168,7 @@ VKAPI_ATTR void VKAPI_CALL
+@@ -2895,6 +3183,7 @@ VKAPI_ATTR void VKAPI_CALL
  vk_ps4_CmdPushConstants(VkCommandBuffer commandBuffer, VkPipelineLayout layout,
                          VkShaderStageFlags stageFlags, uint32_t offset, uint32_t size,
                          const void *pValues) {
@@ -760,1160 +573,110 @@ index 168c1f3..dd0a065 100644
      if (!commandBuffer || !pValues || size == 0) return;
      VkPs4CommandBuffer *cmd = (VkPs4CommandBuffer *)commandBuffer;
      VkPs4Pipeline *pipe = cmd->current_pipeline;
-diff --git a/src/vk_ps4_desc_tables.c b/src/vk_ps4_desc_tables.c
-new file mode 100644
-index 0000000..7ebf3da
---- /dev/null
-+++ b/src/vk_ps4_desc_tables.c
-@@ -0,0 +1,171 @@
-+/*
-+ * Descriptor sets in the layout the compiled shaders expect.
-+ *
-+ * libpsbc compiles every descriptor access (uniform buffer, texture, sampler) into scalar loads
-+ * from a descriptor-set pointer held in a user-data register: s_load of a V#/T#/S# from
-+ * (set address + binding offset). The offsets come from the pipeline layout the shader was
-+ * compiled against (see vk_ps4_compile_shader_module). This file computes that byte layout,
-+ * mirrors a VkDescriptorSet's descriptors into GPU-visible memory at those offsets, and writes
-+ * the set address into the user-data register of every stage that reads it.
-+ */
-+#include "vk_ps4_internal.h"
-+#include <string.h>
-+#include <pm4/sid.h>
-+#include <pm4/amdgfxregs.h>
-+
-+#define VK_PS4_MAX_BOUND_SETS 8
-+
-+uint32_t vk_ps4_desc_elem_size(VkDescriptorType t) {
-+    switch (t) {
-+    case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
-+        return 96; /* T# at +0 (32 bytes), S# at +64 */
-+    case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
-+    case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
-+    case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
-+        return 64; /* T# at +0 (32 bytes), room for the FMASK plane */
-+    default:
-+        return 16; /* V# / S# */
-+    }
-+}
-+
-+/* Offsets/sizes per layout binding (indexed like layout->bindings), packed in ascending binding
-+ * number order, each binding 32-byte aligned. */
-+void vk_ps4_layout_compute(const VkPs4DescriptorSetLayout *l, uint32_t *offsets, uint32_t *sizes,
-+                           uint32_t *total) {
-+    uint32_t n = l ? l->binding_count : 0;
-+    uint32_t cur = 0;
-+    bool done[VK_PS4_MAX_DESCRIPTOR_BINDINGS] = {0};
-+    if (n > VK_PS4_MAX_DESCRIPTOR_BINDINGS) n = VK_PS4_MAX_DESCRIPTOR_BINDINGS;
-+    for (uint32_t k = 0; k < n; k++) {
-+        int best = -1;
-+        for (uint32_t i = 0; i < n; i++) {
-+            if (done[i]) continue;
-+            if (best < 0 || l->bindings[i].binding < l->bindings[best].binding) best = (int)i;
-+        }
-+        if (best < 0) break;
-+        done[best] = true;
-+        uint32_t sz = vk_ps4_desc_elem_size(l->bindings[best].descriptorType);
-+        cur = (cur + 31u) & ~31u;
-+        offsets[best] = cur;
-+        sizes[best] = sz;
-+        cur += sz * (l->bindings[best].descriptorCount ? l->bindings[best].descriptorCount : 1);
-+    }
-+    if (total) *total = (cur + 31u) & ~31u;
-+}
-+
-+static bool is_dynamic_type(VkDescriptorType t) {
-+    return t == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC || t == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
-+}
-+
-+/* Copy a set's descriptors into GPU-visible memory. Dynamic offsets (consumed in ascending binding
-+ * order, one per array element) are folded into the buffer descriptors' base addresses. */
-+void vk_ps4_flush_set(VkPs4DescriptorSet *set, const uint32_t **dyn, uint32_t *dyn_left) {
-+    if (!set || !set->layout) return;
-+    uint32_t offsets[VK_PS4_MAX_DESCRIPTOR_BINDINGS] = {0};
-+    uint32_t sizes[VK_PS4_MAX_DESCRIPTOR_BINDINGS] = {0};
-+    uint32_t total = 0;
-+    vk_ps4_layout_compute(set->layout, offsets, sizes, &total);
-+    if (total == 0) total = 32;
-+    if (!set->gpu_mem || set->gpu_size < total) {
-+        VkPs4Device *dev = set->device;
-+        uint32_t want = total < 256 ? 256 : total;
-+        uint8_t *mem = (uint8_t *)vk_ps4_alloc(dev ? &dev->allocator : NULL, want, 256);
-+        if (!mem) return;
-+        if (set->gpu_mem) vk_ps4_free(dev ? &dev->allocator : NULL, set->gpu_mem);
-+        set->gpu_mem = mem;
-+        set->gpu_size = want;
-+    }
-+    memset(set->gpu_mem, 0, set->gpu_size);
-+
-+    /* Dynamic offsets are consumed in ascending binding order. */
-+    const VkPs4DescriptorSetLayout *l = set->layout;
-+    uint32_t lcount = l->binding_count < VK_PS4_MAX_DESCRIPTOR_BINDINGS ? l->binding_count : VK_PS4_MAX_DESCRIPTOR_BINDINGS;
-+    uint32_t order[VK_PS4_MAX_DESCRIPTOR_BINDINGS];
-+    for (uint32_t i = 0; i < lcount; i++) order[i] = i;
-+    for (uint32_t i = 0; i < lcount; i++)
-+        for (uint32_t j = i + 1; j < lcount; j++)
-+            if (l->bindings[order[j]].binding < l->bindings[order[i]].binding) {
-+                uint32_t t = order[i]; order[i] = order[j]; order[j] = t;
-+            }
-+
-+    for (uint32_t oi = 0; oi < lcount; oi++) {
-+        uint32_t li = order[oi];
-+        const VkDescriptorSetLayoutBinding *lb = &l->bindings[li];
-+        VkPs4DescriptorBinding *b = NULL;
-+        for (uint32_t i = 0; i < set->binding_count; i++)
-+            if (set->bindings[i].binding_number == lb->binding) { b = &set->bindings[i]; break; }
-+        uint32_t count = b ? b->count : 0;
-+        bool dynamic = is_dynamic_type(lb->descriptorType);
-+        for (uint32_t e = 0; e < count; e++) {
-+            uint32_t dyn_off = 0;
-+            if (dynamic && dyn && *dyn && dyn_left && *dyn_left) {
-+                dyn_off = **dyn;
-+                (*dyn)++;
-+                (*dyn_left)--;
-+            }
-+            uint8_t *dst = set->gpu_mem + offsets[li] + e * sizes[li];
-+            switch (lb->descriptorType) {
-+            case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
-+            case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
-+            case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
-+            case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
-+            case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
-+            case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
-+                if (b->buffers) {
-+                    GnmBuffer v = b->buffers[e];
-+                    if (dyn_off) sceGnmBufSetBaseAddress(&v, (char *)sceGnmBufGetBaseAddress(&v) + dyn_off);
-+                    memcpy(dst, &v, sizeof(GnmBuffer));
-+                }
-+                break;
-+            case VK_DESCRIPTOR_TYPE_SAMPLER:
-+                if (b->samplers) memcpy(dst, &b->samplers[e], sizeof(GnmSampler));
-+                break;
-+            case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
-+            case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
-+            case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
-+                if (b->textures) memcpy(dst, &b->textures[e], sizeof(GnmTexture));
-+                break;
-+            case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
-+                if (b->textures) memcpy(dst, &b->textures[e], sizeof(GnmTexture));
-+                if (b->samplers) memcpy(dst + 64, &b->samplers[e], sizeof(GnmSampler));
-+                break;
-+            default:
-+                break;
-+            }
-+        }
-+    }
-+#if defined(__x86_64__)
-+    __asm__ volatile("sfence" ::: "memory");
-+#endif
-+}
-+
-+static void emit_user_data_dword(GnmCommandBuffer *gc, uint32_t reg_base, bool is_cs, uint32_t reg, uint32_t value) {
-+    if ((uint32_t)(gc->endptr - gc->cmdptr) < 3 && gc->callback.func)
-+        gc->callback.func(gc, 3, gc->callback.userdata);
-+    if ((uint32_t)(gc->endptr - gc->cmdptr) < 3) return;
-+    gc->cmdptr[0] = PKT3(PKT3_SET_SH_REG, 1, 0) | (is_cs ? PKT3_SHADER_TYPE_S(1) : 0);
-+    gc->cmdptr[1] = (reg_base + reg * 4 - SI_SH_REG_OFFSET) >> 2;
-+    gc->cmdptr[2] = value;
-+    gc->cmdptr += 3;
-+}
-+
-+static void emit_stage(VkPs4CommandBuffer *cmd, const GnmInputUsageSlot *slots, uint32_t count,
-+                       uint32_t reg_base, bool is_cs) {
-+    for (uint32_t i = 0; i < count; i++) {
-+        if (slots[i].usagetype != GNM_SHINPUTUSAGE_PTR_INDIRECTRESOURCETABLE) continue;
-+        uint32_t set = slots[i].apislot;
-+        if (set >= VK_PS4_MAX_BOUND_SETS) continue;
-+        VkPs4DescriptorSet *s = cmd->bound_sets[set];
-+        if (!s || !s->gpu_mem) continue;
-+        emit_user_data_dword(&cmd->gnm_cmd, reg_base, is_cs, slots[i].startregister,
-+                             (uint32_t)(uintptr_t)s->gpu_mem);
-+    }
-+}
-+
-+/* Write the address of each bound set into the user-data registers the pipeline's shaders use. */
-+void vk_ps4_emit_set_tables(VkPs4CommandBuffer *cmd, const VkPs4Pipeline *pipe) {
-+    if (!cmd || !pipe) return;
-+    if (pipe->bind_point != VK_PIPELINE_BIND_POINT_GRAPHICS) return; /* compute: not yet */
-+    emit_stage(cmd, pipe->vs_input_usage_slots, pipe->vs_input_usage_slot_count, R_00B130_SPI_SHADER_USER_DATA_VS_0, false);
-+    emit_stage(cmd, pipe->ps_input_usage_slots, pipe->ps_input_usage_slot_count, R_00B030_SPI_SHADER_USER_DATA_PS_0, false);
-+}
-diff --git a/src/vk_ps4_descriptor.c b/src/vk_ps4_descriptor.c
-index c9d6e1c..5e2fbd0 100644
---- a/src/vk_ps4_descriptor.c
-+++ b/src/vk_ps4_descriptor.c
-@@ -429,6 +429,29 @@ vk_ps4_CmdBindDescriptorSets(VkCommandBuffer commandBuffer, VkPipelineBindPoint
- 
-     GnmShaderStage stage = vk_bind_point_to_gnm_stage(pipelineBindPoint);
- 
-+    /* Mirror the sets into GPU memory in the layout the compiled shaders read, remember them,
-+     * and publish their addresses to the current pipeline's shaders. */
-+    {
-+        const uint32_t *dyn = pDynamicOffsets;
-+        uint32_t dyn_left = dynamicOffsetCount;
-+        for (uint32_t i = 0; i < setCount; i++) {
-+            VkPs4DescriptorSet *ds = (VkPs4DescriptorSet *)pDescriptorSets[i];
-+            if (firstSet + i >= 8) break;
-+            vk_ps4_flush_set(ds, &dyn, &dyn_left);
-+            cmd->bound_sets[firstSet + i] = ds;
-+            {   /* PcPs4 diagnostic */
-+                static unsigned bind_logs;
-+                if (ds && ds->gpu_mem && bind_logs++ < 24) {
-+                    const uint32_t *w = (const uint32_t *)ds->gpu_mem;
-+                    vk_ps4_log("BindSet set=%u mem=%p dyn=%u [%08x %08x %08x %08x | %08x %08x %08x %08x %08x %08x %08x %08x]",
-+                               firstSet + i, (void *)ds->gpu_mem, dynamicOffsetCount,
-+                               w[0], w[1], w[2], w[3], w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
-+                }
-+            }
-+        }
-+        if (cmd->current_pipeline) vk_ps4_emit_set_tables(cmd, cmd->current_pipeline);
-+    }
-+
-     /* Get the current pipeline to access input usage slot tables */
-     VkPs4Pipeline *pipe = cmd->current_pipeline;
-     if (!pipe) return;
-diff --git a/src/vk_ps4_device.c b/src/vk_ps4_device.c
-index 9d8a83f..2e896bf 100644
---- a/src/vk_ps4_device.c
-+++ b/src/vk_ps4_device.c
-@@ -30,6 +30,9 @@
- /* Submit the GNM default-hardware-state preamble and mark the device as
-  * GNM-initialized.  Returns VK_SUCCESS on success, an error otherwise.
-  * On failure the caller is responsible for tearing down partial state. */
-+uint8_t pcps4_clear_push_reg[4];
-+int pcps4_clear_push_ready;
-+
- static VkResult vk_ps4_device_init_gnm(VkPs4Device *dev) {
-     const uint64_t cmd_bytes = (uint64_t)VK_PS4_GNM_INIT_CMD_DWORDS * sizeof(uint32_t);
-     const uint64_t alignment = 64 * 1024; /* 64KB Garlic alignment */
-@@ -111,7 +114,7 @@ static VkResult vk_ps4_device_init_gnm(VkPs4Device *dev) {
-      * and parse it with sceGnmShaderBinaryGetMetadata to extract the PS
-      * stage registers and shader code address. */
-     {
--#include "../shaders/clear_ps_binary.h"
-+#include "../shaders/clear_push_ps_binary.h"
-         dev->clear_ps_binary = malloc(g_clear_ps_binary_size);
-         if (dev->clear_ps_binary) {
-             memcpy(dev->clear_ps_binary, g_clear_ps_binary, g_clear_ps_binary_size);
-@@ -123,15 +126,47 @@ static VkResult vk_ps4_device_init_gnm(VkPs4Device *dev) {
-             if (gnm_err == GNM_ERROR_OK && meta.stage) {
-                 const GnmPsShader *ps = (const GnmPsShader *)meta.stage;
-                 dev->clear_ps_regs = ps->registers;
-+                /* The clear colour arrives as inline push constants: remember which
-+                 * user-data register carries each of the four dwords. */
-+                pcps4_clear_push_ready = 0;
-+                {
-+                    uint32_t found = 0;
-+                    for (uint32_t k = 0; k < meta.numinputusageslots; k++) {
-+                        const GnmInputUsageSlot *sl = &meta.inputusageslots[k];
-+                        if (sl->usagetype == GNM_SHINPUTUSAGE_IMM_ALUFLOATCONST && sl->apislot < 4) {
-+                            pcps4_clear_push_reg[sl->apislot] = sl->startregister;
-+                            found |= 1u << sl->apislot;
-+                        }
-+                    }
-+                    if (found != 0xF) {
-+                        /* The offline compile records no push-constant slots; the shader reads the
-+                         * colour from user SGPRs s2..s5 (s0:s1 hold the unused table pointer). */
-+                        for (uint32_t k = 0; k < 4; k++) pcps4_clear_push_reg[k] = (uint8_t)(2 + k);
-+                        found = 0xF;
-+                    }
-+                    pcps4_clear_push_ready = (found == 0xF);
-+                    vk_ps4_log("clear PS: push regs %u %u %u %u ready=%d",
-+                               pcps4_clear_push_reg[0], pcps4_clear_push_reg[1],
-+                               pcps4_clear_push_reg[2], pcps4_clear_push_reg[3],
-+                               (int)pcps4_clear_push_ready);
-+                }
-                 /* The binary's spishaderpgmlops is an offset from the
-                  * start of the GnmPsShader, not a GPU address.  We must
-                  * call sceGnmPsRegsSetAddress to patch it to the actual
-                  * address of the shader code in the malloc'd buffer.
-                  * meta.shadercode points into dev->clear_ps_binary. */
-                 if (meta.shadercode) {
--                    sceGnmPsRegsSetAddress(
--                        &dev->clear_ps_regs, (void *)meta.shadercode
--                    );
-+                    /* PcPs4: the GPU fetches shader code from GPU-visible memory, not
-+                     * from a malloc'd copy; use the driver allocator (256-byte aligned). */
-+                    void *code = (void *)meta.shadercode;
-+                    if (meta.shadercodesize) {
-+                        void *gpu = vk_ps4_alloc(&dev->allocator, meta.shadercodesize, 256);
-+                        if (gpu) {
-+                            memcpy(gpu, meta.shadercode, meta.shadercodesize);
-+                            code = gpu;
-+                        }
-+                    }
-+                    sceGnmPsRegsSetAddress(&dev->clear_ps_regs, code);
-                     dev->clear_ps_ready = true;
-                 }
-             }
-diff --git a/src/vk_ps4_entry.c b/src/vk_ps4_entry.c
-index 24ef0d4..cd63bf3 100644
---- a/src/vk_ps4_entry.c
-+++ b/src/vk_ps4_entry.c
-@@ -152,6 +152,110 @@ vk_icdEnumerateInstanceLayerProperties(
- /* These are implemented in vk_ps4_dispatch.c, which has the full name → function map. */
- 
- /* === Allocator helpers === */
-+/* === PcPs4 hardware patch: GPU-visible allocator ==========================
-+ *
-+ * On a real PS4 the GPU can only read memory mapped for GPU use. Command
-+ * buffers, compiled shader code and fetch shaders were allocated from the
-+ * ordinary heap. Serve every default (no user callback) driver allocation from
-+ * one GPU-mapped arena: power-of-two size classes, per-class free lists, bump
-+ * carving. */
-+#if defined(__ORBIS__) || defined(__PS4__)
-+#define PCPS4_ARENA_SIZE (160u * 1024u * 1024u)
-+#define PCPS4_ARENA_HDR 32u
-+#define PCPS4_ARENA_MAGIC 0x50433441524E4131ull
-+typedef struct {
-+    uint64_t magic;
-+    uint32_t cls;
-+    uint32_t pad;
-+    void *raw;
-+    uint64_t pad2;
-+} Pcps4ArenaHdr;
-+
-+static GnmDirectMemory g_arena_mem;
-+static uint8_t *g_arena_base = NULL;
-+static size_t g_arena_top = 0;
-+static int g_arena_state = 0; /* 0 untried, 1 ready, -1 unavailable */
-+static void *g_arena_free[40];
-+static volatile int g_arena_lock = 0;
-+
-+static void arena_lock(void) {
-+    while (__atomic_exchange_n(&g_arena_lock, 1, __ATOMIC_ACQUIRE)) {
-+    }
-+}
-+static void arena_unlock(void) { __atomic_store_n(&g_arena_lock, 0, __ATOMIC_RELEASE); }
-+
-+static int arena_ready(void) {
-+    if (g_arena_state == 0) {
-+        memset(&g_arena_mem, 0, sizeof(g_arena_mem));
-+        GnmError e = sceGnmDirectMemoryAllocate(
-+            &g_arena_mem, PCPS4_ARENA_SIZE, 2u * 1024u * 1024u,
-+            GNM_DIRECT_MEMORY_TYPE_WC_GARLIC, GNM_PROT_CPU_GPU_RW);
-+        if (e == GNM_ERROR_OK && g_arena_mem.mapped) {
-+            g_arena_base = (uint8_t *)g_arena_mem.mapped;
-+            g_arena_state = 1;
-+        } else {
-+            g_arena_state = -1;
-+        }
-+    }
-+    return g_arena_state == 1;
-+}
-+
-+static int arena_owns(const void *p) {
-+    return g_arena_state == 1 && (const uint8_t *)p >= g_arena_base &&
-+           (const uint8_t *)p < g_arena_base + PCPS4_ARENA_SIZE;
-+}
-+
-+static void *arena_alloc(size_t size, size_t alignment) {
-+    if (alignment < 16) alignment = 16;
-+    size_t need = size + alignment + PCPS4_ARENA_HDR;
-+    uint32_t cls = 7;
-+    while (((size_t)1 << cls) < need) cls++;
-+    if (cls >= 40) return NULL;
-+    arena_lock();
-+    uint8_t *raw = NULL;
-+    if (g_arena_free[cls]) {
-+        raw = (uint8_t *)g_arena_free[cls];
-+        g_arena_free[cls] = *(void **)raw;
-+    } else {
-+        size_t blk = (size_t)1 << cls;
-+        size_t top = (g_arena_top + 255) & ~(size_t)255;
-+        if (top + blk <= PCPS4_ARENA_SIZE) {
-+            raw = g_arena_base + top;
-+            g_arena_top = top + blk;
-+        }
-+    }
-+    arena_unlock();
-+    if (!raw) return NULL;
-+    uintptr_t user = ((uintptr_t)raw + PCPS4_ARENA_HDR + alignment - 1) & ~(uintptr_t)(alignment - 1);
-+    Pcps4ArenaHdr *h = (Pcps4ArenaHdr *)(user - PCPS4_ARENA_HDR);
-+    h->magic = PCPS4_ARENA_MAGIC;
-+    h->cls = cls;
-+    h->raw = raw;
-+    return (void *)user;
-+}
-+
-+static void arena_release(void *ptr) {
-+    Pcps4ArenaHdr *h = (Pcps4ArenaHdr *)((uint8_t *)ptr - PCPS4_ARENA_HDR);
-+    if (h->magic != PCPS4_ARENA_MAGIC) return;
-+    uint32_t cls = h->cls;
-+    void *raw = h->raw;
-+    h->magic = 0;
-+    arena_lock();
-+    *(void **)raw = g_arena_free[cls];
-+    g_arena_free[cls] = raw;
-+    arena_unlock();
-+}
-+#endif
-+
-+
-+/* Upper 32 bits of every default driver allocation: shaders address descriptor sets with a
-+ * 32-bit register plus this constant. */
-+uint32_t vk_ps4_arena_hi32(void) {
-+#if defined(__ORBIS__) || defined(__PS4__)
-+    if (arena_ready()) return (uint32_t)((uintptr_t)g_arena_base >> 32);
-+#endif
-+    return 0;
-+}
- 
- void *vk_ps4_alloc(const VkAllocationCallbacks *alloc, size_t size, size_t alignment) {
-     if (alloc && alloc->pfnAllocation) {
-@@ -164,6 +268,10 @@ void *vk_ps4_alloc(const VkAllocationCallbacks *alloc, size_t size, size_t align
-     }
-     return _aligned_malloc(size, alignment);
- #elif defined(__ORBIS__) || defined(__PS4__)
-+    if (arena_ready()) {
-+        void *g = arena_alloc(size, alignment);
-+        if (g) return g;
-+    }
-     /* PS4 FreeBSD-based kernel doesn't expose posix_memalign.
-      * Always over-allocate and align manually, storing the raw
-      * pointer immediately before the aligned address so vk_ps4_free
-@@ -208,6 +316,10 @@ void vk_ps4_free(const VkAllocationCallbacks *alloc, void *ptr) {
- #if defined(_MSC_VER)
-     _aligned_free(ptr);
- #elif defined(__ORBIS__) || defined(__PS4__)
-+    if (arena_owns(ptr)) {
-+        arena_release(ptr);
-+        return;
-+    }
-     /* Recover the original malloc pointer stored before the aligned address. */
-     free(((void **)ptr)[-1]);
- #else
-diff --git a/src/vk_ps4_image.c b/src/vk_ps4_image.c
-index 6545469..12cd064 100644
---- a/src/vk_ps4_image.c
-+++ b/src/vk_ps4_image.c
-@@ -208,6 +208,9 @@ vk_ps4_GetImageMemoryRequirements(VkDevice device, VkImage image, VkMemoryRequir
-                                           (1u << VK_PS4_MEMORY_TYPE_ONION);
- }
- 
-+VkPs4Image *pcps4_probe_images[16];
-+uint32_t pcps4_probe_image_count;
-+
- VKAPI_ATTR VkResult VKAPI_CALL
- vk_ps4_BindImageMemory(VkDevice device, VkImage image, VkDeviceMemory memory, VkDeviceSize offset) {
-     if (!device || !image || !memory) {
-@@ -226,6 +229,16 @@ vk_ps4_BindImageMemory(VkDevice device, VkImage image, VkDeviceMemory memory, Vk
- 
-     void *gpu_addr = (char *)mem->gnm_mem.mapped + offset;
- 
-+    {   /* PcPs4 diagnostic: remember bound images so present can probe their contents */
-+        extern VkPs4Image *pcps4_probe_images[16];
-+        extern uint32_t pcps4_probe_image_count;
-+        if (pcps4_probe_image_count < 16 && !img->is_swapchain_image)
-+            pcps4_probe_images[pcps4_probe_image_count++] = img;
-+        vk_ps4_log("BindImageMemory: img=%p %ux%u fmt=%d usage=0x%x rt=%d addr=%p",
-+                   (void *)img, img->create_info.extent.width, img->create_info.extent.height,
-+                   (int)img->create_info.format, (unsigned)img->create_info.usage,
-+                   (int)img->is_render_target, gpu_addr);
-+    }
-     if (img->is_render_target) {
-         sceGnmRtSetBaseAddr(&img->gnm_rt, gpu_addr);
-     } else {
-@@ -288,8 +301,19 @@ vk_ps4_CreateImageView(VkDevice device, const VkImageViewCreateInfo *pCreateInfo
-              * correctly but won't crash. */
-             memset(&view->gnm_view, 0, sizeof(GnmTexture));
-         }
-+        /* PcPs4 diag: why does the blitter sample a render target as black?
-+         * Report the conversion result and the resulting T# base address. */
-+        vk_ps4_log("RTtex: err=%d rt_base=%p tm=%d %ux%u -> Tbase=%p",
-+                   (int)tex_err, rt_base, (int)rt_info.tm,
-+                   rt_width, rt_height,
-+                   (tex_err == GNM_ERROR_OK) ? sceGnmTexGetBaseAddress(&view->gnm_view) : (void *)0);
-     }
- 
-+    vk_ps4_log("CreateImageView: img=%p rt=%d base=%p fmt=%d", (void *)view->image,
-+               (int)view->image->is_render_target,
-+               view->image->is_render_target ? sceGnmRtGetBaseAddr(&view->image->gnm_rt)
-+                                             : sceGnmTexGetBaseAddress(&view->image->gnm_texture),
-+               (int)pCreateInfo->format);
-     *pImageView = (VkImageView)view;
-     return VK_SUCCESS;
- }
-diff --git a/src/vk_ps4_pipeline.c b/src/vk_ps4_pipeline.c
-index b621e66..3369d76 100644
---- a/src/vk_ps4_pipeline.c
-+++ b/src/vk_ps4_pipeline.c
-@@ -19,7 +19,10 @@
- VkResult vk_ps4_compile_shader_module(VkPs4ShaderModule *mod, VkShaderStageFlagBits stage,
-                                       const VkAllocationCallbacks *alloc,
-                                       void **out_binary, size_t *out_binary_size,
--                                      GnmShaderMetadata *out_metadata);
-+                                      GnmShaderMetadata *out_metadata,
-+                                      const VkPs4PipelineLayout *playout,
-+                                      const VkSpecializationInfo *spec);
-+uint32_t vk_ps4_stage_key_hash(const VkPs4PipelineLayout *pl, const VkSpecializationInfo *spec);
- 
- /* Forward declaration from vk_ps4_command.c */
- extern uint32_t vk_stencil_op_to_pm4(VkStencilOp op);
-@@ -95,6 +98,18 @@ GnmPrimitiveType vk_topology_to_gnm(VkPrimitiveTopology topology) {
-     }
- }
- 
-+/* PcPs4 hardware patch: compiled shader code sits at an arbitrary offset inside
-+ * a heap buffer, but the GPU fetches instructions from the address in the stage
-+ * registers and needs it 256-byte aligned in GPU-visible memory (the vendor
-+ * loaders copy it for the same reason). Copy before pointing the registers at it. */
-+static void *pcps4_gpu_code(const VkAllocationCallbacks *alloc, const GnmShaderMetadata *md) {
-+    if (!md || !md->shadercode || md->shadercodesize == 0) return (void *)md->shadercode;
-+    void *dst = vk_ps4_alloc(alloc, md->shadercodesize, 256);
-+    if (!dst) return (void *)md->shadercode;
-+    memcpy(dst, md->shadercode, md->shadercodesize);
-+    return dst;
-+}
-+
- VKAPI_ATTR VkResult VKAPI_CALL
- vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
-                                 uint32_t createInfoCount,
-@@ -305,9 +320,9 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
-             void *cached_binary = NULL;
-             if (pipelineCache && mod->binary && mod->binary_size > 0) {
-                 cache_hash = vk_ps4_pipeline_cache_hash(mod->binary, mod->binary_size,
--                                                        (uint32_t)stage->stage);
-+                                                        (uint32_t)stage->stage ^ vk_ps4_stage_key_hash((const VkPs4PipelineLayout *)ci->layout, stage->pSpecializationInfo));
-                 cached_binary = vk_ps4_pipeline_cache_lookup(pipelineCache, cache_hash,
--                                                             (uint32_t)stage->stage,
-+                                                             (uint32_t)stage->stage ^ vk_ps4_stage_key_hash((const VkPs4PipelineLayout *)ci->layout, stage->pSpecializationInfo),
-                                                              &cached_size);
-             }
- 
-@@ -324,7 +339,8 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
-             } else {
-                 /* Cache miss — compile the shader */
-                 VkResult vr = vk_ps4_compile_shader_module(
--                    mod, stage->stage, alloc, &binary, &binary_size, &metadata
-+                    mod, stage->stage, alloc, &binary, &binary_size, &metadata,
-+                    (const VkPs4PipelineLayout *)ci->layout, stage->pSpecializationInfo
-                 );
-                 if (vr != VK_SUCCESS) {
-                     if (binary && binary != mod->binary) {
-@@ -336,7 +352,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
-                 /* Insert into pipeline cache */
-                 if (pipelineCache && binary && binary_size > 0 && mod->binary && mod->binary_size > 0) {
-                     vk_ps4_pipeline_cache_insert(pipelineCache, cache_hash,
--                                                 (uint32_t)stage->stage,
-+                                                 (uint32_t)stage->stage ^ vk_ps4_stage_key_hash((const VkPs4PipelineLayout *)ci->layout, stage->pSpecializationInfo),
-                                                  (uint32_t)mod->binary_size,
-                                                  binary, binary_size);
-                 }
-@@ -369,7 +385,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
-                          * to actual GPU address in the compiled binary. */
-                         if (metadata.shadercode) {
-                             sceGnmLsRegsSetAddress(&pipe->ls_regs,
--                                (void *)metadata.shadercode);
-+                                pcps4_gpu_code(alloc, &metadata));
-                         }
-                         /* LS doesn't have vertex input semantics in the same
-                          * format — skip semantic extraction for LS */
-@@ -381,7 +397,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
-                         pipe->has_es = true;
-                         if (metadata.shadercode) {
-                             sceGnmEsRegsSetAddress(&pipe->es_regs,
--                                (void *)metadata.shadercode);
-+                                pcps4_gpu_code(alloc, &metadata));
-                         }
-                     } else {
-                         /* Standard VS: GnmVsShader (common + regs + semantics) */
-@@ -389,7 +405,17 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
-                         pipe->vs_regs = vs->registers;
-                         if (metadata.shadercode) {
-                             sceGnmVsRegsSetAddress(&pipe->vs_regs,
--                                (void *)metadata.shadercode);
-+                                pcps4_gpu_code(alloc, &metadata));
-+                        }
-+                        /* Extract VS export semantics (VS->PS linkage) */
-+                        {
-+                            uint32_t nexp = vs->numexportsemantics;
-+                            const GnmVertexExportSemantic *exps = sceGnmVsShaderExportSemanticTable(vs);
-+                            if (nexp > 32) nexp = 32;
-+                            if (exps && nexp > 0) {
-+                                memcpy(pipe->vs_export_semantics, exps, nexp * sizeof(GnmVertexExportSemantic));
-+                                pipe->vs_export_semantic_count = nexp;
-+                            }
-                         }
-                         /* Extract vertex input semantics */
-                         uint32_t nsemantics = vs->numinputsemantics;
-@@ -413,7 +439,16 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
-                     pipe->ps_regs = ps->registers;
-                     if (metadata.shadercode) {
-                         sceGnmPsRegsSetAddress(&pipe->ps_regs,
--                            (void *)metadata.shadercode);
-+                            pcps4_gpu_code(alloc, &metadata));
-+                    }
-+                    {
-+                        uint32_t nin = ps->numinputsemantics;
-+                        const GnmPixelInputSemantic *ins = sceGnmPsShaderInputSemanticTable(ps);
-+                        if (nin > 32) nin = 32;
-+                        if (ins && nin > 0) {
-+                            memcpy(pipe->ps_input_semantics, ins, nin * sizeof(GnmPixelInputSemantic));
-+                            pipe->ps_input_semantic_count = nin;
-+                        }
-                     }
-                     pipe->fs_module = mod;
-                     ps_found = true;
-@@ -437,7 +472,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
-                         pipe->has_gs = true;
-                         if (metadata.shadercode) {
-                             sceGnmGsRegsSetAddress(&pipe->gs_regs,
--                                (void *)metadata.shadercode);
-+                                pcps4_gpu_code(alloc, &metadata));
-                         }
-                     }
-                     /* Store the module regardless — it may be used later
-@@ -458,7 +493,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
-                         pipe->has_hs = true;
-                         if (metadata.shadercode) {
-                             sceGnmHsRegsSetAddress(&pipe->hs_regs,
--                                (void *)metadata.shadercode);
-+                                pcps4_gpu_code(alloc, &metadata));
-                         }
-                     }
-                     pipe->tcs_module = mod;
-@@ -477,7 +512,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
-                         pipe->has_es = true;
-                         if (metadata.shadercode) {
-                             sceGnmEsRegsSetAddress(&pipe->es_regs,
--                                (void *)metadata.shadercode);
-+                                pcps4_gpu_code(alloc, &metadata));
-                         }
-                     } else {
-                         /* DS_VS or compiler fallback: treat as vertex shader.
-@@ -487,7 +522,7 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
-                         pipe->has_ds_vs = true;
-                         if (metadata.shadercode) {
-                             sceGnmVsRegsSetAddress(&pipe->vs_regs,
--                                (void *)metadata.shadercode);
-+                                pcps4_gpu_code(alloc, &metadata));
-                         }
-                     }
-                     pipe->tes_module = mod;
-@@ -655,6 +690,28 @@ vk_ps4_CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
-             }
-         }
- 
-+        {   /* PcPs4 diagnostic: describe the pipeline DXVK asked for */
-+            static unsigned pipe_logs;
-+            if (pipe_logs++ < 60) {
-+                const VkPs4PipelineLayout *dl = (const VkPs4PipelineLayout *)ci->layout;
-+                vk_ps4_log("PIPE #%u stages=%u topo=%d dyn=%u cbatt=%u blend0=%d wm0=0x%x cull=%d layout_sets=%u pc=%u",
-+                    pipe_logs, ci->stageCount,
-+                    ci->pInputAssemblyState ? (int)ci->pInputAssemblyState->topology : -1,
-+                    ci->pDynamicState ? ci->pDynamicState->dynamicStateCount : 0,
-+                    ci->pColorBlendState ? ci->pColorBlendState->attachmentCount : 0,
-+                    (ci->pColorBlendState && ci->pColorBlendState->attachmentCount) ? (int)ci->pColorBlendState->pAttachments[0].blendEnable : -1,
-+                    (ci->pColorBlendState && ci->pColorBlendState->attachmentCount) ? (unsigned)ci->pColorBlendState->pAttachments[0].colorWriteMask : 0,
-+                    ci->pRasterizationState ? (int)ci->pRasterizationState->cullMode : -1,
-+                    dl ? dl->set_layout_count : 0, dl ? dl->push_constant_range_count : 0);
-+                if (dl)
-+                    for (uint32_t sl = 0; sl < dl->set_layout_count; sl++)
-+                        if (dl->set_layouts[sl])
-+                            for (uint32_t bb = 0; bb < dl->set_layouts[sl]->binding_count; bb++)
-+                                vk_ps4_log("   set%u b%u type=%d count=%u", sl, dl->set_layouts[sl]->bindings[bb].binding,
-+                                           (int)dl->set_layouts[sl]->bindings[bb].descriptorType,
-+                                           dl->set_layouts[sl]->bindings[bb].descriptorCount);
-+            }
-+        }
-         pPipelines[i] = (VkPipeline)pipe;
-     }
- 
-@@ -700,9 +757,9 @@ vk_ps4_CreateComputePipelines(VkDevice device, VkPipelineCache pipelineCache,
-         void *cached_binary = NULL;
-         if (pipelineCache && mod->binary && mod->binary_size > 0) {
-             cache_hash = vk_ps4_pipeline_cache_hash(mod->binary, mod->binary_size,
--                                                    (uint32_t)ci->stage.stage);
-+                                                    (uint32_t)ci->stage.stage ^ vk_ps4_stage_key_hash((const VkPs4PipelineLayout *)ci->layout, ci->stage.pSpecializationInfo));
-             cached_binary = vk_ps4_pipeline_cache_lookup(pipelineCache, cache_hash,
--                                                         (uint32_t)ci->stage.stage,
-+                                                         (uint32_t)ci->stage.stage ^ vk_ps4_stage_key_hash((const VkPs4PipelineLayout *)ci->layout, ci->stage.pSpecializationInfo),
-                                                          &cached_size);
-         }
- 
-@@ -715,7 +772,8 @@ vk_ps4_CreateComputePipelines(VkDevice device, VkPipelineCache pipelineCache,
-             }
-         } else {
-             VkResult vr = vk_ps4_compile_shader_module(
--                mod, ci->stage.stage, alloc, &binary, &binary_size, &metadata
-+                mod, ci->stage.stage, alloc, &binary, &binary_size, &metadata,
-+                (const VkPs4PipelineLayout *)ci->layout, ci->stage.pSpecializationInfo
-             );
-             if (vr != VK_SUCCESS) {
-                 if (binary && binary != mod->binary) {
-@@ -728,7 +786,7 @@ vk_ps4_CreateComputePipelines(VkDevice device, VkPipelineCache pipelineCache,
-             }
-             if (pipelineCache && binary && binary_size > 0 && mod->binary && mod->binary_size > 0) {
-                 vk_ps4_pipeline_cache_insert(pipelineCache, cache_hash,
--                                             (uint32_t)ci->stage.stage,
-+                                             (uint32_t)ci->stage.stage ^ vk_ps4_stage_key_hash((const VkPs4PipelineLayout *)ci->layout, ci->stage.pSpecializationInfo),
-                                              (uint32_t)mod->binary_size,
-                                              binary, binary_size);
-             }
-@@ -1018,17 +1076,36 @@ vk_ps4_CreateDescriptorPool(VkDevice device, const VkDescriptorPoolCreateInfo *p
-     return VK_SUCCESS;
- }
- 
-+
-+/* Release one descriptor set completely: resource arrays, GPU-visible copy, the set itself. */
-+static void pcps4_release_set(const VkAllocationCallbacks *alloc, VkPs4DescriptorSet *set) {
-+    if (!set) return;
-+    for (uint32_t b = 0; b < set->binding_count && b < VK_PS4_MAX_DESCRIPTOR_BINDINGS; b++) {
-+        if (set->bindings[b].buffers) vk_ps4_free(alloc, set->bindings[b].buffers);
-+        if (set->bindings[b].textures) vk_ps4_free(alloc, set->bindings[b].textures);
-+        if (set->bindings[b].samplers) vk_ps4_free(alloc, set->bindings[b].samplers);
-+    }
-+    if (set->gpu_mem) vk_ps4_free(alloc, set->gpu_mem);
-+    vk_ps4_free(alloc, set);
-+}
-+
-+static void pcps4_release_pool_sets(const VkAllocationCallbacks *alloc, VkPs4DescriptorPool *pool) {
-+    for (uint32_t i = 0; i < pool->tracked_count; i++)
-+        pcps4_release_set(alloc, pool->tracked[i]);
-+    if (pool->tracked) vk_ps4_free(alloc, pool->tracked);
-+    pool->tracked = NULL;
-+    pool->tracked_count = pool->tracked_cap = 0;
-+    for (uint32_t i = 0; i < pool->free_count; i++) pool->free_list[i] = NULL;
-+    pool->free_count = 0;
-+}
-+
- VKAPI_ATTR void VKAPI_CALL
- vk_ps4_DestroyDescriptorPool(VkDevice device, VkDescriptorPool descriptorPool, const VkAllocationCallbacks *pAllocator) {
-     if (!device || !descriptorPool) return;
-     VkPs4Device *dev = (VkPs4Device *)device;
-     VkPs4DescriptorPool *pool = (VkPs4DescriptorPool *)descriptorPool;
-     const VkAllocationCallbacks *alloc = pAllocator ? pAllocator : &dev->allocator;
--    /* Free all descriptor sets in the free list */
--    for (uint32_t i = 0; i < pool->free_count; i++) {
--        if (pool->free_list[i]) vk_ps4_free(alloc, pool->free_list[i]);
--    }
--    pool->free_count = 0;
-+    pcps4_release_pool_sets(alloc, pool);
-     vk_ps4_free(alloc, pool);
- }
- 
-@@ -1064,8 +1141,12 @@ vk_ps4_AllocateDescriptorSets(VkDevice device, const VkDescriptorSetAllocateInfo
-         if (pool && pool->free_count > 0) {
-             set = pool->free_list[--pool->free_count];
-             pool->free_list[pool->free_count] = NULL;
--            /* Clear the set for reuse */
-+            /* Clear the set for reuse (keep its GPU-visible descriptor memory) */
-+            uint8_t *keep_mem = set->gpu_mem;
-+            uint32_t keep_size = set->gpu_size;
-             memset(set, 0, sizeof(*set));
-+            set->gpu_mem = keep_mem;
-+            set->gpu_size = keep_size;
-         }
- 
-         if (!set) {
-@@ -1077,6 +1158,22 @@ vk_ps4_AllocateDescriptorSets(VkDevice device, const VkDescriptorSetAllocateInfo
-                 }
-                 return VK_ERROR_OUT_OF_HOST_MEMORY;
-             }
-+            if (pool) {
-+                if (pool->tracked_count == pool->tracked_cap) {
-+                    uint32_t ncap = pool->tracked_cap ? pool->tracked_cap * 2 : 64;
-+                    VkPs4DescriptorSet **nt = vk_ps4_alloc(alloc, ncap * sizeof(*nt), 16);
-+                    if (nt) {
-+                        if (pool->tracked) {
-+                            memcpy(nt, pool->tracked, pool->tracked_count * sizeof(*nt));
-+                            vk_ps4_free(alloc, pool->tracked);
-+                        }
-+                        pool->tracked = nt;
-+                        pool->tracked_cap = ncap;
-+                    }
-+                }
-+                if (pool->tracked_count < pool->tracked_cap)
-+                    pool->tracked[pool->tracked_count++] = set;
-+            }
-         }
- 
-         set->type = VK_PS4_OBJ_DESCRIPTOR_SET;
-@@ -1127,15 +1224,15 @@ vk_ps4_FreeDescriptorSets(VkDevice device, VkDescriptorPool descriptorPool,
-         VkPs4DescriptorSet *set = (VkPs4DescriptorSet *)pDescriptorSets[i];
-         /* Free binding resource arrays */
-         for (uint32_t b = 0; b < set->binding_count; b++) {
--            if (set->bindings[b].buffers) vk_ps4_free(alloc, set->bindings[b].buffers);
--            if (set->bindings[b].textures) vk_ps4_free(alloc, set->bindings[b].textures);
--            if (set->bindings[b].samplers) vk_ps4_free(alloc, set->bindings[b].samplers);
-+            if (set->bindings[b].buffers) { vk_ps4_free(alloc, set->bindings[b].buffers); set->bindings[b].buffers = NULL; }
-+            if (set->bindings[b].textures) { vk_ps4_free(alloc, set->bindings[b].textures); set->bindings[b].textures = NULL; }
-+            if (set->bindings[b].samplers) { vk_ps4_free(alloc, set->bindings[b].samplers); set->bindings[b].samplers = NULL; }
-         }
--        /* Add to the pool's free list for reuse, or free if pool is full */
-+        /* The pool owns every set it handed out: keep it for reuse (released on reset/destroy). */
-         if (pool && pool->free_count < VK_PS4_MAX_POOLED_SETS) {
-             pool->free_list[pool->free_count++] = set;
--        } else {
--            vk_ps4_free(alloc, set);
-+        } else if (!pool) {
-+            pcps4_release_set(alloc, set);
-         }
-         if (pool) pool->sets_freed++;
-     }
-@@ -1152,14 +1249,7 @@ vk_ps4_ResetDescriptorPool(VkDevice device, VkDescriptorPool descriptorPool, VkD
-     const VkAllocationCallbacks *alloc = &dev->allocator;
-     VkPs4DescriptorPool *pool = (VkPs4DescriptorPool *)descriptorPool;
- 
--    /* Free all descriptor sets in the free list */
--    for (uint32_t i = 0; i < pool->free_count; i++) {
--        if (pool->free_list[i]) {
--            vk_ps4_free(alloc, pool->free_list[i]);
--            pool->free_list[i] = NULL;
--        }
--    }
--    pool->free_count = 0;
-+    pcps4_release_pool_sets(alloc, pool);
-     pool->sets_allocated = 0;
-     pool->sets_freed = 0;
-     return VK_SUCCESS;
-diff --git a/src/vk_ps4_queue.c b/src/vk_ps4_queue.c
-index 683667b..9ae954a 100644
---- a/src/vk_ps4_queue.c
-+++ b/src/vk_ps4_queue.c
-@@ -57,6 +57,12 @@ static uint32_t vk_ps4_queue_emit_waitmem(
-     return (uint32_t)(cmd.cmdptr - cmd.beginptr) * sizeof(uint32_t);
- }
- 
-+
-+/* PcPs4 hardware patch: the firmware reads the constant-command-buffer arrays
-+ * unconditionally, so they must be real one-element arrays, not NULL. */
-+static void *pcps4_ccb_addr = NULL;
-+static uint32_t pcps4_ccb_size = 0;
-+
- VKAPI_ATTR VkResult VKAPI_CALL
- vk_ps4_QueueSubmit(VkQueue queue, uint32_t submitCount, const VkSubmitInfo *pSubmits, VkFence fence) {
-     if (!queue) {
-@@ -89,9 +95,7 @@ vk_ps4_QueueSubmit(VkQueue queue, uint32_t submitCount, const VkSubmitInfo *pSub
-                     dev, label_addr, sem->signal_value
-                 );
-                 void *wait_addr = dev->gnm_epilogue_cmd;
--                int32_t wait_result = sceGnmSubmitCommandBuffers(
--                    1, &wait_addr, &wait_bytes, NULL, NULL
--                );
-+                int32_t wait_result = sceGnmSubmitCommandBuffers(1, &wait_addr, &wait_bytes, &pcps4_ccb_addr, &pcps4_ccb_size);
-                 if (wait_result != 0) {
-                     /* WaitMem submit failed — fall back to CPU check. */
-                     if (!sem->signaled) {
-@@ -124,9 +128,7 @@ vk_ps4_QueueSubmit(VkQueue queue, uint32_t submitCount, const VkSubmitInfo *pSub
-              * since we don't use a separate constant command buffer. */
-             vk_ps4_log("QueueSubmit: sceGnmSubmitCommandBuffers dwords=%u",
-                        cmd->pm4_used);
--            int32_t result = sceGnmSubmitCommandBuffers(
--                1, &dcb_addr, &cmd_size_bytes, NULL, NULL
--            );
-+            int32_t result = sceGnmSubmitCommandBuffers(1, &dcb_addr, &cmd_size_bytes, &pcps4_ccb_addr, &pcps4_ccb_size);
- 
-             if (result != 0) {
-                 vk_ps4_log("QueueSubmit: sceGnmSubmitCommandBuffers FAILED: %d",
-@@ -157,9 +159,7 @@ vk_ps4_QueueSubmit(VkQueue queue, uint32_t submitCount, const VkSubmitInfo *pSub
-                     dev, label_addr, sem->signal_value
-                 );
-                 void *eop_addr = dev->gnm_epilogue_cmd;
--                int32_t result = sceGnmSubmitCommandBuffers(
--                    1, &eop_addr, &eop_bytes, NULL, NULL
--                );
-+                int32_t result = sceGnmSubmitCommandBuffers(1, &eop_addr, &eop_bytes, &pcps4_ccb_addr, &pcps4_ccb_size);
-                 if (result != 0) {
-                     /* EOP submit failed — fall back to CPU signaling so
-                      * the semaphore doesn't deadlock waiters. */
-@@ -193,9 +193,7 @@ vk_ps4_QueueSubmit(VkQueue queue, uint32_t submitCount, const VkSubmitInfo *pSub
-                 dev, label_addr, f->signal_value
-             );
-             void *eop_addr = dev->gnm_epilogue_cmd;
--            int32_t result = sceGnmSubmitCommandBuffers(
--                1, &eop_addr, &eop_bytes, NULL, NULL
--            );
-+            int32_t result = sceGnmSubmitCommandBuffers(1, &eop_addr, &eop_bytes, &pcps4_ccb_addr, &pcps4_ccb_size);
-             if (result != 0) {
-                 /* EOP submit failed — fall back to CPU signaling. */
-                 f->signaled = true;
-@@ -242,9 +240,7 @@ vk_ps4_QueueWaitIdle(VkQueue queue) {
-         uint64_t label_addr = (uint64_t)(uintptr_t)idle_label;
-         uint32_t eop_bytes = vk_ps4_queue_emit_eop(dev, label_addr, 1);
-         void *eop_addr = dev->gnm_epilogue_cmd;
--        int32_t result = sceGnmSubmitCommandBuffers(
--            1, &eop_addr, &eop_bytes, NULL, NULL
--        );
-+        int32_t result = sceGnmSubmitCommandBuffers(1, &eop_addr, &eop_bytes, &pcps4_ccb_addr, &pcps4_ccb_size);
- #ifdef VK_USE_PLATFORM_PS4
-         if (result == 0) {
-             /* Poll until the GPU writes the label. */
-diff --git a/src/vk_ps4_shader.c b/src/vk_ps4_shader.c
-index 151a536..dfd7977 100644
---- a/src/vk_ps4_shader.c
-+++ b/src/vk_ps4_shader.c
-@@ -147,10 +147,103 @@ vk_ps4_DestroyShaderModule(VkDevice device, VkShaderModule shaderModule, const V
- 
- /* Helper: compile a shader module for a specific stage using libpsbc.
-  * Called from pipeline creation. Returns the compiled binary and metadata. */
-+/* Stable hash of a pipeline layout's descriptor bindings: the same SPIR-V compiles differently
-+ * against different layouts, so the pipeline cache key must include it. */
-+static uint32_t spec_hash(const VkSpecializationInfo *spec) {
-+    uint32_t h = 2166136261u;
-+    if (!spec || !spec->mapEntryCount) return 0;
-+    for (uint32_t i = 0; i < spec->mapEntryCount; i++) {
-+        const VkSpecializationMapEntry *e = &spec->pMapEntries[i];
-+        h = (h ^ e->constantID) * 16777619u;
-+        for (size_t b = 0; b < e->size && e->offset + b < spec->dataSize; b++)
-+            h = (h ^ ((const uint8_t *)spec->pData)[e->offset + b]) * 16777619u;
-+    }
-+    return h;
-+}
-+
-+/* Pipeline-cache key part: everything besides the SPIR-V that changes the compiled code. */
-+uint32_t vk_ps4_stage_key_hash(const VkPs4PipelineLayout *pl, const VkSpecializationInfo *spec) {
-+    extern uint32_t vk_ps4_layout_hash(const VkPs4PipelineLayout *pl);
-+    return vk_ps4_layout_hash(pl) ^ (spec_hash(spec) << 8);
-+}
-+
-+/* Apply specialization constants to a copy of the SPIR-V: the shader compiler does not take
-+ * specialization info, so bake the values in by turning each OpSpecConstant* with a SpecId
-+ * decoration into the matching OpConstant*. DXVK's present shader, for one, branches on a
-+ * specialization constant to decide whether to sample a gamma ramp that is not bound. */
-+static uint32_t *specialize_spirv(const uint32_t *in, size_t bytes, const VkSpecializationInfo *spec,
-+                                  const VkAllocationCallbacks *alloc) {
-+    size_t words = bytes / 4;
-+    uint32_t *out = (uint32_t *)vk_ps4_alloc(alloc, bytes, 4);
-+    if (!out) return NULL;
-+    memcpy(out, in, bytes);
-+    enum { MAXSPEC = 256 };
-+    uint32_t spec_target[MAXSPEC], spec_id[MAXSPEC];
-+    uint32_t n = 0;
-+    for (size_t i = 5; i < words;) {
-+        uint32_t op = out[i] & 0xffff, wc = out[i] >> 16;
-+        if (wc == 0 || i + wc > words) break;
-+        if (op == 71 /* OpDecorate */ && wc >= 4 && out[i + 2] == 1 /* SpecId */ && n < MAXSPEC) {
-+            spec_target[n] = out[i + 1];
-+            spec_id[n] = out[i + 3];
-+            n++;
-+        }
-+        i += wc;
-+    }
-+    for (size_t i = 5; i < words;) {
-+        uint32_t op = out[i] & 0xffff, wc = out[i] >> 16;
-+        if (wc == 0 || i + wc > words) break;
-+        if (op == 48 || op == 49 || op == 50) {
-+            uint32_t result = out[i + 2];
-+            for (uint32_t k = 0; k < n; k++) {
-+                if (spec_target[k] != result) continue;
-+                for (uint32_t e = 0; e < spec->mapEntryCount; e++) {
-+                    const VkSpecializationMapEntry *me = &spec->pMapEntries[e];
-+                    if (me->constantID != spec_id[k] || me->offset + me->size > spec->dataSize) continue;
-+                    const uint8_t *d = (const uint8_t *)spec->pData + me->offset;
-+                    if (op == 50) {
-+                        for (uint32_t w = 0; w < wc - 3 && (w * 4) < me->size; w++) {
-+                            uint32_t v = 0;
-+                            memcpy(&v, d + w * 4, (me->size - w * 4) < 4 ? (me->size - w * 4) : 4);
-+                            out[i + 3 + w] = v;
-+                        }
-+                        out[i] = (wc << 16) | 43; /* OpConstant */
-+                    } else {
-+                        uint32_t v = 0;
-+                        memcpy(&v, d, me->size < 4 ? me->size : 4);
-+                        out[i] = (wc << 16) | (v ? 41 : 42); /* OpConstantTrue / OpConstantFalse */
-+                    }
-+                    break;
-+                }
-+            }
-+        }
-+        i += wc;
-+    }
-+    return out;
-+}
-+
-+uint32_t vk_ps4_layout_hash(const VkPs4PipelineLayout *pl) {
-+    uint32_t h = 2166136261u;
-+    if (!pl) return 0;
-+    for (uint32_t s = 0; s < pl->set_layout_count; s++) {
-+        const VkPs4DescriptorSetLayout *l = pl->set_layouts[s];
-+        h = (h ^ (0x100u + s)) * 16777619u;
-+        if (!l) continue;
-+        for (uint32_t b = 0; b < l->binding_count; b++) {
-+            h = (h ^ l->bindings[b].binding) * 16777619u;
-+            h = (h ^ (uint32_t)l->bindings[b].descriptorType) * 16777619u;
-+            h = (h ^ l->bindings[b].descriptorCount) * 16777619u;
-+        }
-+    }
-+    return h << 8; /* keep clear of the low stage bits */
-+}
-+
- VkResult vk_ps4_compile_shader_module(VkPs4ShaderModule *mod, VkShaderStageFlagBits stage,
-                                       const VkAllocationCallbacks *alloc,
-                                       void **out_binary, size_t *out_binary_size,
--                                      GnmShaderMetadata *out_metadata) {
-+                                      GnmShaderMetadata *out_metadata,
-+                                      const VkPs4PipelineLayout *playout,
-+                                      const VkSpecializationInfo *spec) {
-     if (!mod || !mod->binary || mod->binary_size == 0) {
-         return VK_ERROR_INITIALIZATION_FAILED;
-     }
-@@ -162,6 +255,36 @@ VkResult vk_ps4_compile_shader_module(VkPs4ShaderModule *mod, VkShaderStageFlagB
- 
-     /* Set up compile options (zero-init to avoid stack garbage) */
-     PsbcCompileOptions opts = {0};
-+    /* Descriptor layout: lets the shader load uniform buffers, textures and samplers from set
-+     * memory instead of compiling them to null descriptors. */
-+    enum { MAXS = 8 };
-+    PsbcBinding pbind[MAXS][VK_PS4_MAX_DESCRIPTOR_BINDINGS];
-+    PsbcSetLayout psets[MAXS];
-+    PsbcDescriptorLayout pdl;
-+    if (playout && playout->set_layout_count > 0) {
-+        uint32_t ns = playout->set_layout_count < MAXS ? playout->set_layout_count : MAXS;
-+        for (uint32_t s = 0; s < ns; s++) {
-+            const VkPs4DescriptorSetLayout *l = playout->set_layouts[s];
-+            psets[s].binding_count = 0;
-+            psets[s].bindings = pbind[s];
-+            if (!l) continue;
-+            uint32_t offs[VK_PS4_MAX_DESCRIPTOR_BINDINGS] = {0}, szs[VK_PS4_MAX_DESCRIPTOR_BINDINGS] = {0};
-+            vk_ps4_layout_compute(l, offs, szs, NULL);
-+            uint32_t nb = l->binding_count < VK_PS4_MAX_DESCRIPTOR_BINDINGS ? l->binding_count : VK_PS4_MAX_DESCRIPTOR_BINDINGS;
-+            for (uint32_t b = 0; b < nb; b++) {
-+                pbind[s][b].binding = l->bindings[b].binding;
-+                pbind[s][b].type = (uint32_t)l->bindings[b].descriptorType;
-+                pbind[s][b].array_size = l->bindings[b].descriptorCount ? l->bindings[b].descriptorCount : 1;
-+                pbind[s][b].offset = offs[b];
-+                pbind[s][b].size = szs[b];
-+            }
-+            psets[s].binding_count = nb;
-+        }
-+        pdl.num_sets = ns;
-+        pdl.sets = psets;
-+        pdl.address32_hi = vk_ps4_arena_hi32();
-+        opts.layout = &pdl;
-+    }
-     opts.target = PSBC_TARGET_PS4_BASE;
-     opts.entrypoint = "main";
-     opts.optimise = true;
-@@ -183,12 +306,16 @@ VkResult vk_ps4_compile_shader_module(VkPs4ShaderModule *mod, VkShaderStageFlagB
- 
-     /* Compile */
-     PsbcShaderOutput output = {0};
-+    uint32_t *specialized = NULL;
-+    if (spec && spec->mapEntryCount)
-+        specialized = specialize_spirv((const uint32_t *)mod->binary, mod->binary_size, spec, alloc);
-     PsbcResult result = psbc_compile_shader(
--        mod->binary,        /* SPIR-V data */
-+        specialized ? specialized : mod->binary,        /* SPIR-V data */
-         mod->binary_size,   /* SPIR-V size */
-         &opts,
-         &output
-     );
-+    if (specialized) vk_ps4_free(alloc, specialized);
- 
-     if (result != PSBC_RESULT_OK) {
-         vk_ps4_log("compile_shader: %s FAILED psbc_result=%d", stage_name, (int)result);
-diff --git a/src/vk_ps4_swapchain.c b/src/vk_ps4_swapchain.c
-index bc36c63..b1826c2 100644
---- a/src/vk_ps4_swapchain.c
-+++ b/src/vk_ps4_swapchain.c
-@@ -11,6 +11,24 @@
- 
+diff --git a/src/vk_ps4_log.c b/src/vk_ps4_log.c
+index a2b31c0..3c0bf13 100644
+--- a/src/vk_ps4_log.c
++++ b/src/vk_ps4_log.c
+@@ -12,6 +12,7 @@
  #include <string.h>
+ #include <stdarg.h>
+ #include <time.h>
++#include <pthread.h>
  
+ #ifdef __ORBIS__
+ #include <orbis/libkernel.h>
+@@ -23,6 +24,16 @@ static FILE *g_log_file = NULL;
+ static uint64_t g_log_counter = 0;
+ static uint64_t g_start_ticks = 0;
+ 
++/*
++ * The breadcrumb log is written from several threads at once (DXVK records
++ * render passes on its CS thread while worker threads log too). FILE* stdio and
++ * g_log_counter are not safe under concurrent vfprintf, and a torn write
++ * corrupts the stream's internal state, crashing inside the number formatter.
++ * Serialize every log operation with a mutex so the diagnostics stay but the
++ * race is gone.
++ */
++static pthread_mutex_t g_log_mutex = PTHREAD_MUTEX_INITIALIZER;
 +
-+/* PcPs4 hardware patch: optional tracing + switch, set by the application. */
-+void (*pcps4_vk_trace)(const char *msg) = NULL;
-+int pcps4_vk_skip_submit_done = 0;
-+#define PCPS4_VKTRACE(m) do { if (pcps4_vk_trace) pcps4_vk_trace(m); } while (0)
-+
-+/* PcPs4: swapchains currently holding the display, so an abandoned run can release it. */
-+static VkPs4Swapchain *g_pcps4_open_sc[8];
-+
-+void vk_ps4_force_close_video_out(void) {
-+    for (int k = 0; k < 8; k++) {
-+        if (g_pcps4_open_sc[k]) {
-+            sceGnmVideoOutClose(&g_pcps4_open_sc[k]->video_out);
-+            g_pcps4_open_sc[k] = NULL;
-+        }
+ /* Get monotonic time in microseconds */
+ static uint64_t get_time_us(void) {
+ #ifdef __ORBIS__
+@@ -35,6 +46,7 @@ static uint64_t get_time_us(void) {
+ }
+ 
+ void vk_ps4_log_open(const char *path) {
++    pthread_mutex_lock(&g_log_mutex);
+     if (g_log_file) {
+         fclose(g_log_file);
+         g_log_file = NULL;
+@@ -54,9 +66,11 @@ void vk_ps4_log_open(const char *path) {
+         fprintf(g_log_file, "opened: %s\n", path);
+         fflush(g_log_file);
+     }
++    pthread_mutex_unlock(&g_log_mutex);
+ }
+ 
+ void vk_ps4_log_close(void) {
++    pthread_mutex_lock(&g_log_mutex);
+     if (g_log_file) {
+         fprintf(g_log_file, "[%06llu] === log closed (counter=%llu) ===\n",
+                 (unsigned long long)(get_time_us() - g_start_ticks),
+@@ -65,31 +79,38 @@ void vk_ps4_log_close(void) {
+         fclose(g_log_file);
+         g_log_file = NULL;
+     }
++    pthread_mutex_unlock(&g_log_mutex);
+ }
+ 
+ void vk_ps4_log(const char *fmt, ...) {
+-    if (!g_log_file) return;
+-    uint64_t elapsed = get_time_us() - g_start_ticks;
+-    g_log_counter++;
+-    fprintf(g_log_file, "[%06llu] #%llu ",
+-            (unsigned long long)elapsed,
+-            (unsigned long long)g_log_counter);
+-    va_list ap;
+-    va_start(ap, fmt);
+-    vfprintf(g_log_file, fmt, ap);
+-    va_end(ap);
+-    fprintf(g_log_file, "\n");
+-    fflush(g_log_file);
++    pthread_mutex_lock(&g_log_mutex);
++    if (g_log_file) {
++        uint64_t elapsed = get_time_us() - g_start_ticks;
++        g_log_counter++;
++        fprintf(g_log_file, "[%06llu] #%llu ",
++                (unsigned long long)elapsed,
++                (unsigned long long)g_log_counter);
++        va_list ap;
++        va_start(ap, fmt);
++        vfprintf(g_log_file, fmt, ap);
++        va_end(ap);
++        fprintf(g_log_file, "\n");
++        fflush(g_log_file);
 +    }
-+}
-+
- VKAPI_ATTR VkResult VKAPI_CALL
- vk_ps4_CreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR *pCreateInfo,
-                           const VkAllocationCallbacks *pAllocator, VkSwapchainKHR *pSwapchain) {
-@@ -76,7 +94,9 @@ vk_ps4_CreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR *pCrea
-     sc->image_count = vo_info.numbuffers;
-     sc->images = vk_ps4_alloc_zero(alloc, sc->image_count * sizeof(VkPs4Image), 16);
-     if (!sc->images) {
--        sceGnmVideoOutClose(&sc->video_out);
-+        for (int k = 0; k < 8; k++)
-+        if (g_pcps4_open_sc[k] == sc) g_pcps4_open_sc[k] = NULL;
-+    sceGnmVideoOutClose(&sc->video_out);
-         vk_ps4_free(alloc, sc);
-         return VK_ERROR_OUT_OF_HOST_MEMORY;
-     }
-@@ -130,11 +150,15 @@ vk_ps4_CreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR *pCrea
- 
-     if (!rt_ok) {
-         vk_ps4_free(alloc, sc->images);
--        sceGnmVideoOutClose(&sc->video_out);
-+        for (int k = 0; k < 8; k++)
-+        if (g_pcps4_open_sc[k] == sc) g_pcps4_open_sc[k] = NULL;
-+    sceGnmVideoOutClose(&sc->video_out);
-         vk_ps4_free(alloc, sc);
-         return VK_ERROR_INITIALIZATION_FAILED;
-     }
- 
-+    for (int k = 0; k < 8; k++)
-+        if (!g_pcps4_open_sc[k]) { g_pcps4_open_sc[k] = sc; break; }
-     *pSwapchain = (VkSwapchainKHR)sc;
-     return VK_SUCCESS;
++    pthread_mutex_unlock(&g_log_mutex);
  }
-@@ -155,6 +179,8 @@ vk_ps4_DestroySwapchainKHR(VkDevice device, VkSwapchainKHR swapchain, const VkAl
-     if (sc->images) {
-         vk_ps4_free(alloc, sc->images);
-     }
-+    for (int k = 0; k < 8; k++)
-+        if (g_pcps4_open_sc[k] == sc) g_pcps4_open_sc[k] = NULL;
-     sceGnmVideoOutClose(&sc->video_out);
-     vk_ps4_free(alloc, sc);
+ 
+ void vk_ps4_log_raw(const char *msg) {
+-    if (!g_log_file) return;
+-    uint64_t elapsed = get_time_us() - g_start_ticks;
+-    g_log_counter++;
+-    fprintf(g_log_file, "[%06llu] #%llu %s\n",
+-            (unsigned long long)elapsed,
+-            (unsigned long long)g_log_counter, msg);
+-    fflush(g_log_file);
++    pthread_mutex_lock(&g_log_mutex);
++    if (g_log_file) {
++        uint64_t elapsed = get_time_us() - g_start_ticks;
++        g_log_counter++;
++        fprintf(g_log_file, "[%06llu] #%llu %s\n",
++                (unsigned long long)elapsed,
++                (unsigned long long)g_log_counter, msg);
++        fflush(g_log_file);
++    }
++    pthread_mutex_unlock(&g_log_mutex);
  }
-@@ -342,12 +368,47 @@ vk_ps4_QueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *pPresentInfo) {
-         if (image_index < sc->image_count) {
-             vk_ps4_log("QueuePresent: flip img=%u frame=%lld",
-                        image_index, (long long)sc->video_out.frame);
-+            /* NOTE (v56 diagnostic result): a CPU memset of this buffer to solid
-+             * blue here DID appear on the TV, proving the swapchain buffer IS the
-+             * scanout target and CPU writes reach the display. The black screen is
-+             * therefore the GPU present-blit (psbc-compiled DXVK shaders) not
-+             * writing visible pixels here — not a buffer-mapping problem. */
-+            PCPS4_VKTRACE("present: SubmitFlipAndWait begin");
-             sceGnmVideoOutSubmitFlipAndWait(
-                 &sc->video_out, image_index, (int64_t)sc->video_out.frame,
-                 GNM_VIDEO_OUT_FLIP_VSYNC
-             );
-+            PCPS4_VKTRACE("present: SubmitFlipAndWait returned");
-+            if (!pcps4_vk_skip_submit_done) {
-+                PCPS4_VKTRACE("present: SubmitDone begin");
-+                sceGnmSubmitDone(); /* PcPs4: vendor loops call this after every flip */
-+                PCPS4_VKTRACE("present: SubmitDone returned");
-+            }
-             sc->video_out.frame++;
-             vk_ps4_log_raw("QueuePresent: flip done");
-+            {   /* PcPs4 diagnostic: what did the GPU actually write into the scanout buffer? */
-+                static uint32_t probe_n;
-+                if (probe_n < 8 || (probe_n % 30) == 0) {
-+                    const volatile uint32_t *px = (const volatile uint32_t *)sceGnmVideoOutGetBuffer(&sc->video_out, image_index);
-+                    if (px)
-+                        vk_ps4_log("QueuePresent: scanout img=%u px[0]=%08x px[1]=%08x px[64]=%08x px[mid]=%08x",
-+                                   image_index, px[0], px[1], px[64], px[(1920u * 540u) / 2]);
-+                }
-+                if (probe_n < 8 || (probe_n % 60) == 0) {
-+                    extern VkPs4Image *pcps4_probe_images[16];
-+                    extern uint32_t pcps4_probe_image_count;
-+                    for (uint32_t k = 0; k < pcps4_probe_image_count; k++) {
-+                        VkPs4Image *im = pcps4_probe_images[k];
-+                        const volatile uint32_t *q = im->is_render_target ? (const volatile uint32_t *)sceGnmRtGetBaseAddr(&im->gnm_rt)
-+                                                                           : (const volatile uint32_t *)sceGnmTexGetBaseAddress(&im->gnm_texture);
-+                        if (q && im->create_info.extent.width >= 64)
-+                            vk_ps4_log("probe img=%p %ux%u fmt=%d rt=%d px[0]=%08x px[1]=%08x px[512]=%08x",
-+                                       (void *)im, im->create_info.extent.width, im->create_info.extent.height,
-+                                       (int)im->create_info.format, (int)im->is_render_target, q[0], q[1], q[512]);
-+                    }
-+                }
-+                probe_n++;
-+            }
-             /* The flip is complete — the display engine is done
-              * with the buffer.  Clear the in-flight tracking so
-              * AcquireNextImageKHR can reclaim this image. */
+ 
+ bool vk_ps4_log_is_open(void) {

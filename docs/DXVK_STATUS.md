@@ -79,10 +79,36 @@ Verified on hardware: v71 launched first try with no crash, ran the full test to
 bundled Windows PE called `ExitProcess(0)` and returned cleanly (no on-close crash either):
 `finished: 4/4 passed`, `DXVK scanout RGB probe = PASS` (flips=240, nonblack=15, color_changes=7).
 
+## Real app geometry renders on hardware (v74, 2026-10-23)
+
+A D3D11 program with its OWN HLSL shaders (compiled to DXBC via Wine's d3dcompiler,
+`tools/shadercompile`) drew a red triangle on a blue clear — confirmed on the TV,
+correctly oriented. The full app path works: DXBC -> DXVK -> SPIR-V -> psbc -> GCN,
+app vertex + pixel shaders, rasterization, present.
+
+Root cause of the earlier "draw writes nothing" (v72/v73): DXVK renders with a
+**negative-height (Y-flipped) viewport** (Vulkan VK_KHR_maintenance1 convention).
+GCN/GNM does not rasterize with that negative Y scale as the driver programmed it,
+so every app draw produced zero coverage while the clear and the driver's own
+self-tests (positive viewport) drew fine. Fix (`vk_ps4_CmdSetViewport`): normalize
+a negative-height viewport to its equivalent positive rectangle. The PS4
+framebuffer already matches D3D orientation, so geometry then renders right-side
+up. It was NOT vertex-fetch (an SV_VertexID triangle with no vertex buffer failed
+identically until the viewport fix).
+
 ## Open problems
 
-1. **Only the synthetic clear test has run — no real game yet.** The next milestone is driving a real
-   D3D11/D3D9 title (or a heavier sample) through the same path.
+1. **Front-face winding for culled content.** Dropping DXVK's Y-flip inverts the
+   front/back-face sense DXVK set for the flipped case. Invisible with culling off
+   (the triangle test), but a culled-geometry test is needed; the pipeline's
+   front-face may need inverting to compensate.
+2. **Vertex-buffer attribute fetch** still unproven on its own (the working test
+   generates geometry from SV_VertexID). The driver has the fetch-shader plumbing;
+   a vertex-buffer triangle is the next geometry test now that draws render.
+3. The scanout acceptance gate still requires a *changing* colour, so a static
+   triangle reports FAIL (cosmetic) even though it renders.
+4. **No real game yet** — richer content (textures, constant buffers, index
+   buffers, depth) is the path from here.
 2. A filled (DMA) render-target clear on DXVK's 640x360 backbuffer hard-hangs the console at the first flip
    while the same fill is fine on a 64x64 test image — unexplained; the draw-based clear is used instead.
 3. C++ exception unwinding (Windows x64 SEH dispatcher) is not implemented; DXVK throws on some error paths.

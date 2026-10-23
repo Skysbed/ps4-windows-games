@@ -19,6 +19,16 @@ async def main():
     mem=await pd.allocate_memory(pid, 8192); await pd.write_memory(pid, mem, b"\x00"*8192)
     await pd.call(pid, US+0x3070, CallRegisters(rdi=mem+112)); uid=int.from_bytes(await pd.read_memory(pid, mem+112,4),'little')
     await pd.call(pid, AIU+0x2cd0, CallRegisters())
+    # CRITICAL: close any running big app FIRST. Uninstalling a RUNNING title
+    # wedges the shell's install IPC, which in turn wedges ps4debug's call
+    # mechanism (recoverable only by reloading the payload or rebooting). Close
+    # it gracefully via LncService before touching the install.
+    SS=min(getattr(m,'start') for m in maps if "libSceSystemService.sprx" in str(getattr(m,'name','')))
+    appid=ai(await pd.call(pid, SS+0x4910, CallRegisters()))&0xffffffff  # GetAppIdOfBigApp
+    if appid and not (appid & 0x80000000):
+        await pd.call(pid, SS+0x58d0, CallRegisters(rdi=appid))  # sceLncUtilKillApp
+        await pd.call(pid, SS+0x4690, CallRegisters(rdi=appid))  # sceSystemServiceKillApp
+        await asyncio.sleep(3)
     # uninstall existing title (AppUnInstall = 0x3160)
     tb=TITLE.encode()+b"\x00"; await pd.write_memory(pid, mem+200, tb)
     ru=ai(await pd.call(pid, AIU+0x3160, CallRegisters(rdi=mem+200)))&0xffffffff

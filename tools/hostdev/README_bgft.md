@@ -25,3 +25,11 @@ background-file-transfer (bgft) daemon to download the pkg over HTTP from this M
   (sceAppInstUtilAppUnInstall, libSceAppInstUtil+0x3160) first.
 - The downloader range-fetches with CDN-style query params; the server must honor
   Range and reply 206.
+
+## CRITICAL: close the app before (un)installing
+Uninstalling a title while its app is RUNNING wedges the shell's install IPC,
+which cascades into wedging ps4debug's `call` mechanism globally (reads still
+work, but nothing can be executed). Recovery then needs reloading the ps4debug
+payload (Payloader menu = controller) or a reboot. ps4debug_install_bgft.py now
+closes the foreground big app (GetAppIdOfBigApp + LncUtilKillApp) before
+uninstalling. Never uninstall a running title.

@@ -49,6 +49,41 @@ each SYS_* Wine uses to the OrbisOS number using:
 4. Link Wine's ntdll/kernelbase/etc. PE side through PcPs4's existing loader +
    resolver; winevulkan → vulkan-ps4.
 
+## Stage 1 — BUILT (ntdll host shim + syscall mapping)
+`compat/wine_host/pcps4_wine_host.{h,c}`. Compiles clean against the
+OpenOrbis cross toolchain (`--target=x86_64-pc-freebsd12-elf`).
+
+What it provides — the FreeBSD host primitives Wine's `__FreeBSD__` paths
+reference but the toolchain headers don't declare, each backed by a
+confirmed OrbisOS firmware export (NID-verified against libkernel*.sprx /
+libc.sprx):
+- **GS/FS base = the Windows TEB mechanism.** `sysarch` is exported;
+  `amd64_{set,get}_{gs,fs}base()` are reimplemented over it exactly as
+  FreeBSD libc does. This is what Wine's signal_x86_64.c uses to point
+  GSBASE at the TEB (`amd64_set_gsbase(teb)` / `sysarch(X86_64_SET_GSBASE)`).
+- **Thread id** — `thr_self()` routed through the exported
+  `pthread_getthreadid_np()` (no raw-syscall dependency).
+- **`_umtx_op`** + `struct _umtx_time` + op codes (low-level sync).
+- **`kqueue`/`kevent`** + `struct kevent` + `EV_*`/`EVFILT_*` + `EV_SET`
+  (Wine's FreeBSD signal/wait loop).
+
+Syscall mapping: resolved, not open. The toolchain's `bits/syscall.h`
+carries the stock FreeBSD-9 numbers unchanged (sysarch=165, thr_self=432,
+_umtx_op=454, kqueue=362, kevent=363, sigaction=416, mmap=477), and the
+decompiled OrbisOS native confirms real `sysarch` use. The shim calls the
+**exported wrappers by name**, so Sony renumbering is a non-issue; the
+number table is recorded in the `.c` for audit and any future raw fallback.
+
+Verification: `pcps4_wine_host_selftest()` round-trips GS-base set/get,
+reads the thread id, creates a kqueue + registers a kevent, and pokes
+`_umtx_op` — to prove the primitives work on-device before Wine depends on
+them. It is standalone (not yet wired into the loader — that's stage 2),
+so nothing already working is touched.
+
+Next (stage 2): compile-select Wine's `__FreeBSD__` ntdll/unix blocks
+against this header, call the self-test at host init, then bring up a
+trivial Win32 console PE through PcPs4's existing loader + resolver.
+
 ## Scope honesty
 This is a large, multi-stage port — not a one-shot package. But it is now
 *scoped and de-risked*: both sides are measured, the host surface is ~complete,

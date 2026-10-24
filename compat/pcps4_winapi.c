@@ -891,6 +891,63 @@ static PCPS4_MS_ABI void win_RtlMoveMemory(PVOID dst, const void *src, SIZE_T le
     memmove(dst, src, length);
 }
 
+/*
+ * Console path (Wine-port stage 2). The PS4 has no console device, so stdout /
+ * stderr are routed to the PcPs4 runtime log. GetStdHandle hands back a sentinel
+ * that is NOT a valid pcps4_os_handle_t pointer; win_WriteFile recognises it and
+ * logs the text, delegating every real handle to the normal file path. This lets
+ * an ordinary Win32 console program run and produce visible output without a
+ * console subsystem. Contracts follow Wine's kernelbase (console.c / file.c).
+ */
+#define PCPS4_STD_INPUT_SENTINEL   ((HANDLE)(intptr_t)0xF0000001)
+#define PCPS4_STD_OUTPUT_SENTINEL  ((HANDLE)(intptr_t)0xF0000002)
+#define PCPS4_STD_ERROR_SENTINEL   ((HANDLE)(intptr_t)0xF0000003)
+
+static int pcps4_is_console_handle(HANDLE h)
+{
+    return h == PCPS4_STD_OUTPUT_SENTINEL ||
+           h == PCPS4_STD_ERROR_SENTINEL ||
+           h == PCPS4_STD_INPUT_SENTINEL;
+}
+
+static PCPS4_MS_ABI HANDLE win_GetStdHandle(DWORD which)
+{
+    switch (which) {
+    case (DWORD)-10: return PCPS4_STD_INPUT_SENTINEL;   /* STD_INPUT_HANDLE  */
+    case (DWORD)-11: return PCPS4_STD_OUTPUT_SENTINEL;  /* STD_OUTPUT_HANDLE */
+    case (DWORD)-12: return PCPS4_STD_ERROR_SENTINEL;   /* STD_ERROR_HANDLE  */
+    default:         return INVALID_HANDLE_VALUE;
+    }
+}
+
+static PCPS4_MS_ABI BOOL win_SetStdHandle(DWORD which, HANDLE h)
+{
+    (void)which; (void)h; /* accepted, not persisted — enough for CRT startup */
+    return TRUE;
+}
+
+static PCPS4_MS_ABI BOOL win_WriteFile(HANDLE h, const void *buf, DWORD n,
+                                       DWORD *written, void *overlapped)
+{
+    if (pcps4_is_console_handle(h)) {
+        if (n && buf)
+            pcps4_status_log("[console] %.*s", (int)n, (const char *)buf);
+        if (written) *written = n;
+        return TRUE;
+    }
+    return pcps4_abi_WriteFile(h, buf, n, written, overlapped);
+}
+
+static PCPS4_MS_ABI BOOL win_WriteConsoleA(HANDLE h, const void *buf, DWORD n,
+                                           DWORD *written, void *reserved)
+{
+    (void)reserved;
+    if (n && buf)
+        pcps4_status_log("[console] %.*s", (int)n, (const char *)buf);
+    if (written) *written = n;
+    return (h != INVALID_HANDLE_VALUE) ? TRUE : FALSE;
+}
+
 static void register_kernel32(
     pcps4_pe_resolver *resolver,
     const char *dll)
@@ -910,7 +967,10 @@ static void register_kernel32(
     KREG("CreateFileA", pcps4_abi_CreateFileA);
     KREG("ReadFile", pcps4_abi_ReadFile);
     KREG("CreateFileW", win_CreateFileW);
-    KREG("WriteFile", pcps4_abi_WriteFile);
+    KREG("WriteFile", win_WriteFile);  /* console-aware; delegates real handles */
+    KREG("GetStdHandle", win_GetStdHandle);
+    KREG("SetStdHandle", win_SetStdHandle);
+    KREG("WriteConsoleA", win_WriteConsoleA);
     KREG("GetFileSize", pcps4_abi_GetFileSize);
     KREG("GetFileSizeEx", win_GetFileSizeEx);
     KREG("SetFilePointer", pcps4_abi_SetFilePointer);

@@ -21,6 +21,14 @@ void pcps4_status_step(const char *name);
 void pcps4_status_report(const char *name, int ok);
 void pcps4_status_finish_forever(void);
 
+/* Wine-port host shim (compat/wine_host). Non-destructive on-device check of
+ * the FreeBSD host primitives (GS-base, thr_self, kqueue, _umtx_op): it saves
+ * and restores GSBASE, so it is safe to run, but it is OFF unless the env var
+ * PCPS4_WINE_SELFTEST=1 is set — PcPs4's own runtime deliberately avoids GSBASE,
+ * so we never touch it on an ordinary run. */
+int pcps4_wine_host_selftest(void);
+char *getenv(const char *name);
+
 static volatile LONG demo_value = 0;
 
 int main(void)
@@ -31,6 +39,18 @@ int main(void)
 
     /* Screen + log first, so every later step is visible. */
     pcps4_status_begin();
+
+    /* Optional: prove the Wine host shim's FreeBSD primitives on-device.
+     * Single-threaded here, and the self-test restores GSBASE, so it is safe;
+     * gated so it never runs on an ordinary boot. */
+    {
+        const char *e = getenv("PCPS4_WINE_SELFTEST");
+        if (e && e[0] == '1') {
+            pcps4_status_step("Wine host shim self-test");
+            pcps4_status_report("Wine host shim self-test",
+                                pcps4_wine_host_selftest() == 0);
+        }
+    }
 
     /* Test 1: translated Win32 runtime calls. */
     pcps4_status_step("Win32 runtime (translated source)");

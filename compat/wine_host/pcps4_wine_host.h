@@ -189,6 +189,22 @@ int kevent(int kq, const struct kevent *changelist, int nchanges,
  * at startup from the host (Unix) side. */
 int pcps4_wine_host_selftest(void);
 
+/*
+ * Install `teb` as the current thread's Windows TEB using Wine's FreeBSD
+ * mechanism (dlls/ntdll/unix/signal_x86_64.c, __FreeBSD__ branch):
+ *     amd64_set_gsbase( teb );
+ *     amd64_get_fsbase( &pthread_teb );
+ * so that native `%gs:`-relative TEB reads resolve on-device. This is
+ * ADDITIVE to PcPs4's existing instruction-patching TEB scheme (which
+ * rewrites gs: loads to RIP-relative): patched images keep working, and
+ * any unpatched Wine-origin code that expects a real GSBASE now also works.
+ *
+ * `teb` is PcPs4's existing fake-TEB page (pcps4_teb_init). On success the
+ * host pthread's own fsbase is saved to *out_pthread_teb (may be NULL) so a
+ * later Unix->Win->Unix transition can restore it, exactly as Wine does.
+ * Runs the self-test once. Returns 0 on success, -1 on failure. */
+int pcps4_wine_host_init(void *teb, void **out_pthread_teb);
+
 #ifdef __cplusplus
 }
 #endif

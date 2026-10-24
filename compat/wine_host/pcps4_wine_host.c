@@ -127,3 +127,49 @@ int pcps4_wine_host_selftest(void)
     pcps4_status_log("[wine-host] stage-1 self-test end: %d failure(s)", failures);
     return failures == 0 ? 0 : -1;
 }
+
+/* ------------------------------------------------------------------ *
+ *  Wine FreeBSD TEB install (stage 2)
+ * ------------------------------------------------------------------ *
+ * Mirrors dlls/ntdll/unix/signal_x86_64.c, __FreeBSD__ branch of the
+ * thread init: amd64_set_gsbase(teb); amd64_get_fsbase(&pthread_teb). */
+int pcps4_wine_host_init(void *teb, void **out_pthread_teb)
+{
+    void *pthread_teb = NULL;
+
+    if (!teb) {
+        pcps4_status_log("[wine-host] init FAIL: null teb");
+        return -1;
+    }
+
+    /* Save the host pthread's current fsbase first, as Wine does, so the
+     * Unix side can be restored across a Win->Unix transition. */
+    if (amd64_get_fsbase(&pthread_teb) != 0)
+        pcps4_status_log("[wine-host] init WARN amd64_get_fsbase errno=%d", errno);
+    if (out_pthread_teb)
+        *out_pthread_teb = pthread_teb;
+
+    /* Point GSBASE at the Windows TEB (the Wine FreeBSD mechanism). */
+    if (amd64_set_gsbase(teb) != 0) {
+        pcps4_status_log("[wine-host] init FAIL amd64_set_gsbase errno=%d", errno);
+        return -1;
+    }
+
+    /* Confirm the write took, so we fail loudly rather than run with a
+     * silently-wrong %gs: base. */
+    {
+        void *got = NULL;
+        amd64_get_gsbase(&got);
+        if (got != teb) {
+            pcps4_status_log("[wine-host] init FAIL gsbase verify set=%p got=%p",
+                             teb, got);
+            return -1;
+        }
+    }
+
+    pcps4_status_log("[wine-host] init OK: gsbase->teb=%p pthread_teb=%p",
+                     teb, pthread_teb);
+
+    /* Prove the rest of the host primitives before anything leans on them. */
+    return pcps4_wine_host_selftest();
+}

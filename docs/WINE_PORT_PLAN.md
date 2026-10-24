@@ -80,9 +80,42 @@ reads the thread id, creates a kqueue + registers a kevent, and pokes
 them. It is standalone (not yet wired into the loader — that's stage 2),
 so nothing already working is touched.
 
-Next (stage 2): compile-select Wine's `__FreeBSD__` ntdll/unix blocks
-against this header, call the self-test at host init, then bring up a
-trivial Win32 console PE through PcPs4's existing loader + resolver.
+## Stage 2 — BUILT (TEB bring-up + console PE), v82
+Three pieces, all compiling against the real cross toolchain and the
+mingw PE toolchain:
+
+1. **Wine FreeBSD TEB bring-up on the shim** — `pcps4_wine_host_init()`
+   mirrors signal_x86_64.c's `__FreeBSD__` thread init exactly:
+   `amd64_set_gsbase(teb); amd64_get_fsbase(&pthread_teb)`, then verifies
+   the GSBASE write and runs the self-test. It is ADDITIVE to PcPs4's
+   existing instruction-patching TEB scheme (which rewrites `gs:` loads to
+   RIP-relative): patched images are untouched, and any unpatched
+   Wine-origin code that expects a real GSBASE now also resolves.
+
+2. **Console path** — `GetStdHandle`/`SetStdHandle`/`WriteConsoleA` added
+   to kernel32, and `WriteFile` wrapped so a std-handle sentinel routes to
+   the PcPs4 runtime log instead of being dereferenced as a file handle.
+   Real file handles still go down the existing path. Contracts from Wine
+   kernelbase. This makes an ordinary Win32 console program produce
+   visible output with no console subsystem.
+
+3. **Trivial console PE** — `tests/win_console_hello.c`: `GetStdHandle ->
+   WriteFile -> ExitProcess`, no graphics/DXVK/window. Built with mingw;
+   imports resolve to the handlers above. Outcome is encoded in the
+   ExitProcess code PcPs4 logs (0x5A00 = alive). It is the floor every
+   real game stands on, independent of the GPU/vertex-fetch path.
+
+On-device safety: PcPs4's runtime deliberately avoids GSBASE, and setting
+it live risks the OrbisOS thread state, so `pcps4_wine_host_init()` (the
+destructive GSBASE install) is NOT called on an ordinary boot. Only the
+non-destructive self-test runs, and only when `PCPS4_WINE_SELFTEST=1`
+(see pc_source/main.c). Build the console PE as the bundled game with:
+`GAME_SRC=tests/win_console_hello.c GAME_LIBS=-lkernel32 GAME_DLLS=`.
+
+Next (stage 3): run the console PE on-device, confirm the ExitProcess
+code and "[console]" log line; then flip on the full GSBASE install for a
+deliberate test and, once proven, start pulling Wine's PE-side ntdll/
+kernelbase in behind PcPs4's resolver.
 
 ## Scope honesty
 This is a large, multi-stage port — not a one-shot package. But it is now

@@ -38,6 +38,20 @@ static void say(const char *s)
     if (g_out && g_out != INVALID_HANDLE_VALUE) WriteFile(g_out, s, n, &w, NULL);
 }
 
+/* Freestanding: log "<label>=<hex8>\n" without the CRT. */
+static void say_hex(const char *label, unsigned v)
+{
+    char buf[80]; unsigned i = 0, j; int shift;
+    while (label[i] && i < 60) { buf[i] = label[i]; i++; }
+    buf[i++] = '='; buf[i++] = '0'; buf[i++] = 'x';
+    for (shift = 28; shift >= 0; shift -= 4) {
+        unsigned nib = (v >> shift) & 0xF;
+        buf[i++] = (char)(nib < 10 ? '0' + nib : 'a' + nib - 10);
+    }
+    buf[i++] = '\n'; buf[i] = 0;
+    say(buf);
+}
+
 static LRESULT CALLBACK wnd_proc(HWND h, UINT m, WPARAM w, LPARAM l)
 { (void)h;(void)m;(void)w;(void)l; return 0; }
 
@@ -129,11 +143,26 @@ void WINAPI WinMainCRTStartup(void)
 #ifndef MOVE_FRAMES
 #define MOVE_FRAMES 10800u
 #endif
-    say("loop: entering render loop\n");
+    say("loop: entering render loop (triangle AUTO-BOUNCES; stick adds on top)\n");
     for (frame = 0; frame < MOVE_FRAMES; ++frame) {
         XINPUT_STATE st;
+        DWORD xrc;
+        /* Auto-bounce X over 240 frames so motion is visible WITHOUT input.
+         * If this bounces on screen, per-frame cbuffer updates reach the GPU. */
+        {
+            unsigned phase = frame % 240u;
+            unsigned tri = phase < 120u ? phase : 240u - phase;  /* 0..120..0 */
+            params.offset[0] = -0.6f + (tri / 120.0f) * 1.2f;    /* -0.6..0.6 */
+        }
         if (frame == 0) say("f0: pre-XInput\n");
-        if (XInputGetState(0, &st) == ERROR_SUCCESS) {
+        xrc = XInputGetState(0, &st);
+        if ((frame % 120u) == 0) {              /* periodic input diagnostics */
+            say_hex("xinput_rc", xrc);
+            say_hex("thumbLX", (unsigned)(unsigned short)st.Gamepad.sThumbLX);
+            say_hex("thumbLY", (unsigned)(unsigned short)st.Gamepad.sThumbLY);
+            say_hex("buttons", (unsigned)st.Gamepad.wButtons);
+        }
+        if (xrc == ERROR_SUCCESS) {
             short lx = st.Gamepad.sThumbLX, ly = st.Gamepad.sThumbLY;
             if (lx > 6000 || lx < -6000) params.offset[0] += (lx / 32767.0f) * 0.025f;
             if (ly > 6000 || ly < -6000) params.offset[1] += (ly / 32767.0f) * 0.025f;

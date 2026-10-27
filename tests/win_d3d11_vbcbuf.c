@@ -17,11 +17,21 @@
  */
 
 typedef struct Vtx { float pos[3]; float col[4]; } Vtx;
-static const Vtx g_vertices[3] = {
-    {{  0.0f,  0.5f, 0.0f }, { 1.0f, 0.2f, 0.2f, 1.0f }},  /* red   top   */
-    {{ -0.5f, -0.5f, 0.0f }, { 0.2f, 1.0f, 0.2f, 1.0f }},  /* green left  */
-    {{  0.5f, -0.5f, 0.0f }, { 0.2f, 0.4f, 1.0f, 1.0f }},  /* blue  right */
+/* Isolation test: the 36-vertex cube geometry on the PROVEN v97 pipeline
+ * (VB + small offset cbuffer, non-indexed Draw). Small positions so it fits
+ * on screen without a projection matrix. If this renders, the 36-vertex VB
+ * geometry is fine and the cube3d crash is the MVP-matrix shader specifically. */
+static const Vtx g_corners[8] = {
+    {{-0.4f,-0.4f,-0.4f},{1,0,0,1}}, {{ 0.4f,-0.4f,-0.4f},{0,1,0,1}},
+    {{ 0.4f, 0.4f,-0.4f},{0,0,1,1}}, {{-0.4f, 0.4f,-0.4f},{1,1,0,1}},
+    {{-0.4f,-0.4f, 0.4f},{1,0,1,1}}, {{ 0.4f,-0.4f, 0.4f},{0,1,1,1}},
+    {{ 0.4f, 0.4f, 0.4f},{1,1,1,1}}, {{-0.4f, 0.4f, 0.4f},{1,0.5f,0,1}},
 };
+static const unsigned short g_ci[36] = {
+    0,1,2, 0,2,3,  4,6,5, 4,7,6,  4,5,1, 4,1,0,
+    3,2,6, 3,6,7,  1,5,6, 1,6,2,  4,0,3, 4,3,7,
+};
+static Vtx g_vertices[36];
 struct CB { float offset[2]; float pad[2]; };
 
 static DXGI_SWAP_CHAIN_DESC g_swap_desc;
@@ -69,6 +79,7 @@ void WINAPI WinMainCRTStartup(void)
     elems[1].InputSlot=0; elems[1].AlignedByteOffset=12; elems[1].InputSlotClass=D3D11_INPUT_PER_VERTEX_DATA; elems[1].InstanceDataStepRate=0;
     hr=device->lpVtbl->CreateInputLayout(device,elems,2,g_vbcbuf_vs_dxbc,sizeof(g_vbcbuf_vs_dxbc),&layout); if(FAILED(hr)) ExitProcess(32);
 
+    for (int ci=0; ci<36; ci++) g_vertices[ci] = g_corners[g_ci[ci]];
     bd.ByteWidth=sizeof(g_vertices); bd.Usage=D3D11_USAGE_DEFAULT; bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;
     srd.pSysMem=g_vertices; hr=device->lpVtbl->CreateBuffer(device,&bd,&srd,&vbuf); if(FAILED(hr)) ExitProcess(33);
 
@@ -91,7 +102,7 @@ void WINAPI WinMainCRTStartup(void)
         ctx->lpVtbl->UpdateSubresource(ctx,(ID3D11Resource*)cbuf,0,0,&cb,0,0);
         ctx->lpVtbl->VSSetConstantBuffers(ctx,0,1,&cbuf);
         ctx->lpVtbl->ClearRenderTargetView(ctx,rtv,g_bg);
-        ctx->lpVtbl->Draw(ctx,3,0);
+        ctx->lpVtbl->Draw(ctx,36,0);
         hr=sc->lpVtbl->Present(sc,1,0); if(FAILED(hr)) ExitProcess((UINT)hr);
     }
 

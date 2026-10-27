@@ -82,10 +82,13 @@ void WINAPI WinMainCRTStartup(void)
     el[1].SemanticName="COLOR";el[1].SemanticIndex=0;el[1].Format=DXGI_FORMAT_R32G32B32A32_FLOAT;el[1].InputSlot=0;el[1].AlignedByteOffset=12;el[1].InputSlotClass=D3D11_INPUT_PER_VERTEX_DATA;el[1].InstanceDataStepRate=0;
     hr=dev->lpVtbl->CreateInputLayout(dev,el,2,g_cube3d_vs_dxbc,sizeof(g_cube3d_vs_dxbc),&il); if(FAILED(hr)) ExitProcess(32);
 
-    bd.ByteWidth=sizeof(g_v); bd.Usage=D3D11_USAGE_DEFAULT; bd.BindFlags=D3D11_BIND_VERTEX_BUFFER; srd.pSysMem=g_v;
+    /* Non-indexed: expand 8 corners x 36 indices into 36 vertices and draw with
+     * the proven Draw() path (the DrawIndexed/DrawIndex2 packet path GPU-faults
+     * with BAD_COMMAND and is a separate fix). */
+    static Vtx tris[36];
+    for (int t=0; t<36; t++) tris[t] = g_v[g_idx[t]];
+    bd.ByteWidth=sizeof(tris); bd.Usage=D3D11_USAGE_DEFAULT; bd.BindFlags=D3D11_BIND_VERTEX_BUFFER; srd.pSysMem=tris;
     hr=dev->lpVtbl->CreateBuffer(dev,&bd,&srd,&vb); if(FAILED(hr)) ExitProcess(33);
-    bd.ByteWidth=sizeof(g_idx); bd.BindFlags=D3D11_BIND_INDEX_BUFFER; srd.pSysMem=g_idx;
-    hr=dev->lpVtbl->CreateBuffer(dev,&bd,&srd,&ib); if(FAILED(hr)) ExitProcess(34);
     bd.ByteWidth=64; bd.BindFlags=D3D11_BIND_CONSTANT_BUFFER; srd.pSysMem=mvpT;
     /* seed cb with identity so first create is valid */
     for(int k=0;k<16;k++) mvpT[k]=(k%5==0)?1.f:0.f;
@@ -101,7 +104,6 @@ void WINAPI WinMainCRTStartup(void)
     ctx->lpVtbl->RSSetViewports(ctx,1,&vp);
     ctx->lpVtbl->IASetInputLayout(ctx,il);
     ctx->lpVtbl->IASetVertexBuffers(ctx,0,1,&vb,&stride,&off);
-    ctx->lpVtbl->IASetIndexBuffer(ctx,ib,DXGI_FORMAT_R16_UINT,0);
     ctx->lpVtbl->IASetPrimitiveTopology(ctx,D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     ctx->lpVtbl->VSSetShader(ctx,vs,0,0);
     ctx->lpVtbl->PSSetShader(ctx,ps,0,0);
@@ -128,11 +130,11 @@ void WINAPI WinMainCRTStartup(void)
 #ifndef NO_DEPTH
         ctx->lpVtbl->ClearDepthStencilView(ctx,dsv,D3D11_CLEAR_DEPTH,1.0f,0);
 #endif
-        ctx->lpVtbl->DrawIndexed(ctx,36,0,0);
+        ctx->lpVtbl->Draw(ctx,36,0);
         hr=sc->lpVtbl->Present(sc,1,0); if(FAILED(hr)) ExitProcess((UINT)hr);
     }
 
-    if(dss) dss->lpVtbl->Release(dss); cb->lpVtbl->Release(cb); ib->lpVtbl->Release(ib); vb->lpVtbl->Release(vb);
+    if(dss) dss->lpVtbl->Release(dss); cb->lpVtbl->Release(cb); vb->lpVtbl->Release(vb);
     il->lpVtbl->Release(il); ps->lpVtbl->Release(ps); vs->lpVtbl->Release(vs);
     if(dsv) dsv->lpVtbl->Release(dsv); if(depth) depth->lpVtbl->Release(depth); rtv->lpVtbl->Release(rtv);
     bb->lpVtbl->Release(bb); ctx->lpVtbl->Release(ctx); sc->lpVtbl->Release(sc); dev->lpVtbl->Release(dev);

@@ -66,6 +66,7 @@ void WINAPI WinMainCRTStartup(void)
     hr=sc->lpVtbl->GetBuffer(sc,0,&IID_ID3D11Texture2D,(void**)&bb); if(FAILED(hr)) ExitProcess((UINT)hr);
     hr=dev->lpVtbl->CreateRenderTargetView(dev,(ID3D11Resource*)bb,0,&rtv); if(FAILED(hr)) ExitProcess((UINT)hr);
 
+#ifndef NO_DEPTH
     /* depth buffer */
     dtd.Width=640; dtd.Height=360; dtd.MipLevels=1; dtd.ArraySize=1; dtd.Format=DXGI_FORMAT_D32_FLOAT;
     dtd.SampleDesc.Count=1; dtd.Usage=D3D11_USAGE_DEFAULT; dtd.BindFlags=D3D11_BIND_DEPTH_STENCIL;
@@ -73,6 +74,7 @@ void WINAPI WinMainCRTStartup(void)
     hr=dev->lpVtbl->CreateDepthStencilView(dev,(ID3D11Resource*)depth,0,&dsv); if(FAILED(hr)) ExitProcess(22);
     dsd.DepthEnable=TRUE; dsd.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ALL; dsd.DepthFunc=D3D11_COMPARISON_LESS;
     hr=dev->lpVtbl->CreateDepthStencilState(dev,&dsd,&dss); if(FAILED(hr)) ExitProcess(23);
+#endif
 
     hr=dev->lpVtbl->CreateVertexShader(dev,g_cube3d_vs_dxbc,sizeof(g_cube3d_vs_dxbc),0,&vs); if(FAILED(hr)) ExitProcess(30);
     hr=dev->lpVtbl->CreatePixelShader(dev,g_cube3d_ps_dxbc,sizeof(g_cube3d_ps_dxbc),0,&ps); if(FAILED(hr)) ExitProcess(31);
@@ -90,8 +92,12 @@ void WINAPI WinMainCRTStartup(void)
     hr=dev->lpVtbl->CreateBuffer(dev,&bd,&srd,&cb); if(FAILED(hr)) ExitProcess(35);
 
     vp.TopLeftX=0;vp.TopLeftY=0;vp.Width=640;vp.Height=360;vp.MinDepth=0;vp.MaxDepth=1;
+#ifndef NO_DEPTH
     ctx->lpVtbl->OMSetRenderTargets(ctx,1,&rtv,dsv);
     ctx->lpVtbl->OMSetDepthStencilState(ctx,dss,0);
+#else
+    ctx->lpVtbl->OMSetRenderTargets(ctx,1,&rtv,0);
+#endif
     ctx->lpVtbl->RSSetViewports(ctx,1,&vp);
     ctx->lpVtbl->IASetInputLayout(ctx,il);
     ctx->lpVtbl->IASetVertexBuffers(ctx,0,1,&vb,&stride,&off);
@@ -119,14 +125,16 @@ void WINAPI WinMainCRTStartup(void)
         ctx->lpVtbl->UpdateSubresource(ctx,(ID3D11Resource*)cb,0,0,mvpT,0,0);
         ctx->lpVtbl->VSSetConstantBuffers(ctx,0,1,&cb);
         ctx->lpVtbl->ClearRenderTargetView(ctx,rtv,g_bg);
+#ifndef NO_DEPTH
         ctx->lpVtbl->ClearDepthStencilView(ctx,dsv,D3D11_CLEAR_DEPTH,1.0f,0);
+#endif
         ctx->lpVtbl->DrawIndexed(ctx,36,0,0);
         hr=sc->lpVtbl->Present(sc,1,0); if(FAILED(hr)) ExitProcess((UINT)hr);
     }
 
-    dss->lpVtbl->Release(dss); cb->lpVtbl->Release(cb); ib->lpVtbl->Release(ib); vb->lpVtbl->Release(vb);
+    if(dss) dss->lpVtbl->Release(dss); cb->lpVtbl->Release(cb); ib->lpVtbl->Release(ib); vb->lpVtbl->Release(vb);
     il->lpVtbl->Release(il); ps->lpVtbl->Release(ps); vs->lpVtbl->Release(vs);
-    dsv->lpVtbl->Release(dsv); depth->lpVtbl->Release(depth); rtv->lpVtbl->Release(rtv);
+    if(dsv) dsv->lpVtbl->Release(dsv); if(depth) depth->lpVtbl->Release(depth); rtv->lpVtbl->Release(rtv);
     bb->lpVtbl->Release(bb); ctx->lpVtbl->Release(ctx); sc->lpVtbl->Release(sc); dev->lpVtbl->Release(dev);
     ExitProcess(0);
 }

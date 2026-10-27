@@ -28,6 +28,15 @@ struct Params {
 
 static DXGI_SWAP_CHAIN_DESC g_swap_desc;
 static float g_bg[4] = { 0.05f, 0.05f, 0.10f, 1.0f };
+static HANDLE g_out;
+
+/* Diagnostic breadcrumbs -> PcPs4 runtime log via the console path. */
+static void say(const char *s)
+{
+    DWORD w = 0, n = 0;
+    while (s[n]) n++;
+    if (g_out && g_out != INVALID_HANDLE_VALUE) WriteFile(g_out, s, n, &w, NULL);
+}
 
 static LRESULT CALLBACK wnd_proc(HWND h, UINT m, WPARAM w, LPARAM l)
 { (void)h;(void)m;(void)w;(void)l; return 0; }
@@ -64,10 +73,13 @@ void WINAPI WinMainCRTStartup(void)
     wc.cbClsExtra = 0; wc.cbWndExtra = 0; wc.hInstance = 0; wc.hIcon = 0;
     wc.hCursor = 0; wc.hbrBackground = 0; wc.lpszMenuName = 0;
     wc.lpszClassName = "PcPs4CbufMove"; wc.hIconSm = 0;
+    g_out = GetStdHandle(STD_OUTPUT_HANDLE);
+    say("move-demo: start\n");
     RegisterClassExA(&wc);
     hwnd = CreateWindowExA(0, "PcPs4CbufMove", "PcPs4 Move Demo",
                            WS_OVERLAPPEDWINDOW, 0, 0, 640, 360, 0, 0, 0, 0);
     if (!hwnd) ExitProcess(20);
+    say("move-demo: window + about to create device\n");
 
     g_swap_desc.BufferDesc.Width = 640;
     g_swap_desc.BufferDesc.Height = 360;
@@ -114,8 +126,13 @@ void WINAPI WinMainCRTStartup(void)
     context->lpVtbl->VSSetShader(context, vs, 0, 0);
     context->lpVtbl->PSSetShader(context, ps, 0, 0);
 
-    for (frame = 0; frame < 10800; ++frame) {
+#ifndef MOVE_FRAMES
+#define MOVE_FRAMES 10800u
+#endif
+    say("loop: entering render loop\n");
+    for (frame = 0; frame < MOVE_FRAMES; ++frame) {
         XINPUT_STATE st;
+        if (frame == 0) say("f0: pre-XInput\n");
         if (XInputGetState(0, &st) == ERROR_SUCCESS) {
             short lx = st.Gamepad.sThumbLX, ly = st.Gamepad.sThumbLY;
             if (lx > 6000 || lx < -6000) params.offset[0] += (lx / 32767.0f) * 0.025f;
@@ -136,13 +153,19 @@ void WINAPI WinMainCRTStartup(void)
             if (st.Gamepad.wButtons & XINPUT_GAMEPAD_START) break;
         }
 
+        if (frame == 0) say("f0: post-XInput, pre-UpdateSubresource\n");
         context->lpVtbl->UpdateSubresource(context, (ID3D11Resource *)cbuf, 0, 0, &params, 0, 0);
         context->lpVtbl->VSSetConstantBuffers(context, 0, 1, &cbuf);
+        if (frame == 0) say("f0: pre-Clear\n");
         context->lpVtbl->ClearRenderTargetView(context, rtv, g_bg);
+        if (frame == 0) say("f0: pre-Draw\n");
         context->lpVtbl->Draw(context, 3, 0);
+        if (frame == 0) say("f0: pre-Present\n");
         hr = swap_chain->lpVtbl->Present(swap_chain, 1, 0);
+        if (frame == 0) say("f0: post-Present (first frame OK)\n");
         if (FAILED(hr)) ExitProcess((UINT)hr);
     }
+    say("loop: completed\n");
 
     cbuf->lpVtbl->Release(cbuf);
     ps->lpVtbl->Release(ps);

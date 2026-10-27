@@ -5,3 +5,4 @@ x64/
 *.pkg
 eboot.bin
 __pycache__/
+tools/shadercompile/hlsl2dxbc.exe

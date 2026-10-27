@@ -15,14 +15,16 @@
  * encoded in the ExitProcess code, which PcPs4 logs as
  * "binary called ExitProcess(...)":
  *
- *   0x5A00  success: valid stdout handle + WriteFile returned without faulting
- *   0x00E1  GetStdHandle returned INVALID_HANDLE_VALUE
- *   0x00E2  GetStdHandle returned NULL
- *   (low byte on success = bytes WriteFile reported written, for information)
+ *   0      success: valid stdout handle + WriteFile returned without faulting
+ *   0x00E1 GetStdHandle returned INVALID_HANDLE_VALUE
+ *   0x00E2 GetStdHandle returned NULL
+ * Exit 0 means the PcPs4 harness shows a green PASS; the "[console]" log line
+ * carries the detail (including the byte count WriteFile reported).
  */
 void WINAPI WinMainCRTStartup(void)
 {
     static const char msg[] = "PcPs4 Wine stage-2: console PE alive\n";
+    static const char done[] = "PcPs4 Wine stage-2: WriteFile returned, exiting 0\n";
     DWORD written = 0;
     HANDLE out;
     BOOL ok;
@@ -35,6 +37,7 @@ void WINAPI WinMainCRTStartup(void)
 
     ok = WriteFile(out, msg, (DWORD)(sizeof(msg) - 1), &written, NULL);
     (void)ok; /* a no-op console is fine; we only require it not to fault */
+    WriteFile(out, done, (DWORD)(sizeof(done) - 1), &written, NULL);
 
-    ExitProcess(0x5A00u | (written & 0xFFu));
+    ExitProcess(0);
 }

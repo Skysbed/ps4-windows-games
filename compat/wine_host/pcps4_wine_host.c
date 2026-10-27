@@ -57,29 +57,40 @@ int pcps4_wine_host_selftest(void)
     pcps4_status_log("[wine-host] stage-1 self-test begin");
 
     /* (1) GS-base round-trip: this is the TEB mechanism Wine relies on.
-     * Save the current GS base, set a probe value, read it back, restore. */
-    void *saved_gs = NULL;
-    if (amd64_get_gsbase(&saved_gs) != 0) {
-        pcps4_status_log("[wine-host] FAIL amd64_get_gsbase errno=%d", errno);
-        failures++;
-    } else {
-        /* Probe with a 16-byte-aligned stack address we own. */
-        void *probe = (void *)&saved_gs;
-        if (amd64_set_gsbase(probe) != 0) {
-            pcps4_status_log("[wine-host] FAIL amd64_set_gsbase errno=%d", errno);
+     * Save the current GS base, set a probe value, read it back, restore.
+     * CRITICAL: do NOT make any library call (logging, libc, pthread) while
+     * GSBASE is set to the probe. FreeBSD/OrbisOS userland TLS lives in FS,
+     * so GS is normally free, but we still keep the risky window to just the
+     * sysarch calls and restore BEFORE evaluating/logging the result. */
+    {
+        void *saved_gs = NULL, *probe = NULL, *readback = NULL;
+        int get_rc, set_rc = -1, restore_rc = -1;
+
+        get_rc = amd64_get_gsbase(&saved_gs);
+        probe = (void *)&saved_gs;              /* a stack address we own */
+        if (get_rc == 0) {
+            set_rc = amd64_set_gsbase(probe);   /* <-- probe active from here */
+            if (set_rc == 0)
+                amd64_get_gsbase(&readback);
+            restore_rc = amd64_set_gsbase(saved_gs); /* <-- probe cleared here */
+        }
+        /* Everything below runs with the real GSBASE restored. */
+        if (get_rc != 0) {
+            pcps4_status_log("[wine-host] FAIL amd64_get_gsbase errno=%d", errno);
+            failures++;
+        } else if (set_rc != 0) {
+            pcps4_status_log("[wine-host] FAIL amd64_set_gsbase");
+            failures++;
+        } else if (readback != probe) {
+            pcps4_status_log("[wine-host] FAIL gsbase roundtrip set=%p got=%p",
+                             probe, readback);
+            failures++;
+        } else if (restore_rc != 0) {
+            pcps4_status_log("[wine-host] FAIL gsbase restore (saved=%p)", saved_gs);
             failures++;
         } else {
-            void *readback = NULL;
-            amd64_get_gsbase(&readback);
-            if (readback != probe) {
-                pcps4_status_log("[wine-host] FAIL gsbase roundtrip set=%p got=%p",
-                                 probe, readback);
-                failures++;
-            } else {
-                pcps4_status_log("[wine-host] OK gsbase set/get roundtrip");
-            }
-            /* Restore the original GS base — never leave it on our probe. */
-            amd64_set_gsbase(saved_gs);
+            pcps4_status_log("[wine-host] OK gsbase set/get roundtrip (saved=%p)",
+                             saved_gs);
         }
     }
 

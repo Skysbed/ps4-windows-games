@@ -42,10 +42,17 @@ int main(void)
 
     /* Optional: prove the Wine host shim's FreeBSD primitives on-device.
      * Single-threaded here, and the self-test restores GSBASE, so it is safe;
-     * gated so it never runs on an ordinary boot. */
+     * gated so it never runs on an ordinary boot. Runs when built with
+     * -DPCPS4_WINE_SELFTEST_FORCE=1 (controller launches have no env), or when
+     * PCPS4_WINE_SELFTEST=1 is set in the environment. */
     {
+#if defined(PCPS4_WINE_SELFTEST_FORCE) && PCPS4_WINE_SELFTEST_FORCE
+        int run_selftest = 1;
+#else
         const char *e = getenv("PCPS4_WINE_SELFTEST");
-        if (e && e[0] == '1') {
+        int run_selftest = (e && e[0] == '1');
+#endif
+        if (run_selftest) {
             pcps4_status_step("Wine host shim self-test");
             pcps4_status_report("Wine host shim self-test",
                                 pcps4_wine_host_selftest() == 0);

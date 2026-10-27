@@ -948,6 +948,148 @@ static PCPS4_MS_ABI BOOL win_WriteConsoleA(HANDLE h, const void *buf, DWORD n,
     return (h != INVALID_HANDLE_VALUE) ? TRUE : FALSE;
 }
 
+/* ------------------------------------------------------------------ *
+ *  Stage 4: startup / CRT-init Win32 surface (Wine-referenced).
+ *  These are hit during process/CRT init by essentially every real game;
+ *  a no-op stub corrupts init, so they get real behaviour on libc/OrbisOS.
+ * ------------------------------------------------------------------ */
+
+/* GetNativeSystemInfo == GetSystemInfo on a non-WOW64 x64 host. */
+static PCPS4_MS_ABI void win_GetNativeSystemInfo(void *p) { pcps4_abi_GetSystemInfo(p); }
+
+/* GetVersion: LOBYTE=major, HIBYTE(LOWORD)=minor, HIWORD=build. Report
+ * Windows 10 (10.0.19041); top bit of build clear => NT platform. */
+static PCPS4_MS_ABI DWORD win_GetVersion(void)
+{
+    return 10u | (0u << 8) | (19041u << 16);
+}
+
+/* OSVERSIONINFO{A,W}: {size, major, minor, build, platformId, csd[...]}. */
+static PCPS4_MS_ABI BOOL win_GetVersionExA(void *info)
+{
+    DWORD *v = (DWORD *)info;
+    if (!v) return FALSE;
+    v[1] = 10;      /* dwMajorVersion */
+    v[2] = 0;       /* dwMinorVersion */
+    v[3] = 19041;   /* dwBuildNumber  */
+    v[4] = 2;       /* VER_PLATFORM_WIN32_NT */
+    return TRUE;    /* leave caller's dwOSVersionInfoSize and csd[] as-is */
+}
+
+/* STARTUPINFO{A,W}: zero it and set cb; dwFlags=0 => game ignores std handles. */
+static PCPS4_MS_ABI void win_GetStartupInfoA(void *p)
+{
+    if (!p) return;
+    memset(p, 0, 104);          /* sizeof(STARTUPINFOA) on x64 */
+    *(DWORD *)p = 104;          /* cb */
+}
+
+static PCPS4_MS_ABI UINT win_GetACP(void) { return 1252; } /* Windows-1252 */
+
+/* GetCommandLineW / environment block (empty): wide, static storage. */
+static PCPS4_MS_ABI LPWSTR win_GetCommandLineW(void)
+{
+    static const WCHAR cmd[] = { 'g','a','m','e','.','e','x','e', 0 };
+    return (LPWSTR)cmd;
+}
+static PCPS4_MS_ABI void *win_GetEnvironmentStringsW(void)
+{
+    static const WCHAR env[] = { 0, 0 }; /* empty, double-null terminated */
+    return (void *)env;
+}
+static PCPS4_MS_ABI BOOL win_FreeEnvironmentStringsW(void *p) { (void)p; return TRUE; }
+
+/* SYSTEMTIME{year,month,dow,day,hour,min,sec,ms} from the host clock. */
+static void fill_systemtime(void *p, int local)
+{
+    struct timespec ts; struct tm tmv; WORD *s = (WORD *)p;
+    if (!p) return;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    if (local) localtime_r(&ts.tv_sec, &tmv); else gmtime_r(&ts.tv_sec, &tmv);
+    s[0] = (WORD)(tmv.tm_year + 1900);
+    s[1] = (WORD)(tmv.tm_mon + 1);
+    s[2] = (WORD)tmv.tm_wday;
+    s[3] = (WORD)tmv.tm_mday;
+    s[4] = (WORD)tmv.tm_hour;
+    s[5] = (WORD)tmv.tm_min;
+    s[6] = (WORD)tmv.tm_sec;
+    s[7] = (WORD)(ts.tv_nsec / 1000000);
+}
+static PCPS4_MS_ABI void win_GetSystemTime(void *p) { fill_systemtime(p, 0); }
+static PCPS4_MS_ABI void win_GetLocalTime(void *p)  { fill_systemtime(p, 1); }
+
+static PCPS4_MS_ABI void win_OutputDebugStringW(const WCHAR *s)
+{
+    char buf[256]; size_t i = 0;
+    if (!s) return;
+    for (; i < sizeof(buf) - 1 && s[i]; ++i) buf[i] = (char)(s[i] & 0x7f);
+    buf[i] = 0;
+    pcps4_status_log("[OutputDebugStringW] %s", buf);
+}
+
+/* GetModuleHandleExW: resolve like GetModuleHandleW and hand back the base. */
+static PCPS4_MS_ABI BOOL win_GetModuleHandleExW(DWORD flags, LPCWSTR name, HMODULE *out)
+{
+    (void)flags;
+    if (!out) return FALSE;
+    *out = win_GetModuleHandleW(name);
+    return *out != NULL;
+}
+
+/* We don't track per-thread exit codes yet; report "exited, code 0". */
+static PCPS4_MS_ABI BOOL win_GetExitCodeThread(HANDLE h, DWORD *code)
+{
+    (void)h;
+    if (code) *code = 0;
+    return TRUE;
+}
+
+/* Affinity is fixed; accept and report a non-zero previous mask. */
+static PCPS4_MS_ABI uintptr_t win_SetThreadAffinityMask(HANDLE h, uintptr_t mask)
+{
+    (void)h; (void)mask;
+    return 0xff;
+}
+
+/* Record and return the previous top-level exception filter (no dispatch yet). */
+static void *g_unhandled_filter;
+static PCPS4_MS_ABI void *win_SetUnhandledExceptionFilter(void *filter)
+{
+    void *prev = g_unhandled_filter;
+    g_unhandled_filter = filter;
+    return prev;
+}
+
+/* InitOnceExecuteOnce: run the callback exactly once. INIT_ONCE is one
+ * pointer-sized slot; we use it as the done-flag. MS-ABI callback. */
+typedef BOOL (PCPS4_MS_ABI *pcps4_init_once_cb)(void *once, void *param, void **ctx);
+static PCPS4_MS_ABI BOOL win_InitOnceExecuteOnce(void *once, void *cb, void *param, void **context)
+{
+    void **slot = (void **)once;
+    if (!slot) return FALSE;
+    if (*slot == NULL && cb) {
+        void *ctx = NULL;
+        ((pcps4_init_once_cb)cb)(once, param, &ctx);
+        if (context) *context = ctx;
+        *slot = (void *)1; /* mark done */
+    } else if (context) {
+        *context = NULL;
+    }
+    return TRUE;
+}
+
+/* Local/Global heap: modern code uses the LPTR/GPTR (fixed) path => plain
+ * pointers. *_ZEROINIT (0x40) implies zeroed memory. */
+static PCPS4_MS_ABI void *win_LocalAlloc(UINT flags, SIZE_T size)
+{
+    return (flags & 0x40) ? calloc(1, size ? size : 1) : malloc(size ? size : 1);
+}
+static PCPS4_MS_ABI void *win_GlobalAlloc(UINT flags, SIZE_T size)
+{
+    return (flags & 0x40) ? calloc(1, size ? size : 1) : malloc(size ? size : 1);
+}
+static PCPS4_MS_ABI void *win_GlobalFree(void *p) { free(p); return NULL; }
+
 static void register_kernel32(
     pcps4_pe_resolver *resolver,
     const char *dll)
@@ -971,6 +1113,29 @@ static void register_kernel32(
     KREG("GetStdHandle", win_GetStdHandle);
     KREG("SetStdHandle", win_SetStdHandle);
     KREG("WriteConsoleA", win_WriteConsoleA);
+    /* Stage 4: startup / CRT-init surface */
+    KREG("GetNativeSystemInfo", win_GetNativeSystemInfo);
+    KREG("GetVersion", win_GetVersion);
+    KREG("GetVersionExA", win_GetVersionExA);
+    KREG("GetVersionExW", win_GetVersionExA);
+    KREG("GetStartupInfoA", win_GetStartupInfoA);
+    KREG("GetStartupInfoW", win_GetStartupInfoA);
+    KREG("GetACP", win_GetACP);
+    KREG("GetCommandLineW", win_GetCommandLineW);
+    KREG("GetEnvironmentStringsW", win_GetEnvironmentStringsW);
+    KREG("FreeEnvironmentStringsW", win_FreeEnvironmentStringsW);
+    KREG("FreeEnvironmentStringsA", win_FreeEnvironmentStringsW);
+    KREG("GetSystemTime", win_GetSystemTime);
+    KREG("GetLocalTime", win_GetLocalTime);
+    KREG("OutputDebugStringW", win_OutputDebugStringW);
+    KREG("GetModuleHandleExW", win_GetModuleHandleExW);
+    KREG("GetExitCodeThread", win_GetExitCodeThread);
+    KREG("SetThreadAffinityMask", win_SetThreadAffinityMask);
+    KREG("SetUnhandledExceptionFilter", win_SetUnhandledExceptionFilter);
+    KREG("InitOnceExecuteOnce", win_InitOnceExecuteOnce);
+    KREG("LocalAlloc", win_LocalAlloc);
+    KREG("GlobalAlloc", win_GlobalAlloc);
+    KREG("GlobalFree", win_GlobalFree);
     KREG("GetFileSize", pcps4_abi_GetFileSize);
     KREG("GetFileSizeEx", win_GetFileSizeEx);
     KREG("SetFilePointer", pcps4_abi_SetFilePointer);

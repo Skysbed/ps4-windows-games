@@ -112,10 +112,37 @@ non-destructive self-test runs, and only when `PCPS4_WINE_SELFTEST=1`
 (see pc_source/main.c). Build the console PE as the bundled game with:
 `GAME_SRC=tests/win_console_hello.c GAME_LIBS=-lkernel32 GAME_DLLS=`.
 
-Next (stage 3): run the console PE on-device, confirm the ExitProcess
-code and "[console]" log line; then flip on the full GSBASE install for a
-deliberate test and, once proven, start pulling Wine's PE-side ntdll/
-kernelbase in behind PcPs4's resolver.
+## Stage 3 — VERIFIED ON HARDWARE (v83)
+The console PE ran on the PS4 (v82): loader resolved GetStdHandle/WriteFile/
+ExitProcess and the "[console] ... alive" line was logged. Then the forced
+self-test (v83, -DPCPS4_WINE_SELFTEST_FORCE=1) proved the FreeBSD host
+primitives on real hardware — all four green, zero failures:
+    [wine-host] OK gsbase set/get roundtrip (saved=0)
+    [wine-host] OK thr_self tid=102155
+    [wine-host] OK kqueue+kevent
+    [wine-host] OK _umtx_op reachable
+`saved=0` is the key result: OrbisOS leaves the userland GS base at zero, so
+pointing GSBASE at the Windows TEB clobbers nothing it relies on — the Wine
+FreeBSD TEB mechanism is sound on PS4, de-risking the whole port.
+
+## Stage 4 — IN PROGRESS (Win32 completeness, v84)
+Replacing no-op import stubs with real behaviour, Wine contracts on libc/
+OrbisOS primitives. Audited the registered surface (~184 handlers): critical
+sections, condition variables, VirtualAlloc/Protect/Query, Multi/WideChar
+conversion, waits/semaphores already real. Filled the startup/CRT-init gaps
+a real game hits first: GetVersion/GetVersionEx, GetStartupInfo, GetACP,
+GetCommandLineW, GetEnvironmentStringsW/Free, GetSystemTime/GetLocalTime,
+GetNativeSystemInfo, GetModuleHandleExW, OutputDebugStringW, GetExitCodeThread,
+SetThreadAffinityMask, SetUnhandledExceptionFilter, InitOnceExecuteOnce,
+LocalAlloc/GlobalAlloc/GlobalFree. The v84 test PE calls a cross-section
+(GetVersion, GetSystemInfo, GetSystemTime, LocalAlloc, GetACP,
+GetModuleHandleExW) and logs pass/fail per check.
+
+Still to backfill as real games reveal them: file mapping (CreateFileMapping/
+MapViewOfFile/UnmapViewOfFile), and the per-game user32/input/audio surface.
+
+Next: run the v84 surface test on-device; then rebuild the DXVK path on the
+fuller Win32 surface and work a real title's import list with scan_game_imports.py.
 
 ## Scope honesty
 This is a large, multi-stage port — not a one-shot package. But it is now

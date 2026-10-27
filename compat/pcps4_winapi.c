@@ -1032,7 +1032,10 @@ static PCPS4_MS_ABI BOOL win_GetModuleHandleExW(DWORD flags, LPCWSTR name, HMODU
 {
     (void)flags;
     if (!out) return FALSE;
-    *out = win_GetModuleHandleW(name);
+    /* name==NULL means "the module that created the calling process" (the exe).
+     * We have no loader getter for the main base, so hand back a stable, non-null
+     * token games use purely as an opaque HINSTANCE (conventional PE base). */
+    *out = name ? win_GetModuleHandleW(name) : (HMODULE)(uintptr_t)0x400000;
     return *out != NULL;
 }
 
@@ -1134,6 +1137,7 @@ static void register_kernel32(
     KREG("SetUnhandledExceptionFilter", win_SetUnhandledExceptionFilter);
     KREG("InitOnceExecuteOnce", win_InitOnceExecuteOnce);
     KREG("LocalAlloc", win_LocalAlloc);
+    KREG("LocalFree", win_GlobalFree);   /* real free (matches win_LocalAlloc) */
     KREG("GlobalAlloc", win_GlobalAlloc);
     KREG("GlobalFree", win_GlobalFree);
     KREG("GetFileSize", pcps4_abi_GetFileSize);

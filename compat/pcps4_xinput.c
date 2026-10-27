@@ -1,9 +1,12 @@
 #include "pcps4_xinput.h"
+#include "pcps4_status.h"
 
 #include <string.h>
 
 #include <orbis/Pad.h>
 #include <orbis/UserService.h>
+
+static int g_xinput_diag_done = 0;
 
 static int32_t g_pad_handles[XUSER_MAX_COUNT] = { -1, -1, -1, -1 };
 static int g_initialized = 0;
@@ -84,10 +87,19 @@ static int pcps4_xinput_read(
 
     memset(pad_data, 0, sizeof(*pad_data));
 
-    int32_t rc = scePadRead(
-        g_pad_handles[index],
-        pad_data,
-        1);
+    /* scePadReadState returns 0 on success and fills the CURRENT pad state
+     * (XInput semantics). The old scePadRead returns a sample COUNT (>=1),
+     * so the previous `rc != 0` check rejected every good read as
+     * "disconnected" — the real cause of ERROR_DEVICE_NOT_CONNECTED. */
+    int32_t rc = scePadReadState(g_pad_handles[index], pad_data);
+
+    if (!g_xinput_diag_done) {
+        g_xinput_diag_done = 1;
+        pcps4_status_log("[xinput] diag: user=0x%x handle=%d readstate_rc=%d connected=%d buttons=0x%x lx=%d ly=%d",
+                         (unsigned)g_user_id, g_pad_handles[index], (int)rc,
+                         (int)pad_data->connected, (unsigned)pad_data->buttons,
+                         (int)pad_data->leftStick.x, (int)pad_data->leftStick.y);
+    }
 
     if (rc != 0 || pad_data->connected == 0) {
         pcps4_xinput_close(index);

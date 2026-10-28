@@ -108,23 +108,19 @@ void WINAPI WinMainCRTStartup(void)
     ctx->lpVtbl->VSSetShader(ctx,vs,0,0);
     ctx->lpVtbl->PSSetShader(ctx,ps,0,0);
 
-    /* static perspective * view (row-major). proj: fov ~60deg, aspect 16:9, n0.1 f100. */
-    float f=1.73205f, a=640.f/360.f, n=0.1f, fa=100.f;
-    float proj[16]={ f/a,0,0,0,  0,f,0,0,  0,0,fa/(fa-n),1,  0,0,(-fa*n)/(fa-n),0 };
-    float view[16]={ 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,6,1 }; /* translate +z 6 (move cube away) */
-    float pv[16]; mmul(view,proj,pv); /* row-vector convention: v * view * proj */
+    /* Column-vector convention (clip = M*p), row-major storage; the VS reads M's
+     * rows (r0..r3) and does clip_i = dot(r_i, p). D3D LH perspective. */
+    float fv=1.73205f, a=640.f/360.f, n=0.1f, fa=100.f;
+    float P[16]={ fv/a,0,0,0,  0,fv,0,0,  0,0,fa/(fa-n),(-n*fa)/(fa-n),  0,0,1,0 };
+    float V[16]={ 1,0,0,0,  0,1,0,0,  0,0,1,4,  0,0,0,1 }; /* translate +z 4 */
 
     for(frame=0; frame<36000u; ++frame){
         float ang=frame*0.02f, cx=mcos(0.5f), sx=msin(0.5f), cy=mcos(ang), sy=msin(ang);
-        float rx[16]={1,0,0,0, 0,cx,sx,0, 0,-sx,cx,0, 0,0,0,1};
-        float ry[16]={cy,0,-sy,0, 0,1,0,0, sy,0,cy,0, 0,0,0,1};
-        float model[16], mvp[16];
-        /* Orthographic: rotation + 0.5 scale, w stays 1. No perspective divide,
-         * so this isolates the MVP-matrix shader path from projection math. */
-        float scl[16]={0.5f,0,0,0, 0,0.5f,0,0, 0,0,0.5f,0, 0,0,0,1};
-        mmul(ry,rx,model); mmul(model,scl,mvp);
-        (void)pv;
-        /* HLSL mul(mvp,v) is column-major; our mvp is row-major for row-vector
+        float rx[16]={1,0,0,0, 0,cx,-sx,0, 0,sx,cx,0, 0,0,0,1};   /* column-vector rotX */
+        float ry[16]={cy,0,sy,0, 0,1,0,0, -sy,0,cy,0, 0,0,0,1};    /* column-vector rotY */
+        float model[16], vm[16], mvp[16];
+        mmul(ry,rx,model); mmul(V,model,vm); mmul(P,vm,mvp);  /* M = P*V*model */
+        /* Shader reads M's rows and dots with p; upload M row-major as-is.
          * math, which is already the transpose column-major needs. Upload as-is. */
         for(int k=0;k<16;k++) mvpT[k]=mvp[k];
         ctx->lpVtbl->UpdateSubresource(ctx,(ID3D11Resource*)cb,0,0,mvpT,0,0);

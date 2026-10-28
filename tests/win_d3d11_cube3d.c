@@ -118,9 +118,12 @@ void WINAPI WinMainCRTStartup(void)
         float ang=frame*0.02f, cx=mcos(0.5f), sx=msin(0.5f), cy=mcos(ang), sy=msin(ang);
         float rx[16]={1,0,0,0, 0,cx,sx,0, 0,-sx,cx,0, 0,0,0,1};
         float ry[16]={cy,0,-sy,0, 0,1,0,0, sy,0,cy,0, 0,0,0,1};
-        float model[16], mv[16], mvp[16];
-        mmul(ry,rx,model); mmul(model,pv,mvp);   /* v * (ry*rx) * view * proj */
-        (void)mv;
+        float model[16], mvp[16];
+        /* Orthographic: rotation + 0.5 scale, w stays 1. No perspective divide,
+         * so this isolates the MVP-matrix shader path from projection math. */
+        float scl[16]={0.5f,0,0,0, 0,0.5f,0,0, 0,0,0.5f,0, 0,0,0,1};
+        mmul(ry,rx,model); mmul(model,scl,mvp);
+        (void)pv;
         /* HLSL mul(mvp,v) is column-major; our mvp is row-major for row-vector
          * math, which is already the transpose column-major needs. Upload as-is. */
         for(int k=0;k<16;k++) mvpT[k]=mvp[k];

@@ -1,0 +1,2 @@
+prospero wine/ps5 support objs linked into ntdll: pw_wine_cwd,cwd_libc,sink,heap,heap_libc,dmem,dmem_ps5
+eboot links: boot.c pw_wine_start.c pw_wine_prx.c pw_wine_dl.c

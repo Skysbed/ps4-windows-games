@@ -1,0 +1,4 @@
+/home/laptop/pcps4-work/prospero-win/wine/ps5/pw_wine_dl_libc.c:39:82: error: use of undeclared identifier 'RTLD_SELF'
+   39 |     return handle==&self || handle==RTLD_DEFAULT || handle==RTLD_NEXT || handle==RTLD_SELF?
+      |                                                                                  ^
+1 error generated.

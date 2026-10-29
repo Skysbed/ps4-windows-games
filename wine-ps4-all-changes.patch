@@ -11540,10 +11540,10 @@ index 96c643c..4904aac 100644
      bool                   dbg_hidden;    /* hidden from debugger */
      bool                   bypass_proc_suspend; /* will still run if the process is suspended */
 diff --git a/server/unicode.c b/server/unicode.c
-index bb39b55..b2960ec 100644
+index bb39b55..9a87d70 100644
 --- a/server/unicode.c
 +++ b/server/unicode.c
-@@ -338,7 +338,11 @@ struct fd *load_intl_file(void)
+@@ -338,11 +338,16 @@ struct fd *load_intl_file(void)
      int unix_fd;
      mode_t mode = 0600;
  
@@ -11555,3 +11555,8 @@ index bb39b55..b2960ec 100644
      for (i = 0; i < ARRAY_SIZE( nls_dirs ); i++)
      {
          if (!nls_dirs[i]) continue;
+         if (asprintf( &path, "%s/l_intl.nls", nls_dirs[i] ) == -1) continue;
++        { int e0=errno; int tf=open(path,O_RDONLY); fprintf(stderr,"pcps4: nls try [%s] rawopen=%d errno=%d\n", path, tf, tf<0?errno:0); if(tf>=0)close(tf); errno=e0; }
+         if ((fd = open_fd( NULL, path, nt_name, O_RDONLY, &mode, FILE_READ_DATA,
+                            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                            FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT ))) break;

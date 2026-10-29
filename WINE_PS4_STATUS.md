@@ -193,3 +193,20 @@ wineserver_desc.o exposing pw_wineserver_connect/pw_wine_thread_{register,unregi
 pw_wineserver_call_direct/try_fast_mutex/mutex_backend/sync_backend/pw_cwd_share_changes), crtlib,
 link_ps4mod.x, create-fself --lib, TLS-strip, add to pkg.gp4. Then it dlopens /app0/sce_module/wineserver.so
 (pw_wine_dl maps .so->.prx). Module recipe + all patches now saved: build-ps4-module/ + wine patch.
+
+## 2026-10-29 (wk-limit checkpoint): wineserver loads+runs; blocked on server NLS open
+Chain working on-device: eboot -> ntdll (aligned, descriptor, dl-shims, locale __tls_get_addr shim,
+loader.c PS4 default paths) -> prefix /data/wine created -> wineserver.prx dlopen'd via pw_wine_dl ->
+pw_wineserver_connect -> create_server_dir (prefix defaulted /data/wine, dev/ino chdir check #ifndef'd
+out on PS4) -> load_intl_file. CURRENT BLOCKER: wineserver load_intl_file() "failed to load l_intl.nls"
+then SIGSYS (fatal_error). NLS files ARE packaged (76 at sce_module/nls/, verified via pkg_extract) and
+inprocess_nls_dir=/app0/sce_module/nls is correct, but open_fd of /app0/sce_module/nls/l_intl.nls fails.
+pw_wine_cwd returns absolute paths as-is, so it is the underlying open of a read-only /app0 PFS file from
+the server that fails. A diagnostic (raw open(path) + errno log) is linked into the current wineserver.prx
+-> NEXT SESSION: relaunch, read klog "pcps4: nls try [path] rawopen=.. errno=..". If raw open works but
+open_fd fails, the issue is server/fd.c open_fd (flags/fstatfs on PFS); if raw open also fails, it is the
+sceKernel open of /app0 files from the server (path form / O_RDONLY on read-only PFS). Likely fixes: copy
+NLS to /data/wine at boot, or adjust open flags. Build recipe for every module + all patches are in
+wine-ps4-all-changes.patch + build-ps4-module/. Modules rebuilt via: make dlls/ntdll/ntdll.so (or
+server/wineserver) with LDFLAGS using link_ps4mod.x + crtlib + shim objs + *_desc_loc.o; create-fself
+--lib; patch_tls_dyn.py; pkg via PkgTool.Core pkg_build pkg.gp4; FTP to /data/pkg/pcps4-wine.pkg.

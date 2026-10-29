@@ -1,0 +1,7 @@
+/home/laptop/pcps4-work/prospero-win/wine/ps5/pw_wine_compat_libc.c:49:5: error: conflicting types for 'ptrace'
+   49 | int ptrace(int request,pid_t pid,caddr_t address,int data)
+      |     ^
+/home/laptop/openorbis-toolchain/include/sys/ptrace.h:109:5: note: previous declaration is here
+  109 | int ptrace(int _request, pid_t _pid, void* _addr, int _data);
+      |     ^
+1 error generated.

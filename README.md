@@ -42,7 +42,7 @@ GPU through RADV with a GNM submission backend instead of Linux's amdgpu.
   a machine-specific IP:
 
   ```bash
-  export PCPS4_CONSOLE_IP=192.168.1.n   # your PS4's LAN address
+  export PCPS4_CONSOLE_IP=.   # your PS4's LAN address
   python3 build-ps4-module/klog_capture.py klog.txt 60
   ```
 

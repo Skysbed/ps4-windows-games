@@ -10474,7 +10474,7 @@ index e71d023..364b72e 100644
      fprintf( f, ";; All keys relative to " );
      dump_path( key, NULL, f );
 diff --git a/server/request.c b/server/request.c
-index 5135ed5..81fe8f4 100644
+index 5135ed5..d6332f8 100644
 --- a/server/request.c
 +++ b/server/request.c
 @@ -60,6 +60,11 @@
@@ -10517,7 +10517,7 @@ index 5135ed5..81fe8f4 100644
      if (req < REQ_NB_REQUESTS)
          req_handlers[req]( &current->req, &reply );
      else
-@@ -301,8 +314,308 @@ static void call_req_handler( struct thread *thread )
+@@ -301,7 +314,307 @@ static void call_req_handler( struct thread *thread )
          }
      }
      current = NULL;
@@ -10675,8 +10675,8 @@ index 5135ed5..81fe8f4 100644
 +    ps5_mutex_server_reconcile();
 +    pthread_mutex_unlock(&inprocess_server_mutex);
 +    return ret;
- }
- 
++}
++
 +DECLSPEC_EXPORT const struct pw_sync_backend *pw_wineserver_sync_backend(uint32_t version)
 +{
 +    static const struct pw_sync_backend api =
@@ -10820,12 +10820,11 @@ index 5135ed5..81fe8f4 100644
 +    ps5_mutex_server_reconcile();
 +    pthread_mutex_unlock( &inprocess_server_mutex );
 +    return ret;
-+}
+ }
 +#endif
-+
+ 
  /* read a request from a thread */
  void read_request( struct thread *thread )
- {
 @@ -518,6 +831,81 @@ static void master_socket_destroy( struct object *obj )
      release_object( sock->fd );
  }
@@ -10922,7 +10921,7 @@ index 5135ed5..81fe8f4 100644
          if (client == -1) return;
          fcntl( client, F_SETFL, O_NONBLOCK );
          if ((process = create_process( client, NULL, 0, NULL, NULL, NULL, 0, NULL )))
-@@ -569,8 +961,10 @@ static void create_dir( const char *name, struct stat *st )
+@@ -569,14 +961,17 @@ static void create_dir( const char *name, struct stat *st )
              fatal_error( "lstat %s: %s\n", name, strerror( errno ));
      }
      if (!S_ISDIR(st->st_mode)) fatal_error( "%s is not a directory\n", name );
@@ -10933,7 +10932,14 @@ index 5135ed5..81fe8f4 100644
  }
  
  /* create the server directory and chdir to it */
-@@ -620,7 +1014,7 @@ static char *create_server_dir( int force )
+ static char *create_server_dir( int force )
+ {
+     const char *prefix = getenv( "WINEPREFIX" );
++    if (!prefix) prefix = "/data/wine"; /* PS4: env not shared across modules */
+     char *p, *config_dir, *base_dir;
+     struct stat st, st2;
+ 
+@@ -620,7 +1015,7 @@ static char *create_server_dir( int force )
  
      /* create the base directory if needed */
  
@@ -10942,7 +10948,18 @@ index 5135ed5..81fe8f4 100644
      if (asprintf( &base_dir, "%s/.wineserver", config_dir ) == -1)
          fatal_error( "out of memory\n" );
  #else
-@@ -828,6 +1222,42 @@ void open_master_socket(void)
+@@ -643,8 +1038,10 @@ static char *create_server_dir( int force )
+         fatal_error( "open %s: %s\n", server_dir, strerror( errno ));
+     if (fstat( server_dir_fd, &st2 ) == -1)
+         fatal_error( "stat %s: %s\n", server_dir, strerror( errno ));
++#ifndef __PROSPERO__  /* PS4 sceKernel FS: path-stat vs fd-fstat dev/ino differ; chdir success is enough */
+     if (st.st_dev != st2.st_dev || st.st_ino != st2.st_ino)
+         fatal_error( "chdir did not end up in %s\n", server_dir );
++#endif
+ 
+     free( base_dir );
+     free( config_dir );
+@@ -828,6 +1225,42 @@ void open_master_socket(void)
      assert( sizeof(union generic_request) == sizeof(struct request_max_size) );
      assert( sizeof(union generic_reply) == sizeof(struct request_max_size) );
  
@@ -10985,7 +11002,7 @@ index 5135ed5..81fe8f4 100644
      /* make sure the stdio fds are open */
      fd = open( "/dev/null", O_RDWR );
      while (fd >= 0 && fd <= 2) fd = dup( fd );
-@@ -887,6 +1317,9 @@ static void close_socket_timeout( void *arg )
+@@ -887,6 +1320,9 @@ static void close_socket_timeout( void *arg )
  {
      master_timeout = NULL;
      flush_registry();
@@ -10995,7 +11012,7 @@ index 5135ed5..81fe8f4 100644
      if (debug_level) fprintf( stderr, "wineserver: exiting (pid=%ld)\n", (long) getpid() );
  
  #ifdef DEBUG_OBJECTS
-@@ -898,11 +1331,13 @@ static void close_socket_timeout( void *arg )
+@@ -898,11 +1334,13 @@ static void close_socket_timeout( void *arg )
  /* close the master socket and stop waiting for new clients */
  void close_master_socket( timeout_t timeout )
  {

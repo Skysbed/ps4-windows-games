@@ -1,0 +1,138 @@
+<?xml version="1.0"?>
+<psproject xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" fmt="gp4" version="1000">
+	<volume>
+		<volume_type>pkg_ps4_app</volume_type>
+		<volume_id>PS4VOLUME</volume_id>
+		<volume_ts>2026-10-29 06:32:18</volume_ts>
+		<package content_id="IV0000-PCPS40001_00-WINEPS4000000001" passcode="00000000000000000000000000000000"
+			storage_type="digital50" app_type="full" />
+		<chunk_info chunk_count="1" scenario_count="1">
+			<chunks>
+				<chunk id="0" layer_no="0" label="Chunk #0" />
+			</chunks>
+			<scenarios default_id="0">
+				<scenario id="0" type="sp" initial_chunk_count="1" label="Scenario #0">0</scenario>
+			</scenarios>
+		</chunk_info>
+	</volume>
+	<files img_no="0">
+		<file targ_path="eboot.bin" orig_path="eboot.bin" />
+		<file targ_path="sce_sys/param.sfo" orig_path="sce_sys/param.sfo" />
+		<file targ_path="sce_sys/icon0.png" orig_path="sce_sys/icon0.png" />
+		<file targ_path="sce_sys/about/right.sprx" orig_path="sce_sys/about/right.sprx" />
+		<file targ_path="test.exe" orig_path="test.exe" />
+		<file targ_path="sce_module/libc.prx" orig_path="sce_module/libc.prx" />
+		<file targ_path="sce_module/libSceFios2.prx" orig_path="sce_module/libSceFios2.prx" />
+		<file targ_path="sce_module/libvulkan.prx" orig_path="sce_module/libvulkan.prx" />
+		<file targ_path="sce_module/ntdll.prx" orig_path="sce_module/ntdll.prx" />
+		<file targ_path="sce_module/wineserver.prx" orig_path="sce_module/wineserver.prx" />
+		<file targ_path="sce_module/win32u.prx" orig_path="sce_module/win32u.prx" />
+		<file targ_path="sce_module/winevulkan.prx" orig_path="sce_module/winevulkan.prx" />
+		<file targ_path="advapi32.dll" orig_path="advapi32.dll" />
+		<file targ_path="combase.dll" orig_path="combase.dll" />
+		<file targ_path="gdi32.dll" orig_path="gdi32.dll" />
+		<file targ_path="imm32.dll" orig_path="imm32.dll" />
+		<file targ_path="kernel32.dll" orig_path="kernel32.dll" />
+		<file targ_path="kernelbase.dll" orig_path="kernelbase.dll" />
+		<file targ_path="msvcrt.dll" orig_path="msvcrt.dll" />
+		<file targ_path="ntdll.dll" orig_path="ntdll.dll" />
+		<file targ_path="ole32.dll" orig_path="ole32.dll" />
+		<file targ_path="rpcrt4.dll" orig_path="rpcrt4.dll" />
+		<file targ_path="sechost.dll" orig_path="sechost.dll" />
+		<file targ_path="setupapi.dll" orig_path="setupapi.dll" />
+		<file targ_path="ucrtbase.dll" orig_path="ucrtbase.dll" />
+		<file targ_path="user32.dll" orig_path="user32.dll" />
+		<file targ_path="version.dll" orig_path="version.dll" />
+		<file targ_path="win32u.dll" orig_path="win32u.dll" />		<file targ_path="sce_module/nls/c_037.nls" orig_path="sce_module/nls/c_037.nls" />
+		<file targ_path="sce_module/nls/c_10000.nls" orig_path="sce_module/nls/c_10000.nls" />
+		<file targ_path="sce_module/nls/c_10001.nls" orig_path="sce_module/nls/c_10001.nls" />
+		<file targ_path="sce_module/nls/c_10002.nls" orig_path="sce_module/nls/c_10002.nls" />
+		<file targ_path="sce_module/nls/c_10003.nls" orig_path="sce_module/nls/c_10003.nls" />
+		<file targ_path="sce_module/nls/c_10004.nls" orig_path="sce_module/nls/c_10004.nls" />
+		<file targ_path="sce_module/nls/c_10005.nls" orig_path="sce_module/nls/c_10005.nls" />
+		<file targ_path="sce_module/nls/c_10006.nls" orig_path="sce_module/nls/c_10006.nls" />
+		<file targ_path="sce_module/nls/c_10007.nls" orig_path="sce_module/nls/c_10007.nls" />
+		<file targ_path="sce_module/nls/c_10008.nls" orig_path="sce_module/nls/c_10008.nls" />
+		<file targ_path="sce_module/nls/c_10010.nls" orig_path="sce_module/nls/c_10010.nls" />
+		<file targ_path="sce_module/nls/c_10017.nls" orig_path="sce_module/nls/c_10017.nls" />
+		<file targ_path="sce_module/nls/c_10021.nls" orig_path="sce_module/nls/c_10021.nls" />
+		<file targ_path="sce_module/nls/c_10029.nls" orig_path="sce_module/nls/c_10029.nls" />
+		<file targ_path="sce_module/nls/c_10079.nls" orig_path="sce_module/nls/c_10079.nls" />
+		<file targ_path="sce_module/nls/c_10081.nls" orig_path="sce_module/nls/c_10081.nls" />
+		<file targ_path="sce_module/nls/c_10082.nls" orig_path="sce_module/nls/c_10082.nls" />
+		<file targ_path="sce_module/nls/c_1026.nls" orig_path="sce_module/nls/c_1026.nls" />
+		<file targ_path="sce_module/nls/c_1250.nls" orig_path="sce_module/nls/c_1250.nls" />
+		<file targ_path="sce_module/nls/c_1251.nls" orig_path="sce_module/nls/c_1251.nls" />
+		<file targ_path="sce_module/nls/c_1252.nls" orig_path="sce_module/nls/c_1252.nls" />
+		<file targ_path="sce_module/nls/c_1253.nls" orig_path="sce_module/nls/c_1253.nls" />
+		<file targ_path="sce_module/nls/c_1254.nls" orig_path="sce_module/nls/c_1254.nls" />
+		<file targ_path="sce_module/nls/c_1255.nls" orig_path="sce_module/nls/c_1255.nls" />
+		<file targ_path="sce_module/nls/c_1256.nls" orig_path="sce_module/nls/c_1256.nls" />
+		<file targ_path="sce_module/nls/c_1257.nls" orig_path="sce_module/nls/c_1257.nls" />
+		<file targ_path="sce_module/nls/c_1258.nls" orig_path="sce_module/nls/c_1258.nls" />
+		<file targ_path="sce_module/nls/c_1361.nls" orig_path="sce_module/nls/c_1361.nls" />
+		<file targ_path="sce_module/nls/c_20127.nls" orig_path="sce_module/nls/c_20127.nls" />
+		<file targ_path="sce_module/nls/c_20866.nls" orig_path="sce_module/nls/c_20866.nls" />
+		<file targ_path="sce_module/nls/c_20932.nls" orig_path="sce_module/nls/c_20932.nls" />
+		<file targ_path="sce_module/nls/c_20949.nls" orig_path="sce_module/nls/c_20949.nls" />
+		<file targ_path="sce_module/nls/c_21866.nls" orig_path="sce_module/nls/c_21866.nls" />
+		<file targ_path="sce_module/nls/c_28591.nls" orig_path="sce_module/nls/c_28591.nls" />
+		<file targ_path="sce_module/nls/c_28592.nls" orig_path="sce_module/nls/c_28592.nls" />
+		<file targ_path="sce_module/nls/c_28593.nls" orig_path="sce_module/nls/c_28593.nls" />
+		<file targ_path="sce_module/nls/c_28594.nls" orig_path="sce_module/nls/c_28594.nls" />
+		<file targ_path="sce_module/nls/c_28595.nls" orig_path="sce_module/nls/c_28595.nls" />
+		<file targ_path="sce_module/nls/c_28596.nls" orig_path="sce_module/nls/c_28596.nls" />
+		<file targ_path="sce_module/nls/c_28597.nls" orig_path="sce_module/nls/c_28597.nls" />
+		<file targ_path="sce_module/nls/c_28598.nls" orig_path="sce_module/nls/c_28598.nls" />
+		<file targ_path="sce_module/nls/c_28599.nls" orig_path="sce_module/nls/c_28599.nls" />
+		<file targ_path="sce_module/nls/c_28603.nls" orig_path="sce_module/nls/c_28603.nls" />
+		<file targ_path="sce_module/nls/c_28605.nls" orig_path="sce_module/nls/c_28605.nls" />
+		<file targ_path="sce_module/nls/c_437.nls" orig_path="sce_module/nls/c_437.nls" />
+		<file targ_path="sce_module/nls/c_500.nls" orig_path="sce_module/nls/c_500.nls" />
+		<file targ_path="sce_module/nls/c_708.nls" orig_path="sce_module/nls/c_708.nls" />
+		<file targ_path="sce_module/nls/c_720.nls" orig_path="sce_module/nls/c_720.nls" />
+		<file targ_path="sce_module/nls/c_737.nls" orig_path="sce_module/nls/c_737.nls" />
+		<file targ_path="sce_module/nls/c_775.nls" orig_path="sce_module/nls/c_775.nls" />
+		<file targ_path="sce_module/nls/c_850.nls" orig_path="sce_module/nls/c_850.nls" />
+		<file targ_path="sce_module/nls/c_852.nls" orig_path="sce_module/nls/c_852.nls" />
+		<file targ_path="sce_module/nls/c_855.nls" orig_path="sce_module/nls/c_855.nls" />
+		<file targ_path="sce_module/nls/c_857.nls" orig_path="sce_module/nls/c_857.nls" />
+		<file targ_path="sce_module/nls/c_860.nls" orig_path="sce_module/nls/c_860.nls" />
+		<file targ_path="sce_module/nls/c_861.nls" orig_path="sce_module/nls/c_861.nls" />
+		<file targ_path="sce_module/nls/c_862.nls" orig_path="sce_module/nls/c_862.nls" />
+		<file targ_path="sce_module/nls/c_863.nls" orig_path="sce_module/nls/c_863.nls" />
+		<file targ_path="sce_module/nls/c_864.nls" orig_path="sce_module/nls/c_864.nls" />
+		<file targ_path="sce_module/nls/c_865.nls" orig_path="sce_module/nls/c_865.nls" />
+		<file targ_path="sce_module/nls/c_866.nls" orig_path="sce_module/nls/c_866.nls" />
+		<file targ_path="sce_module/nls/c_869.nls" orig_path="sce_module/nls/c_869.nls" />
+		<file targ_path="sce_module/nls/c_874.nls" orig_path="sce_module/nls/c_874.nls" />
+		<file targ_path="sce_module/nls/c_875.nls" orig_path="sce_module/nls/c_875.nls" />
+		<file targ_path="sce_module/nls/c_932.nls" orig_path="sce_module/nls/c_932.nls" />
+		<file targ_path="sce_module/nls/c_936.nls" orig_path="sce_module/nls/c_936.nls" />
+		<file targ_path="sce_module/nls/c_949.nls" orig_path="sce_module/nls/c_949.nls" />
+		<file targ_path="sce_module/nls/c_950.nls" orig_path="sce_module/nls/c_950.nls" />
+		<file targ_path="sce_module/nls/l_intl.nls" orig_path="sce_module/nls/l_intl.nls" />
+		<file targ_path="sce_module/nls/locale.nls" orig_path="sce_module/nls/locale.nls" />
+		<file targ_path="sce_module/nls/normidna.nls" orig_path="sce_module/nls/normidna.nls" />
+		<file targ_path="sce_module/nls/normnfc.nls" orig_path="sce_module/nls/normnfc.nls" />
+		<file targ_path="sce_module/nls/normnfd.nls" orig_path="sce_module/nls/normnfd.nls" />
+		<file targ_path="sce_module/nls/normnfkc.nls" orig_path="sce_module/nls/normnfkc.nls" />
+		<file targ_path="sce_module/nls/normnfkd.nls" orig_path="sce_module/nls/normnfkd.nls" />
+		<file targ_path="sce_module/nls/sortdefault.nls" orig_path="sce_module/nls/sortdefault.nls" />
+	</files>
+	<rootdir>
+		<dir targ_name="sce_sys">
+			<dir targ_name="about" />
+		</dir>
+		<dir targ_name="sce_module">
+			<dir targ_name="nls" />
+		</dir>
+		<dir targ_name="assets">
+			<dir targ_name="audio" />
+			<dir targ_name="fonts" />
+			<dir targ_name="images" />
+			<dir targ_name="misc" />
+			<dir targ_name="videos" />
+		</dir>
+	</rootdir>
+</psproject>

@@ -48,9 +48,8 @@ GPU through RADV with a GNM submission backend instead of Linux's amdgpu.
 
 ## Status and roadmap
 
-**Want to run it on a console yourself?** See [INSTALL.md](INSTALL.md) —
-install, collect logs, report. Testers are exactly what this project needs
-right now.
+**Want to run it on a console?** See [INSTALL.md](INSTALL.md) for installing
+the current build and collecting diagnostic logs.
 
 1. ~~Wine Unix-side builds for PS4~~ ✅
 2. ~~Module pipeline (PRX, TLS, alignment, descriptors)~~ ✅

@@ -31,7 +31,7 @@ NEXT = ASSEMBLY not compile: wine64_main host entry + wire win32u dlopen(libvulk
   libvulkan.so; prospero builds libvulkan.prx from the RADV archive via tools/link_radv_prx.sh +
   wine/ps5/pw_vk_radv_profile_wrap.c. PS4 plan: build a libvulkan module exposing vkGetInstanceProcAddr
   (wrap vk_icdGetInstanceProcAddr) from libvulkan_radeon.a, that win32u/winevulkan dlopen.
-- REMAINING ASSEMBLY (needs focused session + the console at PCPS4_CONSOLE_IP):
+- REMAINING ASSEMBLY (needs a focused session + the console (PCPS4_CONSOLE_IP env)):
   1. libvulkan from RADV (expose vkGetInstanceProcAddr).
   2. link the PS4 title: wine64_main + native layer + Wine .so (ntdll/win32u/wineserver) + RADV, bundle the
      1235 PE DLLs as /app0 data, Wine prefix setup (native/pw_wine_prefix.c).
@@ -50,7 +50,7 @@ NEXT = ASSEMBLY not compile: wine64_main host entry + wire win32u dlopen(libvulk
   => Wine winevulkan dlopen(libvulkan.so) -> RADV -> GNM/sceVideoOut -> PS4 GPU. BRIDGE COMPLETE.
 ALL binary artifacts now exist for PS4: libvulkan.so(RADV), Wine Unix .so (ntdll/win32u/wineserver/
 winevulkan), 1235 PE DLLs, native layer objects.
-NEXT (title link + PKG; link offline, install needs console PCPS4_CONSOLE_IP):
+NEXT (title link + PKG; link offline; install needs the console (PCPS4_CONSOLE_IP env)):
   1. link the eboot: wine64_main + native/*_ps4 objects + Wine Unix .so + libvulkan.so, via OpenOrbis
      link.x/crt1.o; how prospero loads Wine .so = pw_wine_dl (dlopen of .so laid beside eboot). Lay
      ntdll.so/win32u.so/wineserver/winevulkan.so/libvulkan.so + 1235 PE dlls under /app0 (sce_sys data).
@@ -69,7 +69,7 @@ NEXT (title link + PKG; link offline, install needs console PCPS4_CONSOLE_IP):
       (it references ps5log, lapy elevation, PS5 module APIs). A MINIMAL custom eboot (init VideoOut
       via RADV wsi + pw_wine_start a .exe) may be faster than porting the whole launcher for first light.
   (b) Wine prefix bootstrap (native/pw_wine_prefix.c) + trivial mingw hello.exe.
-  (c) PKG via create-gp4 + PkgTool.Core (36-char CONTENT_ID), FTP/bgft install to PS4 PCPS4_CONSOLE_IP.
+  (c) PKG via create-gp4 + PkgTool.Core (36-char CONTENT_ID), FTP/bgft install to the PS4 (PCPS4_CONSOLE_IP env).
   (d) FIRST on-device test: does the signal path (gregs mcontext, untested) survive; does ntdll init;
       does a .exe reach WinMain. Then DXVK + a real game.
 
@@ -123,7 +123,7 @@ REMAINING per-module (next session, methodical):
 THEN: minimal eboot (-pie exe via link.x+crt1.o -> create-fself --eboot): wine64_main + native/*_ps4
 objs + PwWineStartOps(sceKernelLoadStartModule/setenv/scePthread) -> pw_wine_start -> __wine_main on
 /app0/test.exe. PKG: create-gp4 (eboot.bin + sce_module/*.prx + libc.prx + /app0 PE DLLs + test.exe) +
-PkgTool.Core (36-char CID). Install FTP/bgft -> PCPS4_CONSOLE_IP, klog. Then iterate Wine init (signal
+PkgTool.Core (36-char CID). Install FTP/bgft -> the console (PCPS4_CONSOLE_IP env), klog. Then iterate Wine init (signal
 path UNTESTED), then DXVK + game. THE MODULE-FORMAT GATE IS CLEARED.
 
 ## MILESTONE 2026-10-29 06:32: INSTALLABLE PKG BUILT + on the console

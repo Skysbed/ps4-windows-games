@@ -598,7 +598,7 @@ index 2a00ad5..48b58c3 100644
                                         1, disposition, open_reparse, FALSE, 0 );
              if (needs_close) close( root_fd );
 diff --git a/dlls/ntdll/unix/loader.c b/dlls/ntdll/unix/loader.c
-index 0d43c5c..5928893 100644
+index 0d43c5c..e82be12 100644
 --- a/dlls/ntdll/unix/loader.c
 +++ b/dlls/ntdll/unix/loader.c
 @@ -132,8 +132,7 @@ static void fatal_error( const char *err, ... )
@@ -611,7 +611,24 @@ index 0d43c5c..5928893 100644
      va_end( args );
      exit(1);
  }
-@@ -383,8 +382,16 @@ static void init_paths(void)
+@@ -352,6 +351,7 @@ static void set_home_dir(void)
+         }
+         if (!name) name = "wine";
+     }
++    if (!home) home = "/data"; /* PS4: no HOME/passwd; env not shared */
+     if ((p = strrchr( name, '/' ))) name = p + 1;
+     if ((p = strrchr( name, '\\' ))) name = p + 1;
+     home_dir = strdup( home );
+@@ -364,6 +364,8 @@ static void set_config_dir(void)
+     char *p, *dir;
+     const char *prefix = getenv( "WINEPREFIX" );
+ 
++    if (!prefix) prefix = "/data/wine"; /* PS4: env not shared */
++
+     if (prefix)
+     {
+         if (prefix[0] != '/')
+@@ -383,8 +385,16 @@ static void init_paths(void)
  {
      Dl_info info;
  
@@ -620,7 +637,7 @@ index 0d43c5c..5928893 100644
 +     * passes the directory it loaded it from. */
 +    if ((!dladdr( init_paths, &info ) || !(ntdll_dir = realpath_dirname( info.dli_fname ))) &&
 +        !(ntdll_dir = getenv( "WINE_PS5_NTDLL_DIR" )))
-+        fatal_error( "cannot get path to ntdll.so (set WINE_PS5_NTDLL_DIR)\n" );
++        ntdll_dir = "/app0/sce_module"; /* PS4: env not shared across modules */
 +#else
      if (!dladdr( init_paths, &info ) || !(ntdll_dir = realpath_dirname( info.dli_fname )))
          fatal_error( "cannot get path to ntdll.so\n" );
@@ -628,7 +645,7 @@ index 0d43c5c..5928893 100644
  
      if ((build_dir = remove_tail( ntdll_dir, "/dlls/ntdll" )))
      {
-@@ -1858,12 +1865,33 @@ static ULONG_PTR get_image_address(void)
+@@ -1858,12 +1868,33 @@ static ULONG_PTR get_image_address(void)
  /***********************************************************************
   *           start_main_thread
   */
@@ -663,7 +680,26 @@ index 0d43c5c..5928893 100644
      virtual_map_user_shared_data();
      init_cpu_info();
      init_files();
-@@ -2111,6 +2139,7 @@ DECLSPEC_EXPORT void __wine_main( int argc, char *argv[] )
+@@ -2018,6 +2049,10 @@ static int pre_exec(void)
+ 
+ static void reexec_loader( int argc, char *argv[], char *extra_arg )
+ {
++#ifdef __PROSPERO__
++    (void)argc; (void)argv; (void)extra_arg;
++    return; /* PS4: ntdll runs in-process; never re-exec a loader binary */
++#else
+     WORD machine = current_machine;
+     char **new_argv;
+ 
+@@ -2041,6 +2076,7 @@ static void reexec_loader( int argc, char *argv[], char *extra_arg )
+ 
+     loader_exec( new_argv, machine );
+     fatal_error( "could not exec the wine loader\n" );
++#endif
+ }
+ 
+ /***********************************************************************
+@@ -2111,6 +2147,7 @@ DECLSPEC_EXPORT void __wine_main( int argc, char *argv[] )
      main_argc = argc;
      main_argv = argv;
  
@@ -671,7 +707,7 @@ index 0d43c5c..5928893 100644
      init_paths();
      if (!getenv( "WINELOADERNOEXEC" ) || argc <= 1) check_command_line( argc, argv );
      unsetenv( "WINELOADERNOEXEC" );
-@@ -2125,11 +2154,14 @@ DECLSPEC_EXPORT void __wine_main( int argc, char *argv[] )
+@@ -2125,11 +2162,14 @@ DECLSPEC_EXPORT void __wine_main( int argc, char *argv[] )
      set_max_limit( RLIMIT_NICE );
  #endif
  
@@ -876,7 +912,7 @@ index d234b20..1b2e7a6 100644
                      if (size >= sizeof(VM_COUNTERS_EX))
                          pvmi.PrivateUsage = pvmi.PagefileUsage;
 diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
-index 06eb740..830564f 100644
+index 06eb740..e080cfa 100644
 --- a/dlls/ntdll/unix/server.c
 +++ b/dlls/ntdll/unix/server.c
 @@ -24,8 +24,16 @@
@@ -1457,7 +1493,7 @@ index 06eb740..830564f 100644
 +    {
 +        const char *env = getenv( "WINE_PS5_NTDLL_DIR" );
 +        free( dir );
-+        if (!env) fatal_error( "cannot locate ntdll to load the in-process server\n" );
++        if (!env) env = "/app0/sce_module"; /* PS4: env not shared across modules */
 +        dir = strdup( env );
 +    }
 +    if (build_dir)

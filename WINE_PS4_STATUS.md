@@ -164,3 +164,32 @@ eboot.elf INTERP=0, eboot.bin inner INTERP=1. PKG rebuilt + re-uploaded to /data
 (Decrypted 13.02 dump confirms format: real eboot inner e_type=0xfe10 ET_SCE_DYNEXEC, sprx=0xfe18; mine match.)
 NEXT: user reinstalls (may need to DELETE old "PcPs4 Wine FirstLight" first - same CONTENT_ID) + launches;
 read /data/pcps4_wine_boot.txt + klog:3232. If it launches past the eboot, we see pw_wine_start_load result.
+
+## MAJOR 2026-10-29: Wine __wine_main RUNS on PS4; prefix created on-device
+Bootstrap fully green (boot log: wine_start_load=0 stage=6 environment=0 run=0). __wine_main runs on its
+thread. Walked Wine init forward by fixing, in order:
+- ntdll.prx ENOEXEC: rtld "segment not page aligned". ROOT: orphan .data.* (static libc++/libunwind)
+  landed mid-page; create-fself starts the data PT_LOAD at firstDataSection. FIX: link_ps4mod.x = link.x
+  with `.data : ALIGN(0x4000) { *(.data .data.*) }` so orphans collect after the page-aligned
+  .data.sce_module_param. ALL LOAD/RELRO segs now 16K-aligned. (TLS also stripped: PT_TLS->PT_NULL +
+  DTPMOD/DTPOFF reloc types->R_X86_64_NONE via patch_tls_dyn.py; PS4 rtld rejects any PT_TLS in a PRX.)
+- stage 3 DESCRIPTOR (-3): module lacked prospero PRXDESC1 export descriptor. FIX: gen_prx_descriptor.py
+  -> ntdll_desc.c (only ntdll-DEFINED symbols: __wine_main + dlerror/pw_wine_heap_stats/pw_wine_sink*/
+  pw_cwd_set/pw_wine_*_display), llvm-objcopy --localize-symbol=module_start/module_stop (crtlib provides
+  the real SELF entry), link ntdll_desc_loc.o.
+- Wine init crashes (env NOT shared: eboot & ntdll each static-link orbis-compat musl -> separate environ,
+  so eboot setenv never reaches ntdll getenv). Patched dlls/ntdll/unix/loader.c:
+  init_paths ntdll_dir fallback "/app0/sce_module"; set_config_dir WINEPREFIX fallback "/data/wine";
+  set_home_dir home fallback "/data" (was strdup(NULL)->strlen(NULL) SIGSEGV).
+- reexec_loader: made a no-op on __PROSPERO__ (in-process loader, never re-exec; was SIGSYS do_execve).
+- __musl_current_locale: __nl_langinfo SIGSEGV because we stripped the TLS. FIX: ps4_tls_shim.c overrides
+  __tls_get_addr to return a process-global zeroed __locale_struct (=C locale). Linked FIRST so it beats
+  libc.a's. Single-locale is fine for a game.
+=> Wine then created '/data/wine' and asked for the in-process wineserver.
+NEXT (in progress): build+package wineserver.prx (prospero in-process server). server.c already patched
+(WINE_PS5_NTDLL_DIR fallback "/app0/sce_module"). Needs: link server/*.o as a .so (link_prx wineserver
+recipe) + support (pw_wine_compat{,_libc}.o pw_wine_threads{,_libc}.o pw_wine_cwd{,_libc}.o heap +
+wineserver_desc.o exposing pw_wineserver_connect/pw_wine_thread_{register,unregister}/
+pw_wineserver_call_direct/try_fast_mutex/mutex_backend/sync_backend/pw_cwd_share_changes), crtlib,
+link_ps4mod.x, create-fself --lib, TLS-strip, add to pkg.gp4. Then it dlopens /app0/sce_module/wineserver.so
+(pw_wine_dl maps .so->.prx). Module recipe + all patches now saved: build-ps4-module/ + wine patch.

@@ -23,7 +23,7 @@ current blocker in detail.
 | `wine-ps4-shims/` | Headers and shims for the gaps between Wine and OrbisOS/FreeBSD 9 |
 | `WINE_PS4_STATUS.md` | Build recipe + status; start here to understand the port |
 
-## How it works, in one paragraph
+## How it works
 
 A PS4 app boots a small `eboot` that loads Wine's `ntdll` as a PS4 PRX module.
 PRX modules can't carry TLS and must be 16 KiB page-aligned, so the build patches
@@ -32,18 +32,18 @@ then creates its prefix on writable storage (`/data/wine`), starts the
 wineserver **in-process** (the console forbids forks), and programs the console's
 GPU through RADV with a GNM submission backend instead of Linux's amdgpu.
 
-## Hardware and setup needed
+## Requirements
 
 - A **jailbroken PS4** ([GoldHEN](https://github.com/GoldHEN/GoldHEN)) with the
   FTP and klog plugins enabled.
-- On your PC: OpenOrbis toolchain + orbis-compat, host Wine build tools
-  (see `WINE_PS4_STATUS.md` for the exact recipe).
-- The console address is read from `PCPS4_CONSOLE_IP` — nothing here hardcodes
-  a machine-specific IP:
+- Build tools on a host machine: the OpenOrbis toolchain, orbis-compat, and
+  host Wine build tools (see `WINE_PS4_STATUS.md` for the exact recipe).
+- The console address is read from `PCPS4_CONSOLE_IP` at runtime; nothing here
+  hardcodes an address:
 
   ```bash
-  export PCPS4_CONSOLE_IP=.   # your PS4's LAN address
-  python3 build-ps4-module/klog_capture.py klog.txt 60
+  export PCPS4_CONSOLE_IP=<the PS4's address on your local network>
+  python3 build-ps4-module/klog_capture.py klog.txt 120
   ```
 
 ## Status and roadmap
@@ -54,7 +54,7 @@ the current build and collecting diagnostic logs.
 1. ~~Wine Unix-side builds for PS4~~ ✅
 2. ~~Module pipeline (PRX, TLS, alignment, descriptors)~~ ✅
 3. ~~Runtime boots on hardware; prefix created; wineserver loads~~ ✅
-4. **Now: NLS locale file open from read-only `/app0` PFS** ← current blocker
+4. **NLS locale file open from read-only `/app0` PFS** (current blocker)
 5. Next: signal-path validation on hardware, then a trivial `.exe`, then DXVK
    over RADV, then real games.
 
@@ -90,8 +90,8 @@ This project is assembled from, and impossible without, these projects:
 ### See also
 
 - [playden-ps5](https://github.com/leolobato/playden-ps5) — Steam + Wine on a
-  jailbroken PS5; the same mission one console up, and our inspiration.
-  Windows games on a jailbroken **PS4** is the gap this project aims to fill.
+  jailbroken PS5, built on the same underlying stack; a PS4 equivalent is the
+  gap this project targets.
 
 ## License
 

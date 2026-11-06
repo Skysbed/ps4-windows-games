@@ -2,8 +2,9 @@
 
 PCPS4 is an early-stage compatibility runtime. The current build initializes
 Wine's Unix side on the console (module load, prefix creation, in-process
-wineserver startup) and stops during NLS table loading. Windows programs do not
-run in this build. The diagnostic output below documents that failure point.
+wineserver startup, and the client/server connection) and stops early in Wine's
+first server request (`init_first_thread`). Windows programs do not run in this
+build. The diagnostic output below documents that failure point.
 
 ## Requirements
 

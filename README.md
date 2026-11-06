@@ -7,9 +7,12 @@ FreeBSD side runs nearly unmodified: the loader, ntdll, win32u, and an in-proces
 wineserver all live inside one PS4 app, talking to the console's GNM GPU through
 RADV (Mesa's AMD Vulkan driver) behind a minimal native layer.
 
-Everything here is **early, experimental homebrew**. Today the runtime reaches
-Wine's own startup on real hardware (ntdll loads, the prefix is created, the
-wineserver module starts); games do not run yet. Follow development in
+Everything here is **early, experimental homebrew**. Today, on real hardware,
+the runtime boots Wine's Unix side: `ntdll` loads, the Wine prefix is created on
+the console, and the in-process **wineserver starts and the client connects to
+it** — Wine's own client/server handshake completes. Windows programs don't run
+yet; the next steps are finishing thread initialization, loading the Windows-side
+DLLs, and running a first `.exe`. Follow development in
 [WINE_PS4_STATUS.md](WINE_PS4_STATUS.md), which documents every milestone and the
 current blocker in detail.
 
@@ -54,9 +57,11 @@ the current build and collecting diagnostic logs.
 1. ~~Wine Unix-side builds for PS4~~ ✅
 2. ~~Module pipeline (PRX, TLS, alignment, descriptors)~~ ✅
 3. ~~Runtime boots on hardware; prefix created; wineserver loads~~ ✅
-4. **NLS locale file open from read-only `/app0` PFS** (current blocker)
-5. Next: signal-path validation on hardware, then a trivial `.exe`, then DXVK
-   over RADV, then real games.
+4. ~~In-process wineserver connects; NLS loads; `SCM_RIGHTS` fd-passing replaced
+   with in-process descriptors; client/server handshake works~~ ✅
+5. **Wine's first server request (`init_first_thread`) on hardware** (current blocker)
+6. Next: load the Windows-side `ntdll`/`kernel32`, run a trivial `.exe`, then
+   DXVK over RADV, then real games.
 
 ## Credits and standing on shoulders
 

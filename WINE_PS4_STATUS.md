@@ -210,3 +210,35 @@ NLS to /data/wine at boot, or adjust open flags. Build recipe for every module +
 wine-ps4-all-changes.patch + build-ps4-module/. Modules rebuilt via: make dlls/ntdll/ntdll.so (or
 server/wineserver) with LDFLAGS using link_ps4mod.x + crtlib + shim objs + *_desc_loc.o; create-fself
 --lib; patch_tls_dyn.py; pkg via PkgTool.Core pkg_build pkg.gp4; FTP to /data/pkg/pcps4-wine.pkg.
+
+## Update: in-process wineserver fully connects; Wine reaches init_first_thread
+
+Progress since the NLS-open blocker above. All of this is verified on real hardware
+(diagnostics written to a log file on the console's `/data`, read back over FTP):
+
+- **NLS loads.** The server's first NLS directory is pinned to `/app0/sce_module/nls`
+  (where the 76 locale files are packaged); `l_intl.nls` now opens. `KUSER_SHARED_DATA`
+  maps via `shm_open(SHM_ANON)`. The read-only `/app0` section mapping of the NLS file is
+  non-fatal and skipped.
+- **Server directory + registry.** `create_server_dir` and `__wrap_fchdir` compared a
+  path `stat` against an `fstat` by dev/ino; the console's filesystem returns those
+  inconsistently, so that cross-check is disabled on the console. The server's prefix
+  defaults to `/data/wine` (the server has its own empty environment).
+- **Server thread starts** (`pthread_create` succeeds) and enters its main loop.
+- **No SCM_RIGHTS.** The console's `AF_UNIX` sockets reject `SCM_RIGHTS` ancillary
+  fd-passing (`sendmsg` → `EINVAL`). Because the in-process client and server share one
+  file-descriptor table, the descriptor number is already valid on both sides, so all of
+  Wine's fd-passing (`connect_inprocess_client`/`receive_inprocess_client`,
+  `wine_server_send_fd`/`wine_server_receive_fd`, server `send_client_fd`/`receive_fd`) was
+  changed to send the raw fd integer as plain data on the console. For the same reason the
+  server no longer closes its copy of a descriptor it just handed to the client
+  (e.g. `request_pipe[1]`), and `SIGPIPE` is ignored before the first such write.
+- **Verified end-to-end:** the server accepts the connection, creates the process and
+  first thread, the version handshake passes (protocol 961), and both the reply and wait
+  pipes are exchanged in each direction — `init_thread_pipe` completes.
+
+**Current blocker:** the first real request, `init_first_thread`. Its server handler runs
+`init_thread(reply_fd, wait_fd)` and then hands back an `inproc_device` descriptor. The
+next step is to narrow which line faults (the request round-trip vs. the `inproc_device`
+hand-off) and apply the same in-process fd handling if needed. After that: load the
+PE-side `ntdll` and run a first `.exe`.

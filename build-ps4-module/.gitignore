@@ -1,0 +1,7 @@
+# build intermediates / logs — never commit (can contain local host paths)
+*.o
+*.oelf
+*.so
+*.prx
+*.err
+*.log

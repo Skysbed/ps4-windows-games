@@ -25,6 +25,7 @@ current blocker in detail.
 | `eboot-src/` | The tiny bootstrap that loads `ntdll.prx` and calls `__wine_main` |
 | `wine-ps4-shims/` | Headers and shims for the gaps between Wine and OrbisOS/FreeBSD 9 |
 | `WINE_PS4_STATUS.md` | Build recipe + status; start here to understand the port |
+| `BUILD.md` | Step-by-step guide to build the whole thing from source |
 
 ## How it works
 

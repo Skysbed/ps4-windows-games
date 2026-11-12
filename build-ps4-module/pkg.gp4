@@ -21,6 +21,11 @@
 		<file targ_path="sce_sys/icon0.png" orig_path="sce_sys/icon0.png" />
 		<file targ_path="sce_sys/about/right.sprx" orig_path="sce_sys/about/right.sprx" />
 		<file targ_path="test.exe" orig_path="test.exe" />
+		<file targ_path="sce_module/x86_64-windows/apisetschema.dll" orig_path="apisetschema.dll" />
+		<file targ_path="winprobe.dll" orig_path="winprobe.dll" />
+		<file targ_path="sce_module/x86_64-windows/d3d11.dll" orig_path="d3d11.dll" />
+		<file targ_path="sce_module/x86_64-windows/dxgi.dll" orig_path="dxgi.dll" />
+		<file targ_path="sce_module/x86_64-windows/wined3d.dll" orig_path="wined3d.dll" />
 		<file targ_path="sce_module/libc.prx" orig_path="sce_module/libc.prx" />
 		<file targ_path="sce_module/libSceFios2.prx" orig_path="sce_module/libSceFios2.prx" />
 		<file targ_path="sce_module/libvulkan.prx" orig_path="sce_module/libvulkan.prx" />
@@ -28,22 +33,22 @@
 		<file targ_path="sce_module/wineserver.prx" orig_path="sce_module/wineserver.prx" />
 		<file targ_path="sce_module/win32u.prx" orig_path="sce_module/win32u.prx" />
 		<file targ_path="sce_module/winevulkan.prx" orig_path="sce_module/winevulkan.prx" />
-		<file targ_path="advapi32.dll" orig_path="advapi32.dll" />
-		<file targ_path="combase.dll" orig_path="combase.dll" />
-		<file targ_path="gdi32.dll" orig_path="gdi32.dll" />
-		<file targ_path="imm32.dll" orig_path="imm32.dll" />
-		<file targ_path="kernel32.dll" orig_path="kernel32.dll" />
-		<file targ_path="kernelbase.dll" orig_path="kernelbase.dll" />
-		<file targ_path="msvcrt.dll" orig_path="msvcrt.dll" />
-		<file targ_path="ntdll.dll" orig_path="ntdll.dll" />
-		<file targ_path="ole32.dll" orig_path="ole32.dll" />
-		<file targ_path="rpcrt4.dll" orig_path="rpcrt4.dll" />
-		<file targ_path="sechost.dll" orig_path="sechost.dll" />
-		<file targ_path="setupapi.dll" orig_path="setupapi.dll" />
-		<file targ_path="ucrtbase.dll" orig_path="ucrtbase.dll" />
-		<file targ_path="user32.dll" orig_path="user32.dll" />
-		<file targ_path="version.dll" orig_path="version.dll" />
-		<file targ_path="win32u.dll" orig_path="win32u.dll" />		<file targ_path="sce_module/nls/c_037.nls" orig_path="sce_module/nls/c_037.nls" />
+		<file targ_path="sce_module/x86_64-windows/advapi32.dll" orig_path="advapi32.dll" />
+		<file targ_path="sce_module/x86_64-windows/combase.dll" orig_path="combase.dll" />
+		<file targ_path="sce_module/x86_64-windows/gdi32.dll" orig_path="gdi32.dll" />
+		<file targ_path="sce_module/x86_64-windows/imm32.dll" orig_path="imm32.dll" />
+		<file targ_path="sce_module/x86_64-windows/kernel32.dll" orig_path="kernel32.dll" />
+		<file targ_path="sce_module/x86_64-windows/kernelbase.dll" orig_path="kernelbase.dll" />
+		<file targ_path="sce_module/x86_64-windows/msvcrt.dll" orig_path="msvcrt.dll" />
+		<file targ_path="sce_module/x86_64-windows/ntdll.dll" orig_path="ntdll.dll" />
+		<file targ_path="sce_module/x86_64-windows/ole32.dll" orig_path="ole32.dll" />
+		<file targ_path="sce_module/x86_64-windows/rpcrt4.dll" orig_path="rpcrt4.dll" />
+		<file targ_path="sce_module/x86_64-windows/sechost.dll" orig_path="sechost.dll" />
+		<file targ_path="sce_module/x86_64-windows/setupapi.dll" orig_path="setupapi.dll" />
+		<file targ_path="sce_module/x86_64-windows/ucrtbase.dll" orig_path="ucrtbase.dll" />
+		<file targ_path="sce_module/x86_64-windows/user32.dll" orig_path="user32.dll" />
+		<file targ_path="sce_module/x86_64-windows/version.dll" orig_path="version.dll" />
+		<file targ_path="sce_module/x86_64-windows/win32u.dll" orig_path="win32u.dll" />		<file targ_path="sce_module/nls/c_037.nls" orig_path="sce_module/nls/c_037.nls" />
 		<file targ_path="sce_module/nls/c_10000.nls" orig_path="sce_module/nls/c_10000.nls" />
 		<file targ_path="sce_module/nls/c_10001.nls" orig_path="sce_module/nls/c_10001.nls" />
 		<file targ_path="sce_module/nls/c_10002.nls" orig_path="sce_module/nls/c_10002.nls" />
@@ -126,6 +131,7 @@
 		</dir>
 		<dir targ_name="sce_module">
 			<dir targ_name="nls" />
+			<dir targ_name="x86_64-windows" />
 		</dir>
 		<dir targ_name="assets">
 			<dir targ_name="audio" />

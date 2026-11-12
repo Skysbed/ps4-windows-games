@@ -8,20 +8,20 @@ wineserver all live inside one PS4 app, talking to the console's GNM GPU through
 RADV (Mesa's AMD Vulkan driver) behind a minimal native layer.
 
 Everything here is **early, experimental homebrew**. Today, on real hardware,
-the runtime boots Wine's Unix side: `ntdll` loads, the Wine prefix is created on
-the console, the in-process **wineserver starts, the client connects, and Wine's
-first server request completes** — the process and its first thread are created
-and `server_init_process()` returns. Windows programs don't run yet; the runtime
-is currently in process-parameter setup, before the Windows-side `ntdll` is
-loaded. Follow development in [WINE_PS4_STATUS.md](WINE_PS4_STATUS.md), which
-documents every milestone, the kernel findings behind them, and the current
-blocker in detail.
+**Windows code runs**: Wine boots, its in-process wineserver handshake completes, a
+Windows x64 executable is mapped at its preferred base, the Windows-side `ntdll.dll`
+is loaded and relocated, system calls from Windows code are dispatched into Wine, and
+the PE loader resolves imports — eleven DLLs load (`kernel32`, `kernelbase`,
+`ucrtbase`, `msvcrt`, `user32`, `gdi32`, `win32u`, …). No program has reached its
+entry point yet; the loader currently stops on a DLL that is not yet packaged.
+Follow development in [WINE_PS4_STATUS.md](WINE_PS4_STATUS.md), which documents every
+milestone, the kernel findings behind them, and the current blocker in detail.
 
 ## What this repository contains
 
 | Path | What it is |
 |---|---|
-| `wine-ps4-all-changes.patch` | The complete diff against upstream Wine that makes it build and run for PS4 (72 files) |
+| `wine-ps4-all-changes.patch` | The complete diff against upstream Wine that makes it build and run for PS4 (113 files; includes bring-up instrumentation) |
 | `build-ps4-module/` | Per-module build pipeline: linker script (16 KiB alignment), TLS stripping, PRX descriptor generation, packaging manifest |
 | `eboot-src/` | The tiny bootstrap that loads `ntdll.prx` and calls `__wine_main` |
 | `wine-ps4-shims/` | Headers and shims for the gaps between Wine and OrbisOS/FreeBSD 9 |
@@ -63,11 +63,12 @@ the current build and collecting diagnostic logs.
    with in-process descriptors; client/server handshake works~~ ✅
 5. ~~Wine's first server request (`init_first_thread`) completes on hardware;
    process and first thread created~~ ✅
-6. **Process-parameter setup** (`build_initial_params`) — current work
-7. Next: ship a prepared Wine prefix (the console cannot create one — process
-   creation is unavailable), load the Windows-side `ntdll`/`kernel32`, and run a
-   trivial `.exe`
-8. Then: a native presentation/input layer so frames can reach the screen, then
+6. ~~Process-parameter setup; the Windows executable and the PE `ntdll.dll` are
+   mapped; Windows syscalls dispatch into Wine; the PE loader loads DLLs~~ ✅
+7. **Complete the program's import closure and reach its entry point** — current work
+8. Next: ship a prepared Wine prefix (the console cannot create one — process
+   creation is unavailable), so the runtime can leave bootstrap mode
+9. Then: a native presentation/input layer so frames can reach the screen, then
    D3D over RADV, then real games.
 
 ## Credits and standing on shoulders

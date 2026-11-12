@@ -361,3 +361,93 @@ Wine looks for its PE builtins in `<module dir>/x86_64-windows/`. The package ma
 must stage the Windows-side DLLs there rather than at the application root, and must
 declare that nested directory in `<rootdir>` — the packaging tool fails on an
 undeclared subdirectory, exactly as it does for `nls/`.
+
+## Update: Windows code runs — the PE loader loads eleven DLLs on hardware
+
+Verified on real hardware. Wine's own debug channels now reach a log file on the
+console, so the lines quoted below are Wine's output, not inferred.
+
+```
+trace:loaddll:build_module Loaded L"unix\\app0\\test.exe" at 0000000140000000: native
+trace:loaddll:build_ntdll_module Loaded L"C:\\windows\\system32\\ntdll.dll" at 00006FFFFFBD0000: builtin
+trace:loaddll:build_module Loaded … kernelbase.dll, kernel32.dll, ucrtbase.dll, msvcrt.dll,
+                                  sechost.dll, advapi32.dll, win32u.dll, gdi32.dll, user32.dll: builtin
+err:module:import_dll Library opengl32.dll (which is needed by wined3d.dll) not found
+```
+
+A Windows x64 executable is mapped at its preferred base, the Windows-side `ntdll.dll`
+is mapped and relocated, the process heap is created, system calls from Windows code are
+dispatched into Wine, and the PE loader resolves imports. It currently stops on a
+packaging gap (one DLL not staged), not a fault.
+
+The test program is a small freestanding D3D11 diagnostic linked with 16 KiB section
+alignment, matching the console's page size.
+
+### What had to be fixed to get here
+
+Each of these was found on the console, most by narrowing with probes and then reading
+the kernel or Wine source for the cause.
+
+- **`run_wineboot` cannot run.** It initialises a prefix by spawning `wineboot.exe`
+  through `NtCreateUserProcess`; a console title cannot create processes, and the path
+  died with `SIGSYS`. It is skipped on the console. **But** the same function is also
+  where `virtual_init_user_shared_data()` is called, and skipping that had a striking
+  effect (next item).
+- **Windows syscalls were reaching the console's kernel.** Wine's x86-64 syscall thunk is
+  `testb $1, 0x7ffe0308 ; jne dispatcher ; syscall`. With the shared data page
+  uninitialised, `KUSER_SHARED_DATA.SystemCall` was 0, so the thunk executed a real
+  `syscall` instruction. `NtAllocateVirtualMemory` is syscall `0x18`, which on the
+  console's FreeBSD-derived kernel is `getuid()` — it returned the process uid, and Wine
+  reported `Could not allocate 0x10000 bytes, status 0x1`. The shared data page is now
+  initialised on the console without the spawn.
+- **Stay in prefix bootstrap mode.** With no `wineboot`, the prefix has no placeholder
+  files in `C:\windows\system32`. Wine only loads a builtin DLL without a matching file
+  while in bootstrap mode, so the console stays in it until a prepared prefix is shipped.
+- **`dup()` and `fcntl(F_DUPFD)` both fail** (`EPERM` and `EINVAL`), measured with `errno`
+  captured immediately. The kernel's `do_dup` has no `EPERM` path, so the refusal comes
+  from elsewhere and is not yet explained. Two consequences, both fixed:
+  - *Server side:* `dup_fd_object()` could not duplicate a file's descriptor to back a
+    section, which surfaced as `STATUS_ACCESS_DENIED` from `NtCreateSection`. For a named
+    file the server now reopens the path instead, which gives an independent descriptor
+    on the same file.
+  - *Client side:* a descriptor the client obtains from the in-process server **is** the
+    server's own (one shared fd table, no `dup`). The client used to close it after use,
+    destroying the server's copy — the second mapping of the shared data section then
+    failed. On the console the client treats such descriptors as borrowed and never closes
+    them; the server remains the owner.
+- **`realpath()` fails on the console's filesystem**, which left every server-side file
+  descriptor without a recorded path (and so nothing to reopen). The server keeps the
+  absolute path it was given when `realpath` fails.
+- **`st_dev` and `st_ino` are reported as 0.** Wine records an unpopulated DOS drive slot
+  as dev 0 / ino 0, so a real directory "matched" the first empty slot and
+  `/app0/test.exe` was mapped to a non-existent drive `A:`. Empty slots are no longer
+  eligible; with no real match Wine falls back to its `\??\unix\` path form, which needs
+  no drive letters.
+- **A read-only `argv`.** `find_drive_nt_root()` edits its argument in place. The
+  bootstrap passes the program path as a string literal in read-only data, so the first
+  write faulted. It is given a writable copy.
+- **`get_image_address()`** walked a Linux-style auxiliary vector via `getauxval()`,
+  which does not yield a usable program-header pointer here. It reports "unknown" on the
+  console; the value only feeds an optional field for debuggers.
+- **`apisetschema.dll`** must be staged beside the other PE builtins.
+
+### Working with the runtime
+
+Two additions make the test loop much shorter:
+
+- Wine's debug output is also appended to a log file on the console's writable storage,
+  so it can be read back over FTP rather than captured live from the kernel log.
+- A console title has no environment in which to set `WINEDEBUG`. The same syntax is read
+  from a small text file on writable storage instead, so debug channels can be changed by
+  replacing one file — no rebuild and no reinstall, only a relaunch.
+
+### Known gaps
+
+- No prepared prefix yet (registry, `system32` contents); the runtime runs in bootstrap
+  mode. `locale_init` reports a failure for the same reason.
+- `opengl32.dll` is not staged, which is what currently stops `wined3d` → `dxgi` →
+  `d3d11` from loading.
+- The cause of the `dup()` refusal is unknown.
+- `wine-ps4-all-changes.patch` in this repository reflects the current tree, **including
+  bring-up instrumentation** (the file-logging probes). It omits two large
+  machine-generated Vulkan thunk sources; regenerate those with the upstream generator.

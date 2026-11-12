@@ -418,7 +418,7 @@ index cfa57c5..f5be3f5 100644
          str = end + 1;
      }
 diff --git a/dlls/ntdll/unix/env.c b/dlls/ntdll/unix/env.c
-index 7e36cb3..7eee0d3 100644
+index 7e36cb3..f498821 100644
 --- a/dlls/ntdll/unix/env.c
 +++ b/dlls/ntdll/unix/env.c
 @@ -31,6 +31,13 @@
@@ -435,7 +435,17 @@ index 7e36cb3..7eee0d3 100644
  #include <sys/types.h>
  #include <sys/ioctl.h>
  #include <sys/stat.h>
-@@ -125,7 +132,16 @@ static void *read_nls_file( const char *name )
+@@ -95,6 +102,9 @@ static char *get_nls_file_path( UINT type, UINT id )
+     const char *dir = build_dir ? build_dir : data_dir;
+     const char *name = NULL;
+     char *path, tmp[16];
++#ifdef __PROSPERO__
++    dir = "/app0/sce_module";  /* PS4: nls/ is packaged beside the modules (see read_nls_file) */
++#endif
+ 
+     switch (type)
+     {
+@@ -125,7 +135,16 @@ static void *read_nls_file( const char *name )
      void *data, *ret = NULL;
      int fd;
  
@@ -452,7 +462,7 @@ index 7e36cb3..7eee0d3 100644
  
      if ((fd = open( path, O_RDONLY )) != -1)
      {
-@@ -833,7 +849,11 @@ void init_environment(void)
+@@ -833,7 +852,11 @@ void init_environment(void)
      {
          uctable = case_table + 2;
          lctable = case_table + case_table[1] + 2;
@@ -464,7 +474,7 @@ index 7e36cb3..7eee0d3 100644
  }
  
  
-@@ -843,7 +863,7 @@ static BOOL host_var_exists( const char *name )
+@@ -843,7 +866,7 @@ static BOOL host_var_exists( const char *name )
      const char *end = strchr( name, '=' );
  
      if (!end) return FALSE;
@@ -473,7 +483,7 @@ index 7e36cb3..7eee0d3 100644
      {
          if (!STARTS_WITH( *e, "WINE_HOST_" )) continue;
          if (!strncmp( *e + 10, name, end + 1 - name )) return TRUE;
-@@ -871,15 +891,33 @@ static WCHAR *get_initial_environment( SIZE_T *pos, SIZE_T *size )
+@@ -871,15 +894,33 @@ static WCHAR *get_initial_environment( SIZE_T *pos, SIZE_T *size )
  {
      char **e;
      WCHAR *env, *ptr, *end;
@@ -509,7 +519,7 @@ index 7e36cb3..7eee0d3 100644
      {
          char *str = *e;
  
-@@ -940,6 +978,10 @@ static void set_env_var( WCHAR **env, SIZE_T *pos, SIZE_T *size,
+@@ -940,6 +981,10 @@ static void set_env_var( WCHAR **env, SIZE_T *pos, SIZE_T *size,
      WCHAR *p;
      SIZE_T len;
  
@@ -520,7 +530,7 @@ index 7e36cb3..7eee0d3 100644
      /* remove existing string */
      if ((p = find_env_var( *env, *pos, name, namelen )))
      {
-@@ -947,18 +989,36 @@ static void set_env_var( WCHAR **env, SIZE_T *pos, SIZE_T *size,
+@@ -947,18 +992,36 @@ static void set_env_var( WCHAR **env, SIZE_T *pos, SIZE_T *size,
          memmove( p, p + len, (*pos - (p + len - *env)) * sizeof(WCHAR) );
          *pos -= len;
      }
@@ -560,7 +570,7 @@ index 7e36cb3..7eee0d3 100644
  }
  
  static void append_envW( WCHAR **env, SIZE_T *pos, SIZE_T *size, const char *name, const WCHAR *value )
-@@ -987,9 +1047,17 @@ static void add_path_var( WCHAR **env, SIZE_T *pos, SIZE_T *size, const char *na
+@@ -987,9 +1050,17 @@ static void add_path_var( WCHAR **env, SIZE_T *pos, SIZE_T *size, const char *na
  {
      WCHAR *nt_name = NULL;
  
@@ -579,7 +589,7 @@ index 7e36cb3..7eee0d3 100644
  }
  
  
-@@ -1032,32 +1100,47 @@ static void add_dynamic_environment( WCHAR **env, SIZE_T *pos, SIZE_T *size )
+@@ -1032,32 +1103,47 @@ static void add_dynamic_environment( WCHAR **env, SIZE_T *pos, SIZE_T *size )
      unsigned int i;
      char str[22];
  
@@ -628,7 +638,7 @@ index 7e36cb3..7eee0d3 100644
  }
  
  
-@@ -1886,6 +1969,19 @@ static void init_peb( RTL_USER_PROCESS_PARAMETERS *params, void *module, BOOL de
+@@ -1886,6 +1972,19 @@ static void init_peb( RTL_USER_PROCESS_PARAMETERS *params, void *module, BOOL de
  }
  
  
@@ -648,7 +658,7 @@ index 7e36cb3..7eee0d3 100644
  /*************************************************************************
   *		build_initial_params
   *
-@@ -1898,40 +1994,90 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
+@@ -1898,40 +1997,90 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
      RTL_USER_PROCESS_PARAMETERS *params = NULL;
      SIZE_T size, env_pos, env_size;
      WCHAR *dst, *cmdline, *path, *bootstrap;
@@ -742,7 +752,7 @@ index 7e36cb3..7eee0d3 100644
          NtTerminateProcess( GetCurrentProcess(), status );
      }
  
-@@ -1948,6 +2094,15 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
+@@ -1948,6 +2097,15 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
          }
      }
  
@@ -758,7 +768,7 @@ index 7e36cb3..7eee0d3 100644
      if (status)  /* try launching it through start.exe */
      {
          static const char *args[] = { "start.exe", "/exec" };
-@@ -2023,10 +2178,13 @@ void init_startup_info(void)
+@@ -2023,10 +2181,13 @@ void init_startup_info(void)
      USHORT machine;
      BOOL debugged;
  
@@ -772,6 +782,16 @@ index 7e36cb3..7eee0d3 100644
          return;
      }
  
+@@ -2251,6 +2412,9 @@ NTSTATUS WINAPI NtInitializeNlsFiles( void **ptr, LCID *lcid, LARGE_INTEGER *siz
+     HANDLE handle, file;
+     SIZE_T mapsize;
+     NTSTATUS status;
++#ifdef __PROSPERO__
++    dir = "/app0/sce_module";  /* PS4: nls/ is packaged beside the modules */
++#endif
+ 
+     if (asprintf( &path, "%s/nls/locale.nls", dir ) == -1) return STATUS_NO_MEMORY;
+     status = open_nls_data_file( path, system_dir, &file );
 diff --git a/dlls/ntdll/unix/file.c b/dlls/ntdll/unix/file.c
 index 2a00ad5..415b71e 100644
 --- a/dlls/ntdll/unix/file.c
@@ -2542,7 +2562,7 @@ index 06eb740..a3ef3ad 100644
      if (ret != STATUS_INVALID_HANDLE || !handle) return ret;
      if (!peb->BeingDebugged) return ret;
 diff --git a/dlls/ntdll/unix/signal_x86_64.c b/dlls/ntdll/unix/signal_x86_64.c
-index e612e5e..2ba60e4 100644
+index e612e5e..ca7db00 100644
 --- a/dlls/ntdll/unix/signal_x86_64.c
 +++ b/dlls/ntdll/unix/signal_x86_64.c
 @@ -29,6 +29,7 @@
@@ -2627,7 +2647,81 @@ index e612e5e..2ba60e4 100644
  
  extern int alloc_fs_sel( int sel, void *base );
  __ASM_GLOBAL_FUNC( alloc_fs_sel,
-@@ -203,37 +259,108 @@ __ASM_GLOBAL_FUNC( modify_ldt,
+@@ -174,6 +230,69 @@ __ASM_GLOBAL_FUNC( modify_ldt,
+ #define FP_XSTATE_MAGIC1 0x46505853
+ #endif
+ 
++#ifdef __ORBIS__
++/* PS4: the kernel is FreeBSD-derived and delivers its own signal frame, not a
++ * Linux one.  Layout established from a raw dump taken on hardware: a 16-byte
++ * signal mask, 48 bytes of padding, then the machine context at offset 0x40,
++ * with the FXSAVE area at 0x140 (mc_len == 0x480).  Reading it through the
++ * Linux gregs[] offsets returned the fault address as the trap number. */
++struct ps4_mcontext
++{
++    unsigned long  mc_onstack;                                   /* 0x40 */
++    unsigned long  mc_rdi, mc_rsi, mc_rdx, mc_rcx, mc_r8, mc_r9; /* 0x48 */
++    unsigned long  mc_rax, mc_rbx, mc_rbp;                       /* 0x78 */
++    unsigned long  mc_r10, mc_r11, mc_r12, mc_r13, mc_r14, mc_r15; /* 0x90 */
++    unsigned int   mc_trapno;                                    /* 0xc0 */
++    unsigned short mc_fs, mc_gs;
++    unsigned long  mc_addr;                                      /* 0xc8 */
++    unsigned int   mc_flags;                                     /* 0xd0 */
++    unsigned short mc_es, mc_ds;
++    unsigned long  mc_err;                                       /* 0xd8 */
++    unsigned long  mc_rip;                                       /* 0xe0 */
++    unsigned long  mc_cs;                                        /* 0xe8 */
++    unsigned long  mc_rflags;                                    /* 0xf0 */
++    unsigned long  mc_rsp;                                       /* 0xf8 */
++    unsigned long  mc_ss;                                        /* 0x100 */
++    unsigned long  mc_len, mc_fpformat, mc_ownedfp;              /* 0x108 */
++    unsigned long  mc_lbrfrom, mc_lbrto, mc_aux1, mc_aux2;       /* 0x120 */
++    unsigned long  mc_fpstate[104];                              /* 0x140 */
++    unsigned long  mc_fsbase, mc_gsbase;                         /* 0x480 */
++    unsigned long  mc_spare[6];
++};
++C_ASSERT( offsetof( struct ps4_mcontext, mc_trapno )  == 0xc0  - 0x40 );
++C_ASSERT( offsetof( struct ps4_mcontext, mc_rip )     == 0xe0  - 0x40 );
++C_ASSERT( offsetof( struct ps4_mcontext, mc_rsp )     == 0xf8  - 0x40 );
++C_ASSERT( offsetof( struct ps4_mcontext, mc_fpstate ) == 0x140 - 0x40 );
++C_ASSERT( sizeof( struct ps4_mcontext )               == 0x480 );
++#define PS4_MC(context)      ((struct ps4_mcontext *)((char *)(context) + 0x40))
++
++#define RAX_sig(context)     (PS4_MC(context)->mc_rax)
++#define RBX_sig(context)     (PS4_MC(context)->mc_rbx)
++#define RCX_sig(context)     (PS4_MC(context)->mc_rcx)
++#define RDX_sig(context)     (PS4_MC(context)->mc_rdx)
++#define RSI_sig(context)     (PS4_MC(context)->mc_rsi)
++#define RDI_sig(context)     (PS4_MC(context)->mc_rdi)
++#define RBP_sig(context)     (PS4_MC(context)->mc_rbp)
++#define R8_sig(context)      (PS4_MC(context)->mc_r8)
++#define R9_sig(context)      (PS4_MC(context)->mc_r9)
++#define R10_sig(context)     (PS4_MC(context)->mc_r10)
++#define R11_sig(context)     (PS4_MC(context)->mc_r11)
++#define R12_sig(context)     (PS4_MC(context)->mc_r12)
++#define R13_sig(context)     (PS4_MC(context)->mc_r13)
++#define R14_sig(context)     (PS4_MC(context)->mc_r14)
++#define R15_sig(context)     (PS4_MC(context)->mc_r15)
++#define CS_sig(context)      (*(WORD *)&PS4_MC(context)->mc_cs)
++#define GS_sig(context)      (PS4_MC(context)->mc_gs)
++#define FS_sig(context)      (PS4_MC(context)->mc_fs)
++#define SS_sig(context)      (*(WORD *)&PS4_MC(context)->mc_ss)
++#define RSP_sig(context)     (PS4_MC(context)->mc_rsp)
++#define RIP_sig(context)     (PS4_MC(context)->mc_rip)
++#define EFL_sig(context)     (PS4_MC(context)->mc_rflags)
++#define TRAP_sig(context)    (PS4_MC(context)->mc_trapno)
++#define ERROR_sig(context)   (PS4_MC(context)->mc_err)
++#define FPU_sig(context)     ((void *)PS4_MC(context)->mc_fpstate)
++#define XState_sig(fpu)      ((XSAVE_AREA_HEADER *)NULL)
++#else  /* __ORBIS__ */
+ #define RAX_sig(context)     ((context)->uc_mcontext.gregs[REG_RAX])
+ #define RBX_sig(context)     ((context)->uc_mcontext.gregs[REG_RBX])
+ #define RCX_sig(context)     ((context)->uc_mcontext.gregs[REG_RCX])
+@@ -200,40 +319,112 @@ __ASM_GLOBAL_FUNC( modify_ldt,
+ #define ERROR_sig(context)   ((context)->uc_mcontext.gregs[REG_ERR])
+ #define FPU_sig(context)     ((void *)((context)->uc_mcontext.fpregs))
+ #define XState_sig(fpu)      (((unsigned int *)((XMM_SAVE_AREA32 *)fpu)->Reserved4)[12] == FP_XSTATE_MAGIC1 ? (XSAVE_AREA_HEADER *)(((XMM_SAVE_AREA32 *)fpu) + 1) : NULL)
++#endif /* __ORBIS__ */
  
  #elif defined(__FreeBSD__) || defined (__FreeBSD_kernel__)
  
@@ -2763,7 +2857,7 @@ index e612e5e..2ba60e4 100644
  
  #elif defined(__NetBSD__)
  
-@@ -777,6 +904,64 @@ __ASM_GLOBAL_FUNC( clear_alignment_flag,
+@@ -777,6 +968,64 @@ __ASM_GLOBAL_FUNC( clear_alignment_flag,
                     "ret" )
  
  
@@ -2828,7 +2922,7 @@ index e612e5e..2ba60e4 100644
  /***********************************************************************
   *           init_handler
   */
-@@ -807,6 +992,24 @@ static inline struct thread_data *init_handler( void *sigcontext )
+@@ -807,6 +1056,24 @@ static inline struct thread_data *init_handler( void *sigcontext )
  }
  
  
@@ -2853,7 +2947,7 @@ index e612e5e..2ba60e4 100644
  /***********************************************************************
   *           leave_handler
   */
-@@ -841,6 +1044,77 @@ static inline void leave_handler( struct thread_data *data, ucontext_t *sigconte
+@@ -841,6 +1108,77 @@ static inline void leave_handler( struct thread_data *data, ucontext_t *sigconte
  }
  
  
@@ -2931,7 +3025,7 @@ index e612e5e..2ba60e4 100644
  /***********************************************************************
   *           save_context
   *
-@@ -891,15 +1165,26 @@ static void save_context( struct thread_data *data, struct xcontext *xcontext,
+@@ -891,15 +1229,26 @@ static void save_context( struct thread_data *data, struct xcontext *xcontext,
      if (FPU_sig(sigcontext))
      {
          XSAVE_AREA_HEADER *xs;
@@ -2959,7 +3053,7 @@ index e612e5e..2ba60e4 100644
              assert( xcontext->c_ex.XState.Offset == (BYTE *)xs - (BYTE *)&xcontext->c_ex );
          }
      }
-@@ -952,6 +1237,9 @@ static void restore_context( struct thread_data *data, const struct xcontext *xc
+@@ -952,6 +1301,9 @@ static void restore_context( struct thread_data *data, const struct xcontext *xc
  {
      const CONTEXT *context = &xcontext->c;
      struct amd64_thread_data *amd64_data = amd64_thread_data( data );
@@ -2969,7 +3063,7 @@ index e612e5e..2ba60e4 100644
  
      if (amd64_data)
      {
-@@ -964,6 +1252,9 @@ static void restore_context( struct thread_data *data, const struct xcontext *xc
+@@ -964,6 +1316,9 @@ static void restore_context( struct thread_data *data, const struct xcontext *xc
      }
      set_sigcontext( context, sigcontext );
      if (FPU_sig(sigcontext)) memcpy( FPU_sig(sigcontext), &context->FltSave, sizeof(context->FltSave) );
@@ -2979,7 +3073,7 @@ index e612e5e..2ba60e4 100644
      leave_handler( data, sigcontext );
  }
  
-@@ -1515,6 +1806,9 @@ static void setup_raise_exception( struct thread_data *data, ucontext_t *sigcont
+@@ -1515,6 +1870,9 @@ static void setup_raise_exception( struct thread_data *data, ucontext_t *sigcont
      }
  
      CS_sig(sigcontext)  = cs64_sel;
@@ -2989,7 +3083,7 @@ index e612e5e..2ba60e4 100644
      RIP_sig(sigcontext) = (ULONG_PTR)pKiUserExceptionDispatcher;
      RSP_sig(sigcontext) = (ULONG_PTR)stack;
      /* clear single-step, direction, and align check flag */
-@@ -2101,6 +2395,25 @@ static BOOL handle_syscall_fault( struct thread_data *data, ucontext_t *sigconte
+@@ -2101,6 +2459,25 @@ static BOOL handle_syscall_fault( struct thread_data *data, ucontext_t *sigconte
                   context->R8, context->R9, context->R10, context->R11 );
      TRACE_(seh)( " r12=%016lx r13=%016lx r14=%016lx r15=%016lx\n",
                   context->R12, context->R13, context->R14, context->R15 );
@@ -3015,7 +3109,7 @@ index e612e5e..2ba60e4 100644
  
      if (data->jmp_buf)
      {
-@@ -2270,18 +2583,48 @@ static inline BOOL check_invalid_gsbase( struct thread_data *data, ucontext_t *u
+@@ -2270,18 +2647,71 @@ static inline BOOL check_invalid_gsbase( struct thread_data *data, ucontext_t *u
  }
  
  
@@ -3059,6 +3153,29 @@ index e612e5e..2ba60e4 100644
      struct xcontext context;
      EXCEPTION_RECORD rec = { .ExceptionAddress = (void *)RIP_sig(sigcontext) };
  
++#ifdef __ORBIS__
++    /* One-shot raw dump of the signal frame, to establish the console's real
++     * ucontext layout (the Linux-layout macros used so far read the wrong
++     * offsets). */
++    {
++        static int dumped;
++        if (!dumped)
++        {
++            FILE *_f = fopen( "/data/pcps4_sigframe.txt", "w" );
++            dumped = 1;
++            if (_f)
++            {
++                const unsigned long *q = (const unsigned long *)_sigcontext;
++                const unsigned long *si = (const unsigned long *)siginfo;
++                int i;
++                fprintf( _f, "signal=%d siginfo=%p ucontext=%p\n", signal, (void *)siginfo, _sigcontext );
++                for (i = 0; i < 10; i++) fprintf( _f, "si[%02x]=%016lx\n", i * 8, si[i] );
++                for (i = 0; i < 80; i++) fprintf( _f, "uc[%03x]=%016lx\n", i * 8, q[i] );
++                fclose( _f );
++            }
++        }
++    }
++#endif
 +#if defined(__PROSPERO__) && !defined(__ORBIS__)
 +    if (segv_hook && segv_hook( siginfo, _sigcontext )) return;
 +#endif
@@ -3066,7 +3183,7 @@ index e612e5e..2ba60e4 100644
      save_context( data, &context, sigcontext );
  
      switch(TRAP_sig(sigcontext))
-@@ -2319,6 +2662,8 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -2319,6 +2749,8 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
          if (!virtual_handle_fault( data, &rec, (void *)RSP_sig(sigcontext) ) ||
              check_invalid_gsbase( data, sigcontext ))
          {
@@ -3075,7 +3192,7 @@ index e612e5e..2ba60e4 100644
              leave_handler( data, sigcontext );
              return;
          }
-@@ -2356,6 +2701,14 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -2356,6 +2788,14 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
          rec.ExceptionCode = EXCEPTION_ILLEGAL_INSTRUCTION;
          break;
      }
@@ -3090,7 +3207,7 @@ index e612e5e..2ba60e4 100644
      if (handle_syscall_fault( data, sigcontext, &rec, &context.c )) return;
      setup_raise_exception( data, sigcontext, &rec, &context );
  }
-@@ -2366,7 +2719,7 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -2366,7 +2806,7 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
   *
   * Handler for SIGTRAP.
   */
@@ -3099,7 +3216,7 @@ index e612e5e..2ba60e4 100644
  {
      ucontext_t *sigcontext = _sigcontext;
      struct thread_data *data = init_handler( sigcontext );
-@@ -2375,6 +2728,13 @@ static void trap_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -2375,6 +2815,13 @@ static void trap_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
  
      if (handle_syscall_trap( data, sigcontext, siginfo )) return;
  
@@ -3113,7 +3230,7 @@ index e612e5e..2ba60e4 100644
      save_context( data, &context, sigcontext );
  
      switch (TRAP_sig(sigcontext))
-@@ -2413,7 +2773,7 @@ static void trap_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -2413,7 +2860,7 @@ static void trap_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
   *
   * Handler for SIGFPE.
   */
@@ -3122,7 +3239,7 @@ index e612e5e..2ba60e4 100644
  {
      ucontext_t *sigcontext = _sigcontext;
      struct thread_data *data = init_handler( sigcontext );
-@@ -2488,7 +2848,7 @@ static void fpe_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -2488,7 +2935,7 @@ static void fpe_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
   *
   * Handler for SIGINT.
   */
@@ -3131,7 +3248,7 @@ index e612e5e..2ba60e4 100644
  {
      ucontext_t *sigcontext = _sigcontext;
      struct thread_data *data = init_handler( sigcontext );
-@@ -2509,7 +2869,7 @@ static void int_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -2509,7 +2956,7 @@ static void int_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
   *
   * Handler for SIGABRT.
   */
@@ -3140,7 +3257,7 @@ index e612e5e..2ba60e4 100644
  {
      ucontext_t *sigcontext = _sigcontext;
      struct thread_data *data = init_handler( sigcontext );
-@@ -2528,7 +2888,7 @@ static void abrt_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -2528,7 +2975,7 @@ static void abrt_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
   *
   * Handler for SIGQUIT.
   */
@@ -3149,7 +3266,7 @@ index e612e5e..2ba60e4 100644
  {
      ucontext_t *sigcontext = _sigcontext;
      struct thread_data *data = init_handler( sigcontext );
-@@ -2543,7 +2903,7 @@ static void quit_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -2543,7 +2990,7 @@ static void quit_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
   *
   * Handler for SIGUSR1, used to signal a thread that it got suspended.
   */
@@ -3158,7 +3275,7 @@ index e612e5e..2ba60e4 100644
  {
      ucontext_t *sigcontext = _sigcontext;
      struct thread_data *data = init_handler( sigcontext );
-@@ -2724,6 +3084,7 @@ NTSTATUS signal_alloc_thread( TEB *teb )
+@@ -2724,6 +3171,7 @@ NTSTATUS signal_alloc_thread( TEB *teb )
      struct amd64_thread_data *thread_data = (struct amd64_thread_data *)&teb->GdiTebBatch;
      WOW_TEB *wow_teb = get_wow_teb( teb );
  
@@ -3166,7 +3283,7 @@ index e612e5e..2ba60e4 100644
      if (wow_teb)
      {
          if (!fs32_sel)
-@@ -2733,6 +3094,12 @@ NTSTATUS signal_alloc_thread( TEB *teb )
+@@ -2733,6 +3181,12 @@ NTSTATUS signal_alloc_thread( TEB *teb )
          }
          else thread_data->fs = fs32_sel;
      }
@@ -3179,7 +3296,7 @@ index e612e5e..2ba60e4 100644
      thread_data->frame_size = frame_size;
      return STATUS_SUCCESS;
  }
-@@ -2745,7 +3112,9 @@ void signal_free_thread( TEB *teb )
+@@ -2745,7 +3199,9 @@ void signal_free_thread( TEB *teb )
  {
      struct amd64_thread_data *thread_data = (struct amd64_thread_data *)&teb->GdiTebBatch;
  
@@ -3189,7 +3306,7 @@ index e612e5e..2ba60e4 100644
  }
  
  
-@@ -2811,8 +3180,23 @@ void signal_init_process( TEB *teb )
+@@ -2811,8 +3267,23 @@ void signal_init_process( TEB *teb )
  
      /* sneak in a syscall dispatcher pointer at a fixed address (7ffe1000) */
      ptr = (char *)user_shared_data + page_size;
@@ -3215,7 +3332,7 @@ index e612e5e..2ba60e4 100644
  
      __asm__( "movw %%cs,%0" : "=m" (cs64_sel) );
      __asm__( "movw %%ss,%0" : "=m" (ds64_sel) );
-@@ -2832,28 +3216,33 @@ void signal_init_process( TEB *teb )
+@@ -2832,28 +3303,33 @@ void signal_init_process( TEB *teb )
      alloc_syscall_frame( (frame_size + 63) & ~63 );
      signal_alloc_thread( teb );
  
@@ -3266,7 +3383,7 @@ index e612e5e..2ba60e4 100644
  #endif
  
  #ifdef __linux__
-@@ -2861,7 +3250,7 @@ void signal_init_process( TEB *teb )
+@@ -2861,7 +3337,7 @@ void signal_init_process( TEB *teb )
      {
          struct sigaction act;
  
@@ -3275,7 +3392,7 @@ index e612e5e..2ba60e4 100644
          {
              WARN_(seh)( "failed to retrieve signal restorer trampoline\n" );
              syscall_dispatch_enabled = FALSE;
-@@ -2874,6 +3263,16 @@ void signal_init_process( TEB *teb )
+@@ -2874,6 +3350,16 @@ void signal_init_process( TEB *teb )
      }
  #endif
  
@@ -3292,7 +3409,7 @@ index e612e5e..2ba60e4 100644
      return;
  
   error:
-@@ -2908,8 +3307,17 @@ void init_syscall_frame( LPTHREAD_START_ROUTINE entry, void *arg, TEB *teb )
+@@ -2908,8 +3394,17 @@ void init_syscall_frame( LPTHREAD_START_ROUTINE entry, void *arg, TEB *teb )
                                             libc_addr, libc_size, &thread_data->syscall_dispatch ) < 0)
          WARN_(seh)( "could not enable syscall user dispatch\n" );
  #elif defined (__FreeBSD__) || defined (__FreeBSD_kernel__)
@@ -3310,7 +3427,7 @@ index e612e5e..2ba60e4 100644
  #elif defined(__NetBSD__)
      sysarch( X86_64_SET_GSBASE, &teb );
  #elif defined (__APPLE__)
-@@ -3124,6 +3532,8 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
+@@ -3124,6 +3619,8 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                     "syscall\n\t"
                     "leaq -0x98(%rbp),%rcx\n"
                     "2:\n\t"
@@ -3319,7 +3436,7 @@ index e612e5e..2ba60e4 100644
  #elif defined(__FreeBSD__)
                     "movq 0x320(%r13),%rsi\n\t"     /* amd64_thread_data()->pthread_teb */
                     "testq %rsi,%rsi\n\t"
-@@ -3441,6 +3851,8 @@ __ASM_GLOBAL_FUNC( __wine_unix_call_dispatcher,
+@@ -3441,6 +3938,8 @@ __ASM_GLOBAL_FUNC( __wine_unix_call_dispatcher,
                     "mov $158,%eax\n\t"             /* SYS_arch_prctl */
                     "syscall\n\t"
                     "2:\n\t"

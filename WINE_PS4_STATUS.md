@@ -451,3 +451,77 @@ Two additions make the test loop much shorter:
 - `wine-ps4-all-changes.patch` in this repository reflects the current tree, **including
   bring-up instrumentation** (the file-logging probes). It omits two large
   machine-generated Vulkan thunk sources; regenerate those with the upstream generator.
+
+## Update: a Windows program runs to completion on hardware
+
+Verified on real hardware, quoting Wine's own log. A freestanding Windows x64 test
+program — a D3D11 diagnostic that first probes heap and loader APIs — now runs from
+its entry point to `ExitProcess`:
+
+```
+process_attach (d3d11.dll) - END                          all 15 modules initialised
+Loaded L"unix\\app0\\winprobe.dll" at 00006FFFFBF00000: native
+MODULE_InitDLL (winprobe.dll, PROCESS_ATTACH) - RETURN 1
+LdrUnloadDll (winprobe.dll) … unloading
+trace:dxgi:CreateDXGIFactory1 …
+warn:d3d:wined3d_init Failed to create adapter.
+warn:dxgi:dxgi_factory_create Failed to initialize factory, hr 0x887a0004
+trace:module:LdrShutdownProcess ()
+MODULE_InitDLL (… , PROCESS_DETACH) - RETURN 1            every module, in order
+```
+
+What that covers:
+
+- the program's full import closure — 14 DLLs — loads, and every `DllMain` returns success
+- `HeapCreate` / `HeapAlloc` / `HeapValidate` / `HeapSize` / `HeapReAlloc` / `HeapFree` /
+  `HeapDestroy` on both a private heap and the process heap
+- `LoadLibraryA` of a native DLL beside the executable, `GetProcAddress` through its
+  export table, a call into it, and `FreeLibrary`
+- `CreateDXGIFactory1` reaching `wined3d`, which reports "no adapter" and returns a
+  proper `DXGI_ERROR_UNSUPPORTED` — there is no GPU backend wired up yet
+- `ExitProcess` and an orderly `PROCESS_DETACH` through all modules, with no fault
+
+### Fixes since the previous update
+
+- **Signal frames were read with the wrong layout.** The port had selected Wine's Linux
+  context macros (`uc_mcontext.gregs[]`) for the console, but the kernel delivers a
+  FreeBSD-style frame. A raw dump taken in the handler on hardware gave the real layout:
+  a 16-byte signal mask, 48 bytes of padding, then the machine context at **offset
+  0x40** — `mc_trapno` 0xc0, `mc_addr` 0xc8, `mc_err` 0xd8, `mc_rip` 0xe0, `mc_rsp` 0xf8,
+  the FXSAVE area at 0x140, `mc_len` 0x480. Until then Wine read the fault *address* as
+  the trap number, so every fault was reported as "unexpected trap N". The macros now use
+  the real layout, with compile-time assertions on those offsets. This is what makes
+  copy-on-write pages, guard pages and structured exceptions work.
+- **Locale data.** `get_nls_file_path()` and `NtInitializeNlsFiles()` built their paths
+  from Wine's data directory, like the casemap loader fixed earlier. With `locale.nls`
+  unavailable, `kernelbase` read through a NULL pointer in its initialiser. They now use
+  the packaged location.
+- **`opengl32` has no Unix half on the console** (there is no OpenGL), yet `wined3d.dll`
+  links against `opengl32.dll`, whose `DllMain` refuses to continue unless its Unix
+  library loads. `build-ps4-module/opengl32_ps4_stub.c` is a stand-in: it lets the DLL
+  initialise and answers every GL entry point with `STATUS_NOT_SUPPORTED`. It is built
+  like any other module and needs a PRX export descriptor naming
+  `__wine_unix_call_funcs` (`gen_prx_descriptor.py`).
+- **Staging.** The program's import closure was computed on the build host
+  (`objdump -p`, recursively) and staged in one pass rather than one missing DLL per run.
+
+### A note on testing against real Windows semantics
+
+The test program originally allocated from a heap immediately after `HeapDestroy` and
+expected `NULL`. A loader that tracks heap handles can return that; Windows unmaps the
+heap, so the access faults — and Wine reproduces Windows here. That check is compiled out
+for this run. It is a useful reminder that Wine brings Windows' actual behaviour,
+including its undefined behaviour.
+
+### Next: graphics
+
+Everything remaining for this program is on the graphics path:
+
+1. Select `wined3d`'s Vulkan renderer (it currently tries its OpenGL adapter).
+2. Give the Unix half of `win32u` a PRX export descriptor; without it no window or
+   graphics call can reach the Unix side
+   (`load_builtin_unixlib … win32u.so: module has no export descriptor`).
+3. Resolve the remaining unresolved imports in `libvulkan.prx` so RADV loads.
+4. Finish the RADV submission backend, which still has unimplemented paths.
+5. Link the native presentation/input/audio layer into the bootstrap so frames can reach
+   the screen.

@@ -21,6 +21,7 @@
 		<file targ_path="sce_sys/icon0.png" orig_path="sce_sys/icon0.png" />
 		<file targ_path="sce_sys/about/right.sprx" orig_path="sce_sys/about/right.sprx" />
 		<file targ_path="test.exe" orig_path="test.exe" />
+		<file targ_path="sce_module/x86_64-windows/opengl32.dll" orig_path="opengl32.dll" />
 		<file targ_path="sce_module/x86_64-windows/apisetschema.dll" orig_path="apisetschema.dll" />
 		<file targ_path="winprobe.dll" orig_path="winprobe.dll" />
 		<file targ_path="sce_module/x86_64-windows/d3d11.dll" orig_path="d3d11.dll" />
@@ -31,6 +32,7 @@
 		<file targ_path="sce_module/libvulkan.prx" orig_path="sce_module/libvulkan.prx" />
 		<file targ_path="sce_module/ntdll.prx" orig_path="sce_module/ntdll.prx" />
 		<file targ_path="sce_module/wineserver.prx" orig_path="sce_module/wineserver.prx" />
+		<file targ_path="sce_module/opengl32.prx" orig_path="sce_module/opengl32.prx" />
 		<file targ_path="sce_module/win32u.prx" orig_path="sce_module/win32u.prx" />
 		<file targ_path="sce_module/winevulkan.prx" orig_path="sce_module/winevulkan.prx" />
 		<file targ_path="sce_module/x86_64-windows/advapi32.dll" orig_path="advapi32.dll" />

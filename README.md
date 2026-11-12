@@ -9,12 +9,13 @@ RADV (Mesa's AMD Vulkan driver) behind a minimal native layer.
 
 Everything here is **early, experimental homebrew**. Today, on real hardware,
 the runtime boots Wine's Unix side: `ntdll` loads, the Wine prefix is created on
-the console, and the in-process **wineserver starts and the client connects to
-it** — Wine's own client/server handshake completes. Windows programs don't run
-yet; the next steps are finishing thread initialization, loading the Windows-side
-DLLs, and running a first `.exe`. Follow development in
-[WINE_PS4_STATUS.md](WINE_PS4_STATUS.md), which documents every milestone and the
-current blocker in detail.
+the console, the in-process **wineserver starts, the client connects, and Wine's
+first server request completes** — the process and its first thread are created
+and `server_init_process()` returns. Windows programs don't run yet; the runtime
+is currently in process-parameter setup, before the Windows-side `ntdll` is
+loaded. Follow development in [WINE_PS4_STATUS.md](WINE_PS4_STATUS.md), which
+documents every milestone, the kernel findings behind them, and the current
+blocker in detail.
 
 ## What this repository contains
 
@@ -60,9 +61,14 @@ the current build and collecting diagnostic logs.
 3. ~~Runtime boots on hardware; prefix created; wineserver loads~~ ✅
 4. ~~In-process wineserver connects; NLS loads; `SCM_RIGHTS` fd-passing replaced
    with in-process descriptors; client/server handshake works~~ ✅
-5. **Wine's first server request (`init_first_thread`) on hardware** (current blocker)
-6. Next: load the Windows-side `ntdll`/`kernel32`, run a trivial `.exe`, then
-   DXVK over RADV, then real games.
+5. ~~Wine's first server request (`init_first_thread`) completes on hardware;
+   process and first thread created~~ ✅
+6. **Process-parameter setup** (`build_initial_params`) — current work
+7. Next: ship a prepared Wine prefix (the console cannot create one — process
+   creation is unavailable), load the Windows-side `ntdll`/`kernel32`, and run a
+   trivial `.exe`
+8. Then: a native presentation/input layer so frames can reach the screen, then
+   D3D over RADV, then real games.
 
 ## Credits and standing on shoulders
 

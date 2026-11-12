@@ -242,3 +242,122 @@ Progress since the NLS-open blocker above. All of this is verified on real hardw
 next step is to narrow which line faults (the request round-trip vs. the `inproc_device`
 hand-off) and apply the same in-process fd handling if needed. After that: load the
 PE-side `ntdll` and run a first `.exe`.
+
+## Update: `init_first_thread` resolved — the handshake completes; process-parameter setup is next
+
+All of the following is verified on real hardware, with diagnostics written to a log
+file on the console's `/data` and read back over FTP.
+
+### The `init_first_thread` blocker was a non-blocking-I/O restriction
+
+The server handler reached `init_thread()` and the process then exited with no
+message. The cause was a single call:
+
+```c
+if (fcntl( reply_fd, F_SETFL, O_NONBLOCK ) == -1) goto error;   /* server/thread.c */
+```
+
+On the console this returns **`EACCES`**. Upstream's `error:` path then does
+`close(reply_fd); close(wait_fd)` — and because the in-process client and server share
+one file-descriptor table, those are the *client's* descriptors. The client was blocked
+in `read()` on its reply pipe; closing the write end made that read return `0`, which
+upstream treats as a protocol error and exits the process. The handler never got to log
+anything, so it looked like a segfault.
+
+### Why `fcntl(F_SETFL)` fails, from the kernel
+
+Reading the decompiled 13.02 kernel gave the exact mechanism:
+
+- `kern_fcntl`'s `F_SETFL` case calls `fp->f_ops->fo_ioctl(fp, FIONBIO, …)` and returns
+  its result verbatim. `kern_ioctl` dispatches to the **same** `fo_ioctl` slot — so
+  `ioctl(fd, FIONBIO, &one)` is *not* a workaround; it fails identically.
+- The refusal is at the top of the socket's `soo_ioctl`, before any command handling:
+  a credential check, and on failure it returns `EACCES`.
+- That check reads a 64-bit field in the process credential and tests **one capability
+  bit**. Ordinary homebrew does not have it. Stock FreeBSD's `soo_ioctl` has no such
+  check and `FIONBIO` never returns `EACCES`, so this is a vendor modification.
+
+**What does work**, also confirmed in the kernel:
+
+- **Use a `pipe()` rather than a `socketpair()`.** `pipe_ioctl` treats `FIONBIO` as a
+  no-op returning success — no capability check — and `pipe_read` honours the
+  `FNONBLOCK` flag directly. So plain `fcntl(F_SETFL, O_NONBLOCK)` works on a pipe.
+- **Or pass `MSG_DONTWAIT` per call.** `soreceive` blocks unless the socket has
+  `SS_NBIO` *or* the per-call flags request non-blocking, and that path is not gated.
+- `SOCK_NONBLOCK` at creation time does **not** exist in this kernel.
+
+The current build treats the failure as non-fatal and continues with a blocking reply
+socket, which is correct for the first thread because the client is always blocked
+reading the reply when the server writes it. Switching the reply channel to a `pipe()`
+is the proper fix.
+
+### Correction: `SCM_RIGHTS` is not simply absent
+
+An earlier section above states that the console's `AF_UNIX` sockets reject
+`SCM_RIGHTS`. That is too strong, and this is a correction. The kernel's
+`unp_externalize` — the receive half — **does** implement `SCM_RIGHTS`: it tests
+`cmsg_level == SOL_SOCKET && cmsg_type == SCM_RIGHTS` and allocates a descriptor per
+entry. What is actually established is narrower: *our* `sendmsg` with an `SCM_RIGHTS`
+control message returned `EINVAL`. The send-side `unp_internalize` has not been located
+(the `AF_UNIX` protocol handlers are reached through a dispatch table, so there are no
+textual cross-references to follow), so whether `SCM_RIGHTS` *send* is supported,
+inlined, or removed is **undetermined**. The raw-descriptor scheme this port uses works
+regardless, but it rests on a narrower fact than previously written here.
+
+Related: **`dup()` returns `EPERM`** on the console, so duplicating a received
+descriptor to restore ordinary ownership semantics is not available through that call.
+`fcntl(fd, F_DUPFD, 0)` is a different `kern_fcntl` case that does not route through the
+gated `fo_ioctl`, and is the next thing to try.
+
+### The handshake now completes
+
+With the above, the first server request succeeds end to end:
+
+```
+ifth: init_thread ok / affinity ok / base_priority ok
+ifth: pid=… tid=… info_size=0 nmach=2
+siproc: wsc ret=0
+wine startup: server connected
+```
+
+The process and its first thread exist, two machine architectures are reported, and
+`server_init_process()` returns.
+
+### Current work: process-parameter setup
+
+Past the handshake, `start_main_thread()` runs
+`virtual_map_user_shared_data → init_cpu_info → init_files → init_startup_info`. With no
+parent process, `init_startup_info()` calls `build_initial_params()`, and two further
+console-specific faults turned up there:
+
+- **`environ` is NULL.** Each PS4 module statically links its own libc, so `ntdll`'s
+  `environ` is never populated by the bootstrap. `get_initial_environment()` walks it
+  unguarded and dereferences NULL on the first iteration. It now treats a NULL `environ`
+  as an empty environment; Wine then builds the environment from the registry and its own
+  defaults, which is the right behaviour on a console anyway.
+- **The NLS casemap table was never loaded in `ntdll`.** `init_environment()` does:
+
+  ```c
+  if ((case_table = read_nls_file( "l_intl.nls" ))) { uctable = …; lctable = …; }
+  ```
+
+  `read_nls_file()` builds its path from Wine's data directory, which does not exist on
+  the console, so it silently returned NULL and **`uctable`/`lctable` stayed NULL**.
+  `ntdll_towupper()` indexes those tables with no guard, so the first case-insensitive
+  comparison in the boot path — `find_env_var()` — faulted (the console's crash report
+  gives exception code 11). The loader now reads NLS from where the package stages it,
+  the result is logged either way, and both inlines return the character unchanged if the
+  table is missing, so a future gap degrades to case-sensitive comparison instead of a
+  fault. This is the same class of bug as the earlier wineserver NLS failure, in the
+  other half of the runtime.
+
+Also fixed while here: Wine's `set_env_var()` does not check the result of `realloc`,
+and this port's allocator can legitimately return NULL; the unchecked result was then
+written through. It is now checked.
+
+### Packaging note
+
+Wine looks for its PE builtins in `<module dir>/x86_64-windows/`. The package manifest
+must stage the Windows-side DLLs there rather than at the application root, and must
+declare that nested directory in `<rootdir>` — the packaging tool fails on an
+undeclared subdirectory, exactly as it does for `nls/`.

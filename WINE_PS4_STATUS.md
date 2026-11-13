@@ -597,3 +597,40 @@ has been presented yet; that is the next run.
 1. First presented frame (clear + `Present`).
 2. Shaders: ship a compiler or precompiled bytecode so the test can draw geometry.
 3. Relink the remaining modules with the corrected linker script.
+
+## Update: first picture — a Direct3D 11 triangle on the television
+
+A Windows x64 program using Direct3D 11 now **draws on the console's display**. Seen on
+the television and confirmed in klog, in two steps:
+
+1. **Clear + Present.** 240 frames of `ClearRenderTargetView` + `Present` showed a
+   pulsing colour full-screen. klog: `wsi/orbis: present flip N -> 0x00000000` for every
+   frame, 1920x1080, zero-copy scan-out.
+2. **A shaded triangle.** The program creates a vertex shader, a pixel shader, an input
+   layout, a vertex buffer and a rasterizer state, and calls `Draw(3, 0)` each frame. A
+   red/green/blue triangle is drawn over the pulsing background, and the process exits
+   cleanly afterwards.
+
+The path a frame takes: `d3d11.dll` -> `wined3d.dll` (Vulkan renderer; DXBC translated
+to SPIR-V by the bundled vkd3d-shader) -> `winevulkan`/`win32u` -> RADV
+(`libvulkan.prx`) -> GNM submission -> `sceVideoOut` flip.
+
+Notes:
+
+- The shaders are `vs_4_0`/`ps_4_0` bytecode compiled from HLSL ahead of time on the
+  build host, using a host build of Wine and its `d3dcompiler_47`
+  (`build-ps4-module/hlslc.c`). `d3dcompiler` is not shipped in the package yet, so a
+  program that compiles HLSL at run time will not work until it is.
+- Full `+d3d,+vulkan` tracing makes a frame take a noticeable fraction of a second;
+  with warn-level tracing in `/data/pcps4_winedebug.txt` the test runs at speed.
+- This is one small program. No commercial game has been tried.
+
+### Next
+
+1. Textures, depth, constant buffers, indexed draws — a broader D3D11 test.
+2. Ship `d3dcompiler_47` and the rest of the commonly needed DLL set; a prepared prefix.
+3. Input (controller) and audio through the native layer.
+4. DXVK as an alternative to `wined3d` for D3D9-11.
+5. Relink the remaining modules with the corrected linker script; root-cause the
+   `dup()` and `regexec` workarounds.
+

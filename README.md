@@ -14,8 +14,9 @@ import closure load and initialise (`kernel32`, `user32`, `gdi32`, `d3d11`, `dxg
 `wined3d`, …), heap and loader APIs work, a native DLL is loaded and called, and the
 process shuts down cleanly. On the graphics side, RADV loads and **a Vulkan device is
 created on the console's GPU through Wine's Direct3D 11**; Wine runs multiple Windows
-threads; the swap chain reaches `sceVideoOut`. **Nothing is drawn yet** — video-out
-currently rejects the swap chain's resolution, which is the next thing to fix.
+threads; and `sceVideoOut` accepts a 1920x1080 zero-copy swap chain, so
+`D3D11CreateDeviceAndSwapChain` succeeds. **Nothing is drawn yet** — presenting the
+first frame is the next step.
 Follow development in [WINE_PS4_STATUS.md](WINE_PS4_STATUS.md), which documents every
 milestone, the kernel findings behind them, and the current blocker in detail.
 

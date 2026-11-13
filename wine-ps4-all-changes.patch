@@ -6297,7 +6297,7 @@ index 6ed5b77..3db7885 100644
          return (ULONG_PTR)get_dialog_proc( (DLGPROC)arg1, arg2 );
  
 diff --git a/dlls/win32u/vulkan.c b/dlls/win32u/vulkan.c
-index 261c10c..7fadce0 100644
+index 261c10c..04d9108 100644
 --- a/dlls/win32u/vulkan.c
 +++ b/dlls/win32u/vulkan.c
 @@ -448,12 +448,14 @@ static VkResult convert_instance_create_info( struct mempool *pool, VkInstanceCr
@@ -6327,15 +6327,48 @@ index 261c10c..7fadce0 100644
              physical_device->map_placed_align = map_placed_props.minPlacedMemoryMapAlignment;
              TRACE( "Using placed map with alignment %u\n", physical_device->map_placed_align );
          }
-@@ -1861,6 +1863,7 @@ static VkResult win32u_vkCreateSwapchainKHR( VkDevice client_device, const VkSwa
-         physical_device->extensions.has_VK_KHR_swapchain_maintenance1)
+@@ -1609,6 +1611,15 @@ static void adjust_surface_capabilities( struct vulkan_instance *instance, struc
+     capabilities->maxImageExtent.height = client_rect.bottom - client_rect.top;
+     capabilities->currentExtent.width = client_rect.right - client_rect.left;
+     capabilities->currentExtent.height = client_rect.bottom - client_rect.top;
++#ifdef __ORBIS__
++    /* PS4: a swapchain's images are registered with sceVideoOut as scan-out
++     * buffers, and video-out only accepts a real display mode.  Report the
++     * console's output size whatever the window's client area is; the client
++     * (wined3d, DXVK) stretches its back buffer to it on present. */
++    capabilities->minImageExtent.width = capabilities->maxImageExtent.width = capabilities->currentExtent.width = 1920;
++    capabilities->minImageExtent.height = capabilities->maxImageExtent.height = capabilities->currentExtent.height = 1080;
++    TRACE( "hwnd %p client %s -> display extent 1920x1080\n", surface->hwnd, wine_dbgstr_rect( &client_rect ) );
++#endif
+ }
+ 
+ static VkResult win32u_vkGetPhysicalDeviceSurfaceCapabilitiesKHR( VkPhysicalDevice client_physical_device, VkSurfaceKHR client_surface,
+@@ -1854,13 +1865,23 @@ static VkResult win32u_vkCreateSwapchainKHR( VkDevice client_device, const VkSwa
+      * display mode change emulation), MoltenVK's vkQueuePresentKHR returns VK_SUBOPTIMAL_KHR.
+      * Create the swapchain with VkSwapchainPresentScalingCreateInfoEXT to avoid this.
+      */
++#ifdef __ORBIS__
++    TRACE( "client extent %ux%u -> scan-out extent 1920x1080\n", create_info_host.imageExtent.width, create_info_host.imageExtent.height );
++    create_info_host.imageExtent.width = 1920;
++    create_info_host.imageExtent.height = 1080;
++#endif
+     get_win_monitor_dpi( surface->hwnd, &raw_dpi );
+     if (get_surface_rect( surface->hwnd, &client_rect, raw_dpi ) &&
+         !extents_equals( &create_info_host.imageExtent, &client_rect ) &&
+         instance->extensions.has_VK_EXT_surface_maintenance1 &&
+-        physical_device->extensions.has_VK_KHR_swapchain_maintenance1)
++        physical_device->extensions.has_VK_KHR_swapchain_maintenance1
++#ifdef __ORBIS__
++        && 0 /* the console's WSI reports no present scaling */
++#endif
++        )
      {
          scaling.scalingBehavior = VK_PRESENT_SCALING_STRETCH_BIT_EXT;
 +        scaling.pNext = create_info_host.pNext;
          create_info_host.pNext = &scaling;
      }
  
-@@ -2020,6 +2023,13 @@ static VkResult win32u_vkQueuePresentKHR( VkQueue client_queue, const VkPresentI
+@@ -2020,6 +2041,13 @@ static VkResult win32u_vkQueuePresentKHR( VkQueue client_queue, const VkPresentI
  
      if (swapchains != swapchains_buffer) free( swapchains );
  
@@ -6349,7 +6382,7 @@ index 261c10c..7fadce0 100644
      if (TRACE_ON( fps ))
      {
          static unsigned long frames, frames_total;
-@@ -3163,14 +3173,17 @@ struct vulkan_instance *vulkan_instance_create( const struct vulkan_instance_ext
+@@ -3163,14 +3191,17 @@ struct vulkan_instance *vulkan_instance_create( const struct vulkan_instance_ext
      const struct vulkan_funcs *funcs = __wine_get_vulkan_driver( WINE_VULKAN_DRIVER_VERSION );
      VkInstanceCreateInfo create_info = {.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
      const char *extension_names[sizeof(*extensions) * 8];
@@ -6368,7 +6401,7 @@ index 261c10c..7fadce0 100644
      ALL_VK_INSTANCE_EXTS
  #undef USE_VK_EXT
  
-@@ -3180,7 +3193,7 @@ struct vulkan_instance *vulkan_instance_create( const struct vulkan_instance_ext
+@@ -3180,7 +3211,7 @@ struct vulkan_instance *vulkan_instance_create( const struct vulkan_instance_ext
  
          if (!(wrapper = calloc( 1, offsetof(struct instance_wrapper, client.physical_device[device_count]) ))) return NULL;
          wrapper->client.physical_device_count = device_count;
@@ -6606,7 +6639,7 @@ index 3c55a80..4f3b42e 100644
 +#endif
 +}
 diff --git a/dlls/wined3d/swapchain.c b/dlls/wined3d/swapchain.c
-index 6609219..54cd836 100644
+index 6609219..bf3696d 100644
 --- a/dlls/wined3d/swapchain.c
 +++ b/dlls/wined3d/swapchain.c
 @@ -754,6 +754,13 @@ static VkFormat get_swapchain_fallback_format(VkFormat vk_format)
@@ -6641,6 +6674,24 @@ index 6609219..54cd836 100644
      }
      free(vk_formats);
      if (i == format_count)
+@@ -1836,6 +1854,17 @@ HRESULT wined3d_swapchain_vk_init(struct wined3d_swapchain_vk *swapchain_vk, str
+         return hr;
+     }
+ 
++    /* PS4: the console has a single video output, and a Vulkan swapchain
++     * claims it (sceVideoOutOpen).  DXGI creates an implicit swapchain on a
++     * hidden device window with every device; it is never presented, so do
++     * not let it take the display away from the application's swapchain. */
++    if ((desc->flags & WINED3D_SWAPCHAIN_IMPLICIT) && !IsWindowVisible(swapchain_vk->s.win_handle))
++    {
++        WARN("Not creating a Vulkan swapchain for hidden implicit swapchain window %p.\n",
++                swapchain_vk->s.win_handle);
++        return hr;
++    }
++
+     if (FAILED(hr = wined3d_swapchain_vk_create_vulkan_swapchain(swapchain_vk)))
+     {
+         WARN("Failed to create a Vulkan swapchain, hr %#lx.\n", hr);
 diff --git a/dlls/winevulkan/Makefile.in b/dlls/winevulkan/Makefile.in
 index de43314..acadabc 100644
 --- a/dlls/winevulkan/Makefile.in

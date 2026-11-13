@@ -542,9 +542,10 @@ chain on the console's video output. On hardware, in order:
 - A window surface is created, a surface format is selected, and
   `vkCreateSwapchainKHR` reaches `sceVideoOutRegisterBuffers`.
 
-**Current blocker:** `sceVideoOutRegisterBuffers` returns `0x80290005` (invalid
-resolution). The test window's client area is 118x2 and the swap chain inherits it;
-video-out only accepts real display modes.
+**Update:** video-out now accepts the swap chain. RADV reports
+`scan-out up - 1920x1080 pitch 1920, 4 swapchain buffer(s), A8B8G8R8_SRGB linear - ZERO COPY`,
+and `D3D11CreateDeviceAndSwapChain` returns a device and an `IDXGISwapChain`. No frame
+has been presented yet; that is the next run.
 
 ### What had to be fixed
 
@@ -580,9 +581,19 @@ video-out only accepts real display modes.
 - **Signal frames use the FreeBSD/PS4 `mcontext` layout**, not Linux's `gregs[]`.
 - `HKCU\Software\Wine\Direct3D\renderer` defaults to `vulkan`.
 
+- **Video-out only accepts a real display mode.** `sceVideoOutRegisterBuffers` returns
+  `0x80290005` for a window-sized swap chain. `win32u` reports the surface extent as
+  1920x1080 regardless of the window's client area, and creates the host swap chain at
+  that size; `wined3d` stretches its back buffer to it on present.
+- **There is one video output.** DXGI creates an implicit swap chain on a hidden device
+  window with every device, and a Vulkan swap chain claims the display
+  (`sceVideoOutOpen` then fails busy for the application's own). `wined3d` no longer
+  creates a Vulkan swap chain for a hidden implicit swap-chain window.
+- The test program needed two changes to be valid on Windows at all: a real output
+  window, and a non-NULL interface id for `IDXGISwapChain::GetBuffer`.
+
 ### Next
 
-1. Give the swap chain a resolution video-out accepts (present the window through a
-   display-sized swap chain).
-2. First presented frame.
+1. First presented frame (clear + `Present`).
+2. Shaders: ship a compiler or precompiled bytecode so the test can draw geometry.
 3. Relink the remaining modules with the corrected linker script.

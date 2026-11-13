@@ -41,7 +41,10 @@ SECTIONS
 	}
 	
 	.init_array : {
-		*(.init_array);
+		/* Prioritised constructors live in .init_array.<N>; without this they
+		 * fall outside __init_array_start/__init_array_end and never run. */
+		KEEP(*(SORT_BY_INIT_PRIORITY(.init_array.*)));
+		KEEP(*(.init_array));
 	}
 	
 	.dynamic : {

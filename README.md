@@ -12,8 +12,10 @@ Everything here is **early, experimental homebrew**. Today, on real hardware,
 in-process wineserver handshake completes, a Windows x64 executable and its 14-DLL
 import closure load and initialise (`kernel32`, `user32`, `gdi32`, `d3d11`, `dxgi`,
 `wined3d`, …), heap and loader APIs work, a native DLL is loaded and called, and the
-process shuts down cleanly. **Nothing is drawn yet** — the Direct3D call the test makes
-fails cleanly because no GPU backend is wired up. Graphics is the remaining work.
+process shuts down cleanly. On the graphics side, RADV loads and **a Vulkan device is
+created on the console's GPU through Wine's Direct3D 11**; Wine runs multiple Windows
+threads; the swap chain reaches `sceVideoOut`. **Nothing is drawn yet** — video-out
+currently rejects the swap chain's resolution, which is the next thing to fix.
 Follow development in [WINE_PS4_STATUS.md](WINE_PS4_STATUS.md), which documents every
 milestone, the kernel findings behind them, and the current blocker in detail.
 
@@ -22,7 +24,7 @@ milestone, the kernel findings behind them, and the current blocker in detail.
 | Path | What it is |
 |---|---|
 | `wine-ps4-all-changes.patch` | The complete diff against upstream Wine that makes it build and run for PS4 (113 files; includes bring-up instrumentation) |
-| `build-ps4-module/` | Per-module build pipeline: linker script (16 KiB alignment), TLS stripping, PRX descriptor generation, packaging manifest, and a stub Unix half for `opengl32` |
+| `build-ps4-module/` | Per-module build pipeline: linker script (16 KiB alignment), TLS stripping, PRX descriptor generation, packaging manifest, a stub Unix half for `opengl32`, the RADV/`win32u`/`winevulkan` link shims, and an import-tag verifier |
 | `eboot-src/` | The tiny bootstrap that loads `ntdll.prx` and calls `__wine_main` |
 | `wine-ps4-shims/` | Headers and shims for the gaps between Wine and OrbisOS/FreeBSD 9 |
 | `WINE_PS4_STATUS.md` | Build recipe + status; start here to understand the port |

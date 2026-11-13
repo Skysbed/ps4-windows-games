@@ -525,3 +525,64 @@ Everything remaining for this program is on the graphics path:
 4. Finish the RADV submission backend, which still has unimplemented paths.
 5. Link the native presentation/input/audio layer into the bootstrap so frames can reach
    the screen.
+
+## Update: graphics bring-up — a Vulkan device through Direct3D 11
+
+The test program's `D3D11CreateDeviceAndSwapChain` now gets as far as creating the swap
+chain on the console's video output. On hardware, in order:
+
+- `win32u`'s Unix half loads as a PRX and binds its 131 imports from `ntdll`.
+- RADV (`libvulkan.prx`, Mesa's "orbis" platform) loads, runs its constructors, and
+  `vkCreateInstance` succeeds. The physical device enumerates as
+  `PlayStation 4 Liverpool (RADV ORBIS)`, `1002:9920`, Vulkan 1.4.
+- Wine registers a GPU and a monitor, `wined3d` selects its Vulkan renderer, and the
+  `winevulkan` PE-to-Unix thunks work.
+- `wined3d`'s Vulkan adapter initialises and **`vkCreateDevice` succeeds**.
+- Wine creates a second Windows thread (`wined3d`'s command stream) and it runs.
+- A window surface is created, a surface format is selected, and
+  `vkCreateSwapchainKHR` reaches `sceVideoOutRegisterBuffers`.
+
+**Current blocker:** `sceVideoOutRegisterBuffers` returns `0x80290005` (invalid
+resolution). The test window's client area is 118x2 and the swap chain inherits it;
+video-out only accepts real display modes.
+
+### What had to be fixed
+
+- **The linker script dropped prioritised constructors.** `link_ps4mod.x` only kept
+  `*(.init_array)`, so every `.init_array.<N>` section was orphaned and never ran. It
+  now keeps `SORT_BY_INIT_PRIORITY(.init_array.*)` first. This silently broke anything
+  relying on `__attribute__((constructor(N)))`.
+- **`create-fself` can tag an import with the wrong library** when more than one input
+  library mentions the symbol (a library that merely *imports* a name can be chosen).
+  The console then reports `PRX_NOT_RESOLVED_FUNCTION` in klog. `verify_imports.py`
+  checks every import's tag against the libraries that actually define it; convert each
+  module against a directory containing only the libraries it should import from
+  (`win32u_stub.c` is the stand-in used when converting `winevulkan`).
+- **Self-imports are mis-bound.** A module that imports a symbol it also defines can be
+  bound to the wrong object by the console's loader. RADV is linked `-Bsymbolic`.
+- **`dlopen`/`dlsym`/`dlclose` bind to the libkernel stub.** `win32u` reaches them
+  through `--wrap` into the port's own module loader (`ps4_dl_forward.c`).
+- **RADV needs real per-thread TLS.** `ps4_tls_block_shim.c` gives each thread its own
+  block from a static pool and serves `__tls_get_addr` from it.
+- **`libvulkan_shim.c`** exports the loader entry points RADV's ICD does not
+  (`vkGetInstanceProcAddr`, `vkGetDeviceProcAddr`), supplies a program name (Mesa calls
+  `strlen` on it), and replaces `regexec`, which faults on the console for a reason not
+  yet understood (driconf application matching is skipped as a result).
+- **Presentation is `VK_EXT_headless_surface`.** RADV on this console has no
+  `VK_KHR_display`; its headless surface type is wired to `sceVideoOut`. Wine's console
+  display driver now maps `VK_KHR_win32_surface` to it instead of to a display plane.
+- **Only R-first surface formats exist** (the scan-out buffer is A8B8G8R8). `wined3d`
+  falls back from `B8G8R8A8` to `R8G8B8A8` and converts on present.
+- **Thread creation with a shared descriptor table.** Because `dup()` is refused, the
+  in-process server uses the client's descriptor numbers directly. The client must not
+  close the new thread's request pipe or reply pipe after handing them over, and the
+  server tolerates `F_SETFL` being refused on the request pipe.
+- **Signal frames use the FreeBSD/PS4 `mcontext` layout**, not Linux's `gregs[]`.
+- `HKCU\Software\Wine\Direct3D\renderer` defaults to `vulkan`.
+
+### Next
+
+1. Give the swap chain a resolution video-out accepts (present the window through a
+   display-sized swap chain).
+2. First presented frame.
+3. Relink the remaining modules with the corrected linker script.

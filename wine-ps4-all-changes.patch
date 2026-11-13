@@ -1651,7 +1651,7 @@ index d234b20..1b2e7a6 100644
                      if (size >= sizeof(VM_COUNTERS_EX))
                          pvmi.PrivateUsage = pvmi.PagefileUsage;
 diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
-index 06eb740..a3ef3ad 100644
+index 06eb740..163bc67 100644
 --- a/dlls/ntdll/unix/server.c
 +++ b/dlls/ntdll/unix/server.c
 @@ -24,8 +24,16 @@
@@ -2508,7 +2508,20 @@ index 06eb740..a3ef3ad 100644
      SERVER_START_REQ( init_thread )
      {
          req->unix_tid  = get_unix_tid();
-@@ -1857,6 +2513,8 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
+@@ -1806,7 +2462,12 @@ void server_init_thread( struct thread_data *data )
+         data->suspend = reply->suspend;
+     }
+     SERVER_END_REQ;
++#ifndef __PROSPERO__
+     close( reply_pipe );
++#else
++    /* PS4: shared fd table -- reply_pipe is the server's thread->reply_fd. */
++    { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"sit: thread init done, keeping reply fd %d\n",reply_pipe);fclose(_l);} }
++#endif
+ 
+     if (data->teb)
+     {
+@@ -1857,6 +2518,8 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
      unsigned int ret;
      int fd = -1;
  
@@ -2517,7 +2530,7 @@ index 06eb740..a3ef3ad 100644
      if (dest) *dest = 0;
  
      if ((options & DUPLICATE_CLOSE_SOURCE) && source_process != NtCurrentProcess())
-@@ -1889,6 +2547,7 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
+@@ -1889,6 +2552,7 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
      if (options & DUPLICATE_CLOSE_SOURCE)
      {
          fd = remove_fd_from_cache( source );
@@ -2525,7 +2538,7 @@ index 06eb740..a3ef3ad 100644
          close_inproc_sync( source );
      }
  
-@@ -1909,7 +2568,9 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
+@@ -1909,7 +2573,9 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
  
      server_leave_uninterrupted_section( &fd_cache_mutex, &sigset );
  
@@ -2535,7 +2548,7 @@ index 06eb740..a3ef3ad 100644
      return ret;
  }
  
-@@ -1953,6 +2614,7 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
+@@ -1953,6 +2619,7 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
      unsigned int ret;
      int fd;
  
@@ -2543,7 +2556,7 @@ index 06eb740..a3ef3ad 100644
      if (HandleToLong( handle ) >= ~5 && HandleToLong( handle ) <= ~0)
          return STATUS_SUCCESS;
  
-@@ -1963,6 +2625,7 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
+@@ -1963,6 +2630,7 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
      /* always remove the cached fd; if the server request fails we'll just
       * retrieve it again */
      fd = remove_fd_from_cache( handle );
@@ -2551,7 +2564,7 @@ index 06eb740..a3ef3ad 100644
      close_inproc_sync( handle );
  
      SERVER_START_REQ( close_handle )
-@@ -1974,7 +2637,9 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
+@@ -1974,7 +2642,9 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
  
      server_leave_uninterrupted_section( &fd_cache_mutex, &sigset );
  
@@ -2562,7 +2575,7 @@ index 06eb740..a3ef3ad 100644
      if (ret != STATUS_INVALID_HANDLE || !handle) return ret;
      if (!peb->BeingDebugged) return ret;
 diff --git a/dlls/ntdll/unix/signal_x86_64.c b/dlls/ntdll/unix/signal_x86_64.c
-index e612e5e..ca7db00 100644
+index e612e5e..217a5e2 100644
 --- a/dlls/ntdll/unix/signal_x86_64.c
 +++ b/dlls/ntdll/unix/signal_x86_64.c
 @@ -29,6 +29,7 @@
@@ -3083,7 +3096,40 @@ index e612e5e..ca7db00 100644
      RIP_sig(sigcontext) = (ULONG_PTR)pKiUserExceptionDispatcher;
      RSP_sig(sigcontext) = (ULONG_PTR)stack;
      /* clear single-step, direction, and align check flag */
-@@ -2101,6 +2459,25 @@ static BOOL handle_syscall_fault( struct thread_data *data, ucontext_t *sigconte
+@@ -2089,6 +2447,32 @@ static BOOL handle_syscall_fault( struct thread_data *data, ucontext_t *sigconte
+ 
+     if (!is_inside_syscall( data, RSP_sig(sigcontext) )) return FALSE;
+ 
++#ifdef __ORBIS__
++    /* PS4 bring-up: a fault on the Unix side.  Record the faulting address and
++     * a frame-pointer backtrace so it can be symbolised against the module map
++     * the loader logs. */
++    {
++        FILE *_f = fopen( "/data/pcps4_srv.log", "a" );
++        if (_f)
++        {
++            unsigned long rip = RIP_sig(sigcontext), rsp = RSP_sig(sigcontext), rbp = RBP_sig(sigcontext);
++            int n;
++            fprintf( _f, "ufault: rip=%lx addr=%lx trap=%u err=%lx rsp=%lx rbp=%lx\n", rip,
++                     (unsigned long)PS4_MC(sigcontext)->mc_addr, (unsigned)TRAP_sig(sigcontext),
++                     (unsigned long)ERROR_sig(sigcontext), rsp, rbp );
++            for (n = 0; n < 14; n++)
++            {
++                unsigned long *fp = (unsigned long *)rbp;
++                if (rbp < rsp || rbp > rsp + 0x200000 || (rbp & 7)) break;
++                fprintf( _f, "ufault:   #%d ret=%lx\n", n, fp[1] );
++                if (fp[0] <= rbp) break;
++                rbp = fp[0];
++            }
++            fclose( _f );
++        }
++    }
++#endif
++
+     TRACE_(seh)( "code=%x flags=%x addr=%p ip=%lx\n",
+                  rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress, context->Rip );
+     for (i = 0; i < rec->NumberParameters; i++)
+@@ -2101,6 +2485,25 @@ static BOOL handle_syscall_fault( struct thread_data *data, ucontext_t *sigconte
                   context->R8, context->R9, context->R10, context->R11 );
      TRACE_(seh)( " r12=%016lx r13=%016lx r14=%016lx r15=%016lx\n",
                   context->R12, context->R13, context->R14, context->R15 );
@@ -3109,7 +3155,7 @@ index e612e5e..ca7db00 100644
  
      if (data->jmp_buf)
      {
-@@ -2270,18 +2647,71 @@ static inline BOOL check_invalid_gsbase( struct thread_data *data, ucontext_t *u
+@@ -2270,18 +2673,71 @@ static inline BOOL check_invalid_gsbase( struct thread_data *data, ucontext_t *u
  }
  
  
@@ -3183,7 +3229,7 @@ index e612e5e..ca7db00 100644
      save_context( data, &context, sigcontext );
  
      switch(TRAP_sig(sigcontext))
-@@ -2319,6 +2749,8 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -2319,6 +2775,8 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
          if (!virtual_handle_fault( data, &rec, (void *)RSP_sig(sigcontext) ) ||
              check_invalid_gsbase( data, sigcontext ))
          {
@@ -3192,7 +3238,7 @@ index e612e5e..ca7db00 100644
              leave_handler( data, sigcontext );
              return;
          }
-@@ -2356,6 +2788,14 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -2356,6 +2814,14 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
          rec.ExceptionCode = EXCEPTION_ILLEGAL_INSTRUCTION;
          break;
      }
@@ -3207,7 +3253,7 @@ index e612e5e..ca7db00 100644
      if (handle_syscall_fault( data, sigcontext, &rec, &context.c )) return;
      setup_raise_exception( data, sigcontext, &rec, &context );
  }
-@@ -2366,7 +2806,7 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -2366,7 +2832,7 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
   *
   * Handler for SIGTRAP.
   */
@@ -3216,7 +3262,7 @@ index e612e5e..ca7db00 100644
  {
      ucontext_t *sigcontext = _sigcontext;
      struct thread_data *data = init_handler( sigcontext );
-@@ -2375,6 +2815,13 @@ static void trap_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -2375,6 +2841,13 @@ static void trap_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
  
      if (handle_syscall_trap( data, sigcontext, siginfo )) return;
  
@@ -3230,7 +3276,7 @@ index e612e5e..ca7db00 100644
      save_context( data, &context, sigcontext );
  
      switch (TRAP_sig(sigcontext))
-@@ -2413,7 +2860,7 @@ static void trap_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -2413,7 +2886,7 @@ static void trap_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
   *
   * Handler for SIGFPE.
   */
@@ -3239,7 +3285,7 @@ index e612e5e..ca7db00 100644
  {
      ucontext_t *sigcontext = _sigcontext;
      struct thread_data *data = init_handler( sigcontext );
-@@ -2488,7 +2935,7 @@ static void fpe_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -2488,7 +2961,7 @@ static void fpe_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
   *
   * Handler for SIGINT.
   */
@@ -3248,7 +3294,7 @@ index e612e5e..ca7db00 100644
  {
      ucontext_t *sigcontext = _sigcontext;
      struct thread_data *data = init_handler( sigcontext );
-@@ -2509,7 +2956,7 @@ static void int_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -2509,7 +2982,7 @@ static void int_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
   *
   * Handler for SIGABRT.
   */
@@ -3257,7 +3303,7 @@ index e612e5e..ca7db00 100644
  {
      ucontext_t *sigcontext = _sigcontext;
      struct thread_data *data = init_handler( sigcontext );
-@@ -2528,7 +2975,7 @@ static void abrt_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -2528,7 +3001,7 @@ static void abrt_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
   *
   * Handler for SIGQUIT.
   */
@@ -3266,7 +3312,7 @@ index e612e5e..ca7db00 100644
  {
      ucontext_t *sigcontext = _sigcontext;
      struct thread_data *data = init_handler( sigcontext );
-@@ -2543,7 +2990,7 @@ static void quit_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -2543,7 +3016,7 @@ static void quit_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
   *
   * Handler for SIGUSR1, used to signal a thread that it got suspended.
   */
@@ -3275,7 +3321,7 @@ index e612e5e..ca7db00 100644
  {
      ucontext_t *sigcontext = _sigcontext;
      struct thread_data *data = init_handler( sigcontext );
-@@ -2724,6 +3171,7 @@ NTSTATUS signal_alloc_thread( TEB *teb )
+@@ -2724,6 +3197,7 @@ NTSTATUS signal_alloc_thread( TEB *teb )
      struct amd64_thread_data *thread_data = (struct amd64_thread_data *)&teb->GdiTebBatch;
      WOW_TEB *wow_teb = get_wow_teb( teb );
  
@@ -3283,7 +3329,7 @@ index e612e5e..ca7db00 100644
      if (wow_teb)
      {
          if (!fs32_sel)
-@@ -2733,6 +3181,12 @@ NTSTATUS signal_alloc_thread( TEB *teb )
+@@ -2733,6 +3207,12 @@ NTSTATUS signal_alloc_thread( TEB *teb )
          }
          else thread_data->fs = fs32_sel;
      }
@@ -3296,7 +3342,7 @@ index e612e5e..ca7db00 100644
      thread_data->frame_size = frame_size;
      return STATUS_SUCCESS;
  }
-@@ -2745,7 +3199,9 @@ void signal_free_thread( TEB *teb )
+@@ -2745,7 +3225,9 @@ void signal_free_thread( TEB *teb )
  {
      struct amd64_thread_data *thread_data = (struct amd64_thread_data *)&teb->GdiTebBatch;
  
@@ -3306,7 +3352,7 @@ index e612e5e..ca7db00 100644
  }
  
  
-@@ -2811,8 +3267,23 @@ void signal_init_process( TEB *teb )
+@@ -2811,8 +3293,23 @@ void signal_init_process( TEB *teb )
  
      /* sneak in a syscall dispatcher pointer at a fixed address (7ffe1000) */
      ptr = (char *)user_shared_data + page_size;
@@ -3332,7 +3378,7 @@ index e612e5e..ca7db00 100644
  
      __asm__( "movw %%cs,%0" : "=m" (cs64_sel) );
      __asm__( "movw %%ss,%0" : "=m" (ds64_sel) );
-@@ -2832,28 +3303,33 @@ void signal_init_process( TEB *teb )
+@@ -2832,28 +3329,33 @@ void signal_init_process( TEB *teb )
      alloc_syscall_frame( (frame_size + 63) & ~63 );
      signal_alloc_thread( teb );
  
@@ -3383,7 +3429,7 @@ index e612e5e..ca7db00 100644
  #endif
  
  #ifdef __linux__
-@@ -2861,7 +3337,7 @@ void signal_init_process( TEB *teb )
+@@ -2861,7 +3363,7 @@ void signal_init_process( TEB *teb )
      {
          struct sigaction act;
  
@@ -3392,7 +3438,7 @@ index e612e5e..ca7db00 100644
          {
              WARN_(seh)( "failed to retrieve signal restorer trampoline\n" );
              syscall_dispatch_enabled = FALSE;
-@@ -2874,6 +3350,16 @@ void signal_init_process( TEB *teb )
+@@ -2874,6 +3376,16 @@ void signal_init_process( TEB *teb )
      }
  #endif
  
@@ -3409,7 +3455,7 @@ index e612e5e..ca7db00 100644
      return;
  
   error:
-@@ -2908,8 +3394,17 @@ void init_syscall_frame( LPTHREAD_START_ROUTINE entry, void *arg, TEB *teb )
+@@ -2908,8 +3420,17 @@ void init_syscall_frame( LPTHREAD_START_ROUTINE entry, void *arg, TEB *teb )
                                             libc_addr, libc_size, &thread_data->syscall_dispatch ) < 0)
          WARN_(seh)( "could not enable syscall user dispatch\n" );
  #elif defined (__FreeBSD__) || defined (__FreeBSD_kernel__)
@@ -3427,7 +3473,7 @@ index e612e5e..ca7db00 100644
  #elif defined(__NetBSD__)
      sysarch( X86_64_SET_GSBASE, &teb );
  #elif defined (__APPLE__)
-@@ -3124,6 +3619,8 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
+@@ -3124,6 +3645,8 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                     "syscall\n\t"
                     "leaq -0x98(%rbp),%rcx\n"
                     "2:\n\t"
@@ -3436,7 +3482,7 @@ index e612e5e..ca7db00 100644
  #elif defined(__FreeBSD__)
                     "movq 0x320(%r13),%rsi\n\t"     /* amd64_thread_data()->pthread_teb */
                     "testq %rsi,%rsi\n\t"
-@@ -3441,6 +3938,8 @@ __ASM_GLOBAL_FUNC( __wine_unix_call_dispatcher,
+@@ -3441,6 +3964,8 @@ __ASM_GLOBAL_FUNC( __wine_unix_call_dispatcher,
                     "mov $158,%eax\n\t"             /* SYS_arch_prctl */
                     "syscall\n\t"
                     "2:\n\t"
@@ -3838,7 +3884,7 @@ index 5e30f0e..107d5d1 100644
          {
              static int clockrate_name[] = { CTL_KERN, KERN_CLOCKRATE };
 diff --git a/dlls/ntdll/unix/thread.c b/dlls/ntdll/unix/thread.c
-index c6b99b7..0477c55 100644
+index c6b99b7..2aee778 100644
 --- a/dlls/ntdll/unix/thread.c
 +++ b/dlls/ntdll/unix/thread.c
 @@ -1116,6 +1116,10 @@ static void contexts_from_server( CONTEXT *context, struct context_data server_c
@@ -3852,7 +3898,22 @@ index c6b99b7..0477c55 100644
      close( data->alert_fd );
      close( data->wait_fd[0] );
      close( data->wait_fd[1] );
-@@ -1312,6 +1316,9 @@ static NTSTATUS create_server_thread( HANDLE *handle, struct thread_data **data_
+@@ -1292,7 +1296,14 @@ static NTSTATUS create_server_thread( HANDLE *handle, struct thread_data **data_
+             *handle = wine_server_ptr_handle( reply->handle );
+             tid = reply->tid;
+         }
++#ifdef __ORBIS__
++        /* PS4: the in-process server could not dup() the descriptor, so it is
++         * using this very fd number as the new thread's request pipe.  It owns
++         * it now (and closes it itself on failure). */
++        { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"cst: new_thread status=%08x tid=%04x req_fd=%d\n",(unsigned)status,(unsigned)tid,request_pipe[0]);fclose(_l);} }
++#else
+         close( request_pipe[0] );
++#endif
+     }
+     SERVER_END_REQ;
+ 
+@@ -1312,6 +1323,9 @@ static NTSTATUS create_server_thread( HANDLE *handle, struct thread_data **data_
  
      data->request_fd = request_pipe[1];
      data->tid        = tid;
@@ -3862,15 +3923,27 @@ index c6b99b7..0477c55 100644
      data->start      = start;
      data->param      = param;
  
-@@ -1336,6 +1343,7 @@ static NTSTATUS spawn_thread( struct thread_data *data )
+@@ -1336,11 +1350,18 @@ static NTSTATUS spawn_thread( struct thread_data *data )
      pthread_attr_setguardsize( &attr, 0 );
      pthread_attr_setscope( &attr, PTHREAD_SCOPE_SYSTEM ); /* force creating a kernel thread */
      InterlockedIncrement( &nb_threads );
+-    if (pthread_create( &pthread_id, &attr, (void * (*)(void *))server_init_thread, data ))
 +    data->ps5_spawn_us = ps5_slow_log() ? ps5_now_us() : 0;
-     if (pthread_create( &pthread_id, &attr, (void * (*)(void *))server_init_thread, data ))
++    {
++    int _rc = pthread_create( &pthread_id, &attr, (void * (*)(void *))server_init_thread, data );
++#ifdef __ORBIS__
++    { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"spt: pthread_create rc=%d stack=%p size=%lx\n",_rc,get_kernel_stack( data ),(unsigned long)kernel_stack_size);fclose(_l);} }
++#endif
++    if (_rc)
      {
          InterlockedDecrement( &nb_threads );
-@@ -1459,7 +1467,13 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle, ACCESS_MASK access, OBJECT_ATT
+         status = STATUS_NO_MEMORY;
+     }
++    }
+     pthread_attr_destroy( &attr );
+     pthread_sigmask( SIG_SETMASK, &sigset, NULL );
+     return status;
+@@ -1459,7 +1480,13 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle, ACCESS_MASK access, OBJECT_ATT
      teb = data->teb;
      set_thread_id( data );
  
@@ -3885,7 +3958,7 @@ index c6b99b7..0477c55 100644
          goto done;
  
      teb->SkipThreadAttach = !!(flags & THREAD_CREATE_FLAGS_SKIP_THREAD_ATTACH);
-@@ -1951,6 +1965,7 @@ NTSTATUS get_thread_context( HANDLE handle, void *context, BOOL *self, USHORT ma
+@@ -1951,6 +1978,7 @@ NTSTATUS get_thread_context( HANDLE handle, void *context, BOOL *self, USHORT ma
          server_enter_uninterrupted_section( &fd_cache_mutex, &sigset );
  
          /* remove the handle from the cache, get_thread_context will close it for us */
@@ -4882,6 +4955,18 @@ index 83b9f8f..05640c8 100644
      LOAD_FUNCPTR(gnutls_transport_get_ptr)
      LOAD_FUNCPTR(gnutls_transport_set_errno)
      LOAD_FUNCPTR(gnutls_transport_set_ptr)
+diff --git a/dlls/win32u/Makefile.in b/dlls/win32u/Makefile.in
+index 454fb25..2a91f96 100644
+--- a/dlls/win32u/Makefile.in
++++ b/dlls/win32u/Makefile.in
+@@ -43,6 +43,7 @@ SOURCES = \
+ 	painting.c \
+ 	palette.c \
+ 	path.c \
++	ps5drv.c \
+ 	pen.c \
+ 	printdrv.c \
+ 	rawinput.c \
 diff --git a/dlls/win32u/dce.c b/dlls/win32u/dce.c
 index 5e8d82a..938bc5a 100644
 --- a/dlls/win32u/dce.c
@@ -5078,18 +5163,6 @@ index 22e5368..b580028 100644
 +    return ret;
 +}
 +#endif
-diff --git a/dlls/win32u/Makefile.in b/dlls/win32u/Makefile.in
-index 454fb25..2a91f96 100644
---- a/dlls/win32u/Makefile.in
-+++ b/dlls/win32u/Makefile.in
-@@ -43,6 +43,7 @@ SOURCES = \
- 	painting.c \
- 	palette.c \
- 	path.c \
-+	ps5drv.c \
- 	pen.c \
- 	printdrv.c \
- 	rawinput.c \
 diff --git a/dlls/win32u/ntuser_private.h b/dlls/win32u/ntuser_private.h
 index 26bab84..5636fd5 100644
 --- a/dlls/win32u/ntuser_private.h
@@ -5104,10 +5177,10 @@ index 26bab84..5636fd5 100644
  extern struct user_thread_info *get_user_thread_info(void);
 diff --git a/dlls/win32u/ps5drv.c b/dlls/win32u/ps5drv.c
 new file mode 100644
-index 0000000..c0a7cf0
+index 0000000..4e0a9bf
 --- /dev/null
 +++ b/dlls/win32u/ps5drv.c
-@@ -0,0 +1,944 @@
+@@ -0,0 +1,970 @@
 +/*
 + * In-process user driver for the PS5
 + *
@@ -5964,11 +6037,33 @@ index 0000000..c0a7cf0
 +    return VK_TRUE;
 +}
 +
++#ifdef __ORBIS__
++/* PS4: the console's Vulkan driver (RADV, the Mesa "orbis" platform) has no
++ * VK_KHR_display.  Its presentation path is VK_EXT_headless_surface, which the
++ * port wires to sceVideoOut flips -- on this console a "headless" surface is
++ * the screen.  So create window surfaces the way upstream Wine's null driver
++ * does, instead of on a PS5 display plane. */
++static VkResult orbis_vulkan_surface_create( struct client_surface *client, const struct vulkan_instance *instance,
++                                             VkSurfaceKHR *surface )
++{
++    VkHeadlessSurfaceCreateInfoEXT create_info = {.sType = VK_STRUCTURE_TYPE_HEADLESS_SURFACE_CREATE_INFO_EXT};
++    VkResult res = instance->p_vkCreateHeadlessSurfaceEXT( instance->host.instance, &create_info, NULL, surface );
++    TRACE( "client %p, headless surface %s, res %d\n", client, wine_dbgstr_longlong( *surface ), res );
++    return res;
++}
++
++static void ps5_map_instance_extensions( struct vulkan_instance_extensions *extensions )
++{
++    if (extensions->has_VK_KHR_win32_surface) extensions->has_VK_EXT_headless_surface = 1;
++    if (extensions->has_VK_EXT_headless_surface) extensions->has_VK_KHR_win32_surface = 1;
++}
++#else
 +static void ps5_map_instance_extensions( struct vulkan_instance_extensions *extensions )
 +{
 +    if (extensions->has_VK_KHR_win32_surface) extensions->has_VK_KHR_display = 1;
 +    if (extensions->has_VK_KHR_display) extensions->has_VK_KHR_win32_surface = 1;
 +}
++#endif
 +
 +static void ps5_map_device_extensions( struct vulkan_device_extensions *extensions )
 +{
@@ -5976,7 +6071,11 @@ index 0000000..c0a7cf0
 +
 +static const struct vulkan_driver_funcs ps5_vulkan_driver_funcs =
 +{
++#ifdef __ORBIS__
++    .p_vulkan_surface_create = orbis_vulkan_surface_create,
++#else
 +    .p_vulkan_surface_create = ps5_vulkan_surface_create,
++#endif
 +    .p_get_physical_device_presentation_support = ps5_get_physical_device_presentation_support,
 +    .p_map_instance_extensions = ps5_map_instance_extensions,
 +    .p_map_device_extensions = ps5_map_device_extensions,
@@ -6506,6 +6605,69 @@ index 3c55a80..4f3b42e 100644
 +    return 0;
 +#endif
 +}
+diff --git a/dlls/wined3d/swapchain.c b/dlls/wined3d/swapchain.c
+index 6609219..54cd836 100644
+--- a/dlls/wined3d/swapchain.c
++++ b/dlls/wined3d/swapchain.c
+@@ -754,6 +754,13 @@ static VkFormat get_swapchain_fallback_format(VkFormat vk_format)
+         case VK_FORMAT_A2B10G10R10_UNORM_PACK32:
+         case VK_FORMAT_R16G16B16A16_SFLOAT:
+             return VK_FORMAT_B8G8R8A8_UNORM;
++        /* PS4: the console's scan-out buffer is A8B8G8R8, so its Vulkan driver
++         * only offers the R-first formats; present B-first swapchains through
++         * wined3d's format-converting blit. */
++        case VK_FORMAT_B8G8R8A8_UNORM:
++            return VK_FORMAT_R8G8B8A8_UNORM;
++        case VK_FORMAT_B8G8R8A8_SRGB:
++            return VK_FORMAT_R8G8B8A8_SRGB;
+         default:
+             WARN("Unhandled format %#x.\n", vk_format);
+             return VK_FORMAT_UNDEFINED;
+@@ -816,6 +823,17 @@ static VkFormat wined3d_swapchain_vk_select_vk_format(struct wined3d_swapchain_v
+             if (vk_formats[i].format == vk_format && vk_formats[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+                 break;
+         }
++        if (i == format_count && vk_format != VK_FORMAT_UNDEFINED)
++        {
++            /* Second hop, e.g. R16G16B16A16 -> B8G8R8A8 -> R8G8B8A8. */
++            vk_format = get_swapchain_fallback_format(vk_format);
++            for (i = 0; i < format_count; ++i)
++            {
++                if (vk_formats[i].format == vk_format && vk_formats[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
++                    break;
++            }
++        }
++        TRACE("Swapchain fallback format %#x, found %d.\n", vk_format, i != format_count);
+     }
+     free(vk_formats);
+     if (i == format_count)
+diff --git a/dlls/winevulkan/Makefile.in b/dlls/winevulkan/Makefile.in
+index de43314..acadabc 100644
+--- a/dlls/winevulkan/Makefile.in
++++ b/dlls/winevulkan/Makefile.in
+@@ -7,6 +7,22 @@ UNIX_LIBS = -lwin32u $(PTHREAD_LIBS)
+ VER_FILEDESCRIPTION_STR = "Wine Vulkan ICD"
+ 
+ SOURCES = \
++	pw_vk_batch_pe.c \
++	pw_vk_present_pe.c \
++	pw_vk_batch_unix.c \
++	pw_vk_retire.c \
++	pw_vk_wire.c \
++	pw_vk_wire_unix.c \
++	pw_vk_template_cache.c \
++	pw_vk_template_cache_unix.c \
++	pw_vk_command_stream.c \
++	pw_vk_command_stream_unix.c \
++	pw_vk_spsc.c \
++	pw_vk_spsc_unix.c \
++	pw_vk_codec.c \
++	pw_vk_codec_unix.c \
++	pw_vk_generated.c \
++	pw_vk_generated_unix.c \
+ 	loader.c \
+ 	loader_thunks.c \
+ 	vulkan.c \
 diff --git a/dlls/winevulkan/loader.c b/dlls/winevulkan/loader.c
 index 864328e..2ce3c73 100644
 --- a/dlls/winevulkan/loader.c
@@ -6600,33 +6762,6 @@ index 90f24c3..208f190 100644
      unix_count,
  };
  
-diff --git a/dlls/winevulkan/Makefile.in b/dlls/winevulkan/Makefile.in
-index de43314..acadabc 100644
---- a/dlls/winevulkan/Makefile.in
-+++ b/dlls/winevulkan/Makefile.in
-@@ -7,6 +7,22 @@ UNIX_LIBS = -lwin32u $(PTHREAD_LIBS)
- VER_FILEDESCRIPTION_STR = "Wine Vulkan ICD"
- 
- SOURCES = \
-+	pw_vk_batch_pe.c \
-+	pw_vk_present_pe.c \
-+	pw_vk_batch_unix.c \
-+	pw_vk_retire.c \
-+	pw_vk_wire.c \
-+	pw_vk_wire_unix.c \
-+	pw_vk_template_cache.c \
-+	pw_vk_template_cache_unix.c \
-+	pw_vk_command_stream.c \
-+	pw_vk_command_stream_unix.c \
-+	pw_vk_spsc.c \
-+	pw_vk_spsc_unix.c \
-+	pw_vk_codec.c \
-+	pw_vk_codec_unix.c \
-+	pw_vk_generated.c \
-+	pw_vk_generated_unix.c \
- 	loader.c \
- 	loader_thunks.c \
- 	vulkan.c \
 diff --git a/dlls/winevulkan/make_vulkan b/dlls/winevulkan/make_vulkan
 index 5a4f192..cb29864 100755
 --- a/dlls/winevulkan/make_vulkan
@@ -8660,16 +8795,6 @@ index 0000000..e154ee9
 + [unix_vkWriteSamplerDescriptorsEXT] = "vkWriteSamplerDescriptorsEXT",
 + [unix_pw_vk_batch] = "pw_vk_batch",
 +};
-diff --git a/dlls/winevulkan/pw_vk_generated_unix.c b/dlls/winevulkan/pw_vk_generated_unix.c
-new file mode 100644
-index 0000000..e2a142e
---- /dev/null
-+++ b/dlls/winevulkan/pw_vk_generated_unix.c
-@@ -0,0 +1,4 @@
-+#if 0
-+#pragma makedep unix
-+#endif
-+#include "pw_vk_generated.c"
 diff --git a/dlls/winevulkan/pw_vk_present_interval.h b/dlls/winevulkan/pw_vk_present_interval.h
 new file mode 100644
 index 0000000..00d9063
@@ -12504,6 +12629,23 @@ index a65db62..30a0e39 100644
  struct per_thread_data *get_per_thread_data(void);
  
  struct getaddrinfo_params
+diff --git a/dlls/xinput1_3/Makefile.in b/dlls/xinput1_3/Makefile.in
+index ade51bb..1a54949 100644
+--- a/dlls/xinput1_3/Makefile.in
++++ b/dlls/xinput1_3/Makefile.in
+@@ -1,4 +1,5 @@
+ MODULE    = xinput1_3.dll
++UNIXLIB   = xinput1_3.so
+ IMPORTLIB = xinput
+ IMPORTS   = hid setupapi advapi32 user32
+ 
+@@ -6,4 +7,5 @@ VER_FILEDESCRIPTION_STR = "Wine Common Controller API"
+ VER_PRODUCTVERSION      = 9,15,779,0000
+ 
+ SOURCES = \
+-	main.c
++	main.c \
++	unixlib.c
 diff --git a/dlls/xinput1_3/main.c b/dlls/xinput1_3/main.c
 index 8530b02..83cee15 100644
 --- a/dlls/xinput1_3/main.c
@@ -12699,23 +12841,6 @@ index 8530b02..83cee15 100644
      start_update_thread();
  
      if (index >= XUSER_MAX_COUNT) return ERROR_BAD_ARGUMENTS;
-diff --git a/dlls/xinput1_3/Makefile.in b/dlls/xinput1_3/Makefile.in
-index ade51bb..1a54949 100644
---- a/dlls/xinput1_3/Makefile.in
-+++ b/dlls/xinput1_3/Makefile.in
-@@ -1,4 +1,5 @@
- MODULE    = xinput1_3.dll
-+UNIXLIB   = xinput1_3.so
- IMPORTLIB = xinput
- IMPORTS   = hid setupapi advapi32 user32
- 
-@@ -6,4 +7,5 @@ VER_FILEDESCRIPTION_STR = "Wine Common Controller API"
- VER_PRODUCTVERSION      = 9,15,779,0000
- 
- SOURCES = \
--	main.c
-+	main.c \
-+	unixlib.c
 diff --git a/dlls/xinput1_3/unixlib.c b/dlls/xinput1_3/unixlib.c
 new file mode 100644
 index 0000000..54488c8
@@ -15671,10 +15796,10 @@ index d2ff75d..4609402 100644
  {
      struct msg_queue *queue = (struct msg_queue *)obj;
 diff --git a/server/registry.c b/server/registry.c
-index e71d023..364b72e 100644
+index e71d023..cc16b2e 100644
 --- a/server/registry.c
 +++ b/server/registry.c
-@@ -1916,6 +1916,28 @@ void init_registry(void)
+@@ -1916,6 +1916,47 @@ void init_registry(void)
      free( current_user_path );
      load_init_registry_from_file( "user.reg", hkcu );
  
@@ -15698,12 +15823,31 @@ index e71d023..364b72e 100644
 +            release_object( key );
 +        }
 +    }
++    /* Direct3D renderer default: the console has no OpenGL, so wined3d's
++     * default (GL) adapter can never be created.  Select its Vulkan renderer
++     * unless the prefix says otherwise. */
++    {
++        static const WCHAR d3dW[] = {'S','o','f','t','w','a','r','e','\\','W','i','n','e','\\',
++                                     'D','i','r','e','c','t','3','D'};
++        static const WCHAR rendererW[] = {'r','e','n','d','e','r','e','r'};
++        static const WCHAR vulkanW[] = {'v','u','l','k','a','n',0};
++        static const struct unicode_str d3d_name = { d3dW, sizeof(d3dW) };
++        static const struct unicode_str renderer_name = { rendererW, sizeof(rendererW) };
++        int index;
++
++        if ((key = create_key_recursive( hkcu, d3d_name, current_time )))
++        {
++            if (!find_value( key, renderer_name, &index ))
++                set_value( key, renderer_name, REG_SZ, vulkanW, sizeof(vulkanW) );
++            release_object( key );
++        }
++    }
 +#endif
 +
      /* set the shared flag on Software\Classes\Wow6432Node for all platforms */
      for (i = 1; i < supported_machines_count; i++)
      {
-@@ -1969,6 +1991,13 @@ void init_registry(void)
+@@ -1969,6 +2010,13 @@ void init_registry(void)
  /* save a registry branch to a file */
  static void save_all_subkeys( struct key *key, FILE *f )
  {
@@ -16630,7 +16774,7 @@ index c8f7764..bdcbb2c 100644
          reply->current = sync->count;
          reply->max = sync->max;
 diff --git a/server/thread.c b/server/thread.c
-index bdf48c4..93e5b58 100644
+index bdf48c4..4b96bfe 100644
 --- a/server/thread.c
 +++ b/server/thread.c
 @@ -26,6 +26,13 @@
@@ -16906,7 +17050,46 @@ index bdf48c4..93e5b58 100644
      return -1;
  }
  
-@@ -1685,43 +1876,81 @@ done:
+@@ -1642,12 +1833,25 @@ DECL_HANDLER(new_thread)
+             goto done;
+         }
+     }
++#ifdef __PROSPERO__
++    else if (request_fd == -1)
++    {
++        PS4LOG("nt: request fd inflight MISS (client fd %d)\n", req->request_fd);
++        set_error( STATUS_INVALID_HANDLE );
++        goto done;
++    }
++    else if (fcntl( request_fd, F_SETFL, O_NONBLOCK ) == -1)
++    {
++        PS4LOG("nt: F_SETFL refused errno=%d, continuing blocking\n", errno);
++    }
++#else
+     else if (request_fd == -1 || fcntl( request_fd, F_SETFL, O_NONBLOCK ) == -1)
+     {
+         if (request_fd != -1) close( request_fd );
+         set_error( STATUS_INVALID_HANDLE );
+         goto done;
+     }
++#endif
+     else if (!(get_handle_access( current->process, req->process ) & PROCESS_CREATE_THREAD))
+     {
+         close( request_fd );
+@@ -1662,7 +1866,11 @@ DECL_HANDLER(new_thread)
+     }
+     if (params.root) release_object( params.root );  /* unused */
+ 
+-    if ((thread = create_thread( request_fd, process, params.sd )))
++    thread = create_thread( request_fd, process, params.sd );
++#ifdef __PROSPERO__
++    PS4LOG("nt: create_thread(fd %d) -> %p err=%08x\n", request_fd, (void *)thread, get_error());
++#endif
++    if (thread)
+     {
+         thread->system_regs = current->system_regs;
+         if (req->flags & THREAD_CREATE_FLAGS_CREATE_SUSPENDED) thread->suspend++;
+@@ -1685,43 +1893,81 @@ done:
  
  static int init_thread( struct thread *thread, int reply_fd, int wait_fd )
  {
@@ -16990,7 +17173,7 @@ index bdf48c4..93e5b58 100644
  
      current->unix_pid = process->unix_pid = req->unix_pid;
      current->unix_tid = req->unix_tid;
-@@ -1730,24 +1959,34 @@ DECL_HANDLER(init_first_thread)
+@@ -1730,24 +1976,34 @@ DECL_HANDLER(init_first_thread)
          process->affinity = current->affinity = get_thread_affinity( current );
      else
          set_thread_affinity( current, current->affinity );

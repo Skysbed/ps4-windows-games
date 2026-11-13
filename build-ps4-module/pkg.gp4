@@ -21,6 +21,9 @@
 		<file targ_path="sce_sys/icon0.png" orig_path="sce_sys/icon0.png" />
 		<file targ_path="sce_sys/about/right.sprx" orig_path="sce_sys/about/right.sprx" />
 		<file targ_path="test.exe" orig_path="test.exe" />
+		<file targ_path="sce_module/x86_64-windows/uxtheme.dll" orig_path="uxtheme.dll" />
+		<file targ_path="sce_module/x86_64-windows/vulkan-1.dll" orig_path="vulkan-1.dll" />
+		<file targ_path="sce_module/x86_64-windows/winevulkan.dll" orig_path="winevulkan.dll" />
 		<file targ_path="sce_module/x86_64-windows/opengl32.dll" orig_path="opengl32.dll" />
 		<file targ_path="sce_module/x86_64-windows/apisetschema.dll" orig_path="apisetschema.dll" />
 		<file targ_path="winprobe.dll" orig_path="winprobe.dll" />

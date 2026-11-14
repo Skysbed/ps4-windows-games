@@ -35,9 +35,51 @@ extern int __malloc_replaced;
 static char ps4_program_name[] = "wine";
 
 /* First among constructors: every later calloc() must clear. */
+/* This module's C library has no environment (nothing runs its start-up), so
+ * Mesa's debug switches -- all read with getenv() -- could never be set.
+ * Take them from the same settings file Wine's ntdll reads: NAME=VALUE lines
+ * whose name starts with ORBIS_, RADV_, MESA_, AMD_ or VK_. */
+int open(const char *, int, ...);
+long read(int, void *, unsigned long);
+int close(int);
+int setenv(const char *, const char *, int);
+int strncmp(const char *, const char *, unsigned long);
+
+static void ps4_load_driver_environment(void)
+{
+    static char buf[4096];
+    static int done;
+    int fd;
+    long n;
+    char *p;
+
+    if (done) return;
+    done = 1;
+    if ((fd = open("/data/pcps4_env.txt", 0)) < 0) return;
+    n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n <= 0) return;
+    buf[n] = 0;
+    for (p = buf; *p; )
+    {
+        char *eol = p, *eq = 0, *next;
+        while (*eol && *eol != '\n' && *eol != '\r') { if (*eol == '=' && !eq) eq = eol; eol++; }
+        next = *eol ? eol + 1 : eol;
+        *eol = 0;
+        if (eq && (!strncmp(p, "ORBIS_", 6) || !strncmp(p, "RADV_", 5) || !strncmp(p, "MESA_", 5) ||
+                   !strncmp(p, "AMD_", 4) || !strncmp(p, "VK_", 3)))
+        {
+            *eq = 0;
+            setenv(p, eq + 1, 1);
+        }
+        p = next;
+    }
+}
+
 __attribute__((constructor(101))) static void ps4_module_environment_early(void)
 {
     __malloc_replaced = 1;
+    ps4_load_driver_environment();
 }
 
 /* Last among constructors: the C library's own start-up runs before this and

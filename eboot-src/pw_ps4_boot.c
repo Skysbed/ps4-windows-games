@@ -23,11 +23,19 @@ int main(void){
   PwWineStartOps ops={op_load,op_modinfo,op_setenv,op_thread};
   PwWineStartConfig cfg; memset(&cfg,0,sizeof cfg);
   cfg.ntdll_path="/app0/sce_module/ntdll.prx"; cfg.ntdll_dir="/app0/sce_module";
+  { /* development overlay: an ntdll uploaded to /data replaces the packaged one */
+    FILE*o=fopen("/data/pcps4/sce_module/ntdll.prx","rb");
+    if(o){ fclose(o); cfg.ntdll_path="/data/pcps4/sce_module/ntdll.prx"; }
+    log2(cfg.ntdll_path,0); }
   cfg.prefix="/data/wine"; cfg.argc=2; cfg.argv=av; cfg.stack_bytes=8u*1024*1024;
   PwWineStart st; memset(&st,0,sizeof st);
   int r=pw_wine_start_load(&st,&cfg,&ops); log2("wine_start_load",r); log2("stage",st.stage); log2("status",st.status);
   if(r==0){ r=pw_wine_start_environment(&st,&cfg,&ops); log2("environment",r);
             r=pw_wine_start_run(&st,&cfg,&ops); log2("run",r); }
-  for(int i=0;i<600;i++) sceKernelUsleep(1000000);
-  if(L)fclose(L); return 0;
+  /* Wine runs on its own thread.  Returning from main() would start process
+   * exit underneath a running program (this used to return after 10 minutes),
+   * so stay here for as long as the process lives. */
+  if(L){fclose(L);L=0;}
+  for(;;) sceKernelUsleep(1000000);
+  return 0;
 }

@@ -634,3 +634,97 @@ Notes:
 5. Relink the remaining modules with the corrected linker script; root-cause the
    `dup()` and `regexec` workarounds.
 
+## Update: a real game — SuperTuxKart is playable
+
+**SuperTuxKart 1.5**, the official 64-bit Windows build, runs on the console through
+Wine: menus, intro cutscene, overworld and races, driven with the console's controller.
+It uses the game's Vulkan renderer (`--render-driver=vulkan`), which reaches RADV through
+`winevulkan`; nothing in the game was modified.
+
+State, as tested:
+
+- **Works:** loading (the executable plus 45 DLLs of its own: SDL2, OpenAL, curl,
+  shaderc, …), run-time GLSL-to-SPIR-V shader compilation, rendering at 1920x1080,
+  controller input, saving config and profile.
+- **Reported by the tester:** "plays fine", with occasional jitter. Tracing was still
+  enabled for that run, which is a known source of it; a run with it off has not been
+  measured yet.
+- **Not working:** audio (OpenAL is pointed at its null device). One texture failed to
+  load. After a long session, closing the game from the system menu hung and the
+  console went down — see "Known problems" below.
+
+### How it is laid out
+
+The game is not in the package. Its `build-x86_64` and `data` directories are copied to
+`/data/stk` on the console, and three text files choose what runs:
+
+| File | Purpose |
+|---|---|
+| `/data/pcps4_cmdline.txt` | The program and its arguments, one per line |
+| `/data/pcps4_env.txt` | `NAME=VALUE` lines for the Windows program; names starting `ORBIS_`, `RADV_`, `MESA_`, `AMD_` or `VK_` are also given to the Vulkan driver |
+| `/data/pcps4_winedebug.txt` | `WINEDEBUG` syntax |
+
+For SuperTuxKart the command line is the path to `supertuxkart.exe`,
+`--render-driver=vulkan` and `--screensize=1920x1080`. The environment sets a user
+profile (`APPDATA`, `USERPROFILE`, `TEMP`, … — there is no `wineboot` to create one),
+`SUPERTUXKART_DATADIR`, `ALSOFT_DRIVERS=null`, and for SDL
+`SDL_JOYSTICK_RAWINPUT=0`, `SDL_JOYSTICK_HIDAPI=0`, `SDL_DIRECTINPUT_ENABLED=0`.
+
+### Development overlay
+
+A module at `/data/pcps4/sce_module/<name>.prx` is loaded in place of the packaged one
+(`ntdll` included — the bootstrap checks), and DLLs under
+`/data/pcps4/sce_module/x86_64-windows/` are found before the packaged ones. A rebuilt
+module therefore needs an upload and a relaunch, not a reinstall. Only the bootstrap
+itself still requires a new package.
+
+### What had to be fixed
+
+- **The whole DLL set is packaged** (775 PE files, debug info stripped) instead of the
+  24 the first test needed.
+- **Paths get drive letters.** `stat()` reports `st_dev`/`st_ino` as 0, so Wine could
+  not match a directory to a drive and fell back to `\\??\unix\…`. Paths are now
+  mapped by prefix: the prefix's `drive_c` is `C:`, everything else is `Z:`.
+- **Every directory listing was empty.** Wine hides a few of its own files by comparing
+  file identity; with identity 0/0 for every file, every entry matched and was dropped.
+  SuperTuxKart reported this as "No vulkan shaders compiled". `is_ignored_file` no
+  longer matches a 0/0 identity.
+- **`ws2_32` needs its Unix half** or its `DllMain` fails and the process aborts at
+  load. It builds as-is and links against `libSceNet` for the resolver.
+- **Acquire and present must not report `VK_SUBOPTIMAL_KHR` for a size mismatch.** The
+  swap chain is always the display's size, the window may not be, and Wine reports that
+  difference as suboptimal. SuperTuxKart treats anything but success from acquire as a
+  failure after it has already reset its frame fence, then times out on that fence and
+  rebuilds its swap chain forever — a black screen with a healthy GPU. The default
+  monitor is also 1920x1080 now rather than 800x600.
+- **Controller.** `xinput_ps4_pad.c` is the Unix half of `xinput`: it reads the first
+  pad with `scePad` and presents it as XInput controller 0. SDL only reaches XInput if
+  DirectInput is disabled, because its DirectInput step needs COM class registrations
+  this prefix does not have.
+- **The bootstrap must not return.** Its `main` slept for ten minutes and returned,
+  which begins process exit underneath a running program. It now stays for the life of
+  the process. (Suspected cause of the hang described below; not yet confirmed.)
+- **Bring-up probes are off by default.** They wrote a log line on every path lookup and
+  descriptor transfer; they now do nothing unless `/data/pcps4_probes` exists.
+
+### Known problems
+
+- Closing the game from the system menu after a long session hung at "Closing
+  application" while the game kept rendering; klog showed
+  `[SceShellCore] Main thread has frozen in sceLncServiceKeepAlive()`, and the console
+  later went down. The bootstrap fix above is the suspected remedy and is untested.
+- No audio.
+- No COM class registry (no `wineboot`), so anything that needs `CoCreateInstance` of a
+  system class fails.
+- Tracing channels left on (for example `+xinput`) flood the kernel log and cause
+  visible stutter.
+
+### Next
+
+1. Confirm the close/exit fix on hardware.
+2. Audio: a `winmm`/`mmdevapi` driver over `sceAudioOut`.
+3. A prepared prefix with the standard registry, so COM works.
+4. Measure the remaining jitter with tracing off (shader/pipeline compilation is the
+   next suspect).
+5. More games, and DXVK for Direct3D titles.
+

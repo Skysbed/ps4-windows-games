@@ -418,24 +418,45 @@ index cfa57c5..f5be3f5 100644
          str = end + 1;
      }
 diff --git a/dlls/ntdll/unix/env.c b/dlls/ntdll/unix/env.c
-index 7e36cb3..f498821 100644
+index 7e36cb3..64b9803 100644
 --- a/dlls/ntdll/unix/env.c
 +++ b/dlls/ntdll/unix/env.c
-@@ -31,6 +31,13 @@
+@@ -25,12 +25,34 @@
+ 
+ #include "config.h"
+ 
++/* PS4 bring-up probes write to /data/pcps4_srv.log.  They sit in hot paths
++ * (every path lookup and descriptor transfer), so they are off unless the
++ * file /data/pcps4_probes exists. */
++#ifndef PS4_PROBE_OPEN_DEFINED
++#define PS4_PROBE_OPEN_DEFINED
++#include <stdio.h>
++#include <unistd.h>
++static inline FILE *ps4_probe_open(void)
++{
++    static int on = -1;
++    if (on < 0) on = !access( "/data/pcps4_probes", 0 );
++    return on ? fopen( "/data/pcps4_srv.log", "a" ) : NULL;
++}
++#endif
++
+ #include <assert.h>
+ #include <errno.h>
+ #include <locale.h>
  #include <langinfo.h>
  #include <fcntl.h>
  #include <stdarg.h>
 +#include <stdio.h>
 +
 +#ifdef __PROSPERO__
-+#define PS4LOG(...) do{ FILE*_pl=fopen("/data/pcps4_srv.log","a"); if(_pl){ fprintf(_pl,__VA_ARGS__); fclose(_pl);} }while(0)
++#define PS4LOG(...) do{ FILE*_pl=ps4_probe_open(); if(_pl){ fprintf(_pl,__VA_ARGS__); fclose(_pl);} }while(0)
 +#else
 +#define PS4LOG(...) do{}while(0)
 +#endif
  #include <sys/types.h>
  #include <sys/ioctl.h>
  #include <sys/stat.h>
-@@ -95,6 +102,9 @@ static char *get_nls_file_path( UINT type, UINT id )
+@@ -95,6 +117,9 @@ static char *get_nls_file_path( UINT type, UINT id )
      const char *dir = build_dir ? build_dir : data_dir;
      const char *name = NULL;
      char *path, tmp[16];
@@ -445,7 +466,7 @@ index 7e36cb3..f498821 100644
  
      switch (type)
      {
-@@ -125,7 +135,16 @@ static void *read_nls_file( const char *name )
+@@ -125,7 +150,16 @@ static void *read_nls_file( const char *name )
      void *data, *ret = NULL;
      int fd;
  
@@ -462,7 +483,7 @@ index 7e36cb3..f498821 100644
  
      if ((fd = open( path, O_RDONLY )) != -1)
      {
-@@ -833,7 +852,11 @@ void init_environment(void)
+@@ -833,7 +867,11 @@ void init_environment(void)
      {
          uctable = case_table + 2;
          lctable = case_table + case_table[1] + 2;
@@ -474,7 +495,7 @@ index 7e36cb3..f498821 100644
  }
  
  
-@@ -843,7 +866,7 @@ static BOOL host_var_exists( const char *name )
+@@ -843,7 +881,7 @@ static BOOL host_var_exists( const char *name )
      const char *end = strchr( name, '=' );
  
      if (!end) return FALSE;
@@ -483,7 +504,7 @@ index 7e36cb3..f498821 100644
      {
          if (!STARTS_WITH( *e, "WINE_HOST_" )) continue;
          if (!strncmp( *e + 10, name, end + 1 - name )) return TRUE;
-@@ -871,15 +894,33 @@ static WCHAR *get_initial_environment( SIZE_T *pos, SIZE_T *size )
+@@ -871,15 +909,57 @@ static WCHAR *get_initial_environment( SIZE_T *pos, SIZE_T *size )
  {
      char **e;
      WCHAR *env, *ptr, *end;
@@ -498,6 +519,30 @@ index 7e36cb3..f498821 100644
 +    PS4LOG("gie: environ=%p %s\n", (void *)environ,
 +           environ ? "(walking it)" : "(NULL -> using empty environment)");
 +    if (!envp) envp = ps4_empty_env;
++    {
++        /* Extra variables for the Windows program, NAME=VALUE per line. */
++        static char buf[4096];
++        static char *ev[65];
++        FILE *f = fopen( "/data/pcps4_env.txt", "r" );
++        if (f && envp == ps4_empty_env)
++        {
++            size_t n = fread( buf, 1, sizeof(buf) - 1, f );
++            char *p;
++            int c = 0;
++            buf[n] = 0;
++            for (p = buf; *p && c < 64; )
++            {
++                char *eol = p + strcspn( p, "\r\n" );
++                char *next = *eol ? eol + 1 : eol;
++                *eol = 0;
++                if (strchr( p, '=' )) ev[c++] = p;
++                p = next;
++            }
++            ev[c] = NULL;
++            envp = ev;
++        }
++        if (f) fclose( f );
++    }
 +#endif
  
      /* estimate needed size */
@@ -519,7 +564,7 @@ index 7e36cb3..f498821 100644
      {
          char *str = *e;
  
-@@ -940,6 +981,10 @@ static void set_env_var( WCHAR **env, SIZE_T *pos, SIZE_T *size,
+@@ -940,6 +1020,10 @@ static void set_env_var( WCHAR **env, SIZE_T *pos, SIZE_T *size,
      WCHAR *p;
      SIZE_T len;
  
@@ -530,7 +575,7 @@ index 7e36cb3..f498821 100644
      /* remove existing string */
      if ((p = find_env_var( *env, *pos, name, namelen )))
      {
-@@ -947,18 +992,36 @@ static void set_env_var( WCHAR **env, SIZE_T *pos, SIZE_T *size,
+@@ -947,18 +1031,36 @@ static void set_env_var( WCHAR **env, SIZE_T *pos, SIZE_T *size,
          memmove( p, p + len, (*pos - (p + len - *env)) * sizeof(WCHAR) );
          *pos -= len;
      }
@@ -570,7 +615,7 @@ index 7e36cb3..f498821 100644
  }
  
  static void append_envW( WCHAR **env, SIZE_T *pos, SIZE_T *size, const char *name, const WCHAR *value )
-@@ -987,9 +1050,17 @@ static void add_path_var( WCHAR **env, SIZE_T *pos, SIZE_T *size, const char *na
+@@ -987,9 +1089,17 @@ static void add_path_var( WCHAR **env, SIZE_T *pos, SIZE_T *size, const char *na
  {
      WCHAR *nt_name = NULL;
  
@@ -589,7 +634,7 @@ index 7e36cb3..f498821 100644
  }
  
  
-@@ -1032,32 +1103,47 @@ static void add_dynamic_environment( WCHAR **env, SIZE_T *pos, SIZE_T *size )
+@@ -1032,32 +1142,47 @@ static void add_dynamic_environment( WCHAR **env, SIZE_T *pos, SIZE_T *size )
      unsigned int i;
      char str[22];
  
@@ -638,7 +683,7 @@ index 7e36cb3..f498821 100644
  }
  
  
-@@ -1886,6 +1972,19 @@ static void init_peb( RTL_USER_PROCESS_PARAMETERS *params, void *module, BOOL de
+@@ -1886,6 +2011,19 @@ static void init_peb( RTL_USER_PROCESS_PARAMETERS *params, void *module, BOOL de
  }
  
  
@@ -658,7 +703,7 @@ index 7e36cb3..f498821 100644
  /*************************************************************************
   *		build_initial_params
   *
-@@ -1898,40 +1997,90 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
+@@ -1898,40 +2036,90 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
      RTL_USER_PROCESS_PARAMETERS *params = NULL;
      SIZE_T size, env_pos, env_size;
      WCHAR *dst, *cmdline, *path, *bootstrap;
@@ -752,7 +797,7 @@ index 7e36cb3..f498821 100644
          NtTerminateProcess( GetCurrentProcess(), status );
      }
  
-@@ -1948,6 +2097,15 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
+@@ -1948,6 +2136,15 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
          }
      }
  
@@ -768,7 +813,7 @@ index 7e36cb3..f498821 100644
      if (status)  /* try launching it through start.exe */
      {
          static const char *args[] = { "start.exe", "/exec" };
-@@ -2023,10 +2181,13 @@ void init_startup_info(void)
+@@ -2023,10 +2220,13 @@ void init_startup_info(void)
      USHORT machine;
      BOOL debugged;
  
@@ -782,7 +827,7 @@ index 7e36cb3..f498821 100644
          return;
      }
  
-@@ -2251,6 +2412,9 @@ NTSTATUS WINAPI NtInitializeNlsFiles( void **ptr, LCID *lcid, LARGE_INTEGER *siz
+@@ -2251,6 +2451,9 @@ NTSTATUS WINAPI NtInitializeNlsFiles( void **ptr, LCID *lcid, LARGE_INTEGER *siz
      HANDLE handle, file;
      SIZE_T mapsize;
      NTSTATUS status;
@@ -793,23 +838,58 @@ index 7e36cb3..f498821 100644
      if (asprintf( &path, "%s/nls/locale.nls", dir ) == -1) return STATUS_NO_MEMORY;
      status = open_nls_data_file( path, system_dir, &file );
 diff --git a/dlls/ntdll/unix/file.c b/dlls/ntdll/unix/file.c
-index 2a00ad5..415b71e 100644
+index 2a00ad5..4b484e4 100644
 --- a/dlls/ntdll/unix/file.c
 +++ b/dlls/ntdll/unix/file.c
-@@ -36,6 +36,12 @@
+@@ -26,6 +26,21 @@
+ 
+ #include "config.h"
+ 
++/* PS4 bring-up probes write to /data/pcps4_srv.log.  They sit in hot paths
++ * (every path lookup and descriptor transfer), so they are off unless the
++ * file /data/pcps4_probes exists. */
++#ifndef PS4_PROBE_OPEN_DEFINED
++#define PS4_PROBE_OPEN_DEFINED
++#include <stdio.h>
++#include <unistd.h>
++static inline FILE *ps4_probe_open(void)
++{
++    static int on = -1;
++    if (on < 0) on = !access( "/data/pcps4_probes", 0 );
++    return on ? fopen( "/data/pcps4_srv.log", "a" ) : NULL;
++}
++#endif
++
+ #include <assert.h>
+ #include <sys/types.h>
+ #include <dirent.h>
+@@ -36,6 +51,12 @@
  #include <stdlib.h>
  #include <stdint.h>
  #include <stdio.h>
 +
 +#ifdef __PROSPERO__
-+#define PS4LOG(...) do{ FILE*_pl=fopen("/data/pcps4_srv.log","a"); if(_pl){ fprintf(_pl,__VA_ARGS__); fclose(_pl);} }while(0)
++#define PS4LOG(...) do{ FILE*_pl=ps4_probe_open(); if(_pl){ fprintf(_pl,__VA_ARGS__); fclose(_pl);} }while(0)
 +#else
 +#define PS4LOG(...) do{}while(0)
 +#endif
  #include <limits.h>
  #include <unistd.h>
  #ifdef HAVE_MNTENT_H
-@@ -813,7 +819,14 @@ static char *parse_mount_entries( FILE *f, dev_t dev, ino_t ino )
+@@ -293,6 +314,12 @@ static inline BOOL is_same_file( const struct file_identity *file, const struct
+ 
+ static inline BOOL is_ignored_file( const struct stat *st )
+ {
++#ifdef __ORBIS__
++    /* PS4: stat() reports st_dev and st_ino as 0 for every file, so identity
++     * cannot tell an ignored file from any other -- every directory entry
++     * would match the list and vanish from listings. */
++    if (!st->st_dev && !st->st_ino) return FALSE;
++#endif
+     unsigned int i;
+ 
+     for (i = 0; i < ignored_files_count; i++)
+@@ -813,7 +840,14 @@ static char *parse_mount_entries( FILE *f, dev_t dev, ino_t ino )
  }
  #endif
  
@@ -825,7 +905,7 @@ index 2a00ad5..415b71e 100644
  #include <fstab.h>
  static char *parse_mount_entries( FILE *f, dev_t dev, ino_t ino )
  {
-@@ -1256,7 +1269,11 @@ done:
+@@ -1256,7 +1290,11 @@ done:
   */
  static BOOLEAN get_dir_case_sensitivity_stat( int root_fd, const char *dir )
  {
@@ -838,7 +918,7 @@ index 2a00ad5..415b71e 100644
      struct statfs stfs;
      int fd;
  
-@@ -2893,6 +2910,56 @@ static unsigned int get_cached_dir_data( HANDLE handle, struct dir_data **data_r
+@@ -2893,6 +2931,56 @@ static unsigned int get_cached_dir_data( HANDLE handle, struct dir_data **data_r
  }
  
  
@@ -895,7 +975,7 @@ index 2a00ad5..415b71e 100644
  /******************************************************************************
   *              NtQueryDirectoryFile   (NTDLL.@)
   */
-@@ -2957,7 +3024,7 @@ NTSTATUS WINAPI NtQueryDirectoryFile( HANDLE handle, HANDLE event, PIO_APC_ROUTI
+@@ -2957,7 +3045,7 @@ NTSTATUS WINAPI NtQueryDirectoryFile( HANDLE handle, HANDLE event, PIO_APC_ROUTI
      mutex_lock( &dir_mutex );
  
      cwd = open( ".", O_RDONLY );
@@ -904,7 +984,7 @@ index 2a00ad5..415b71e 100644
      {
          if (!(status = get_cached_dir_data( handle, &data, fd, mask, restart_scan )))
          {
-@@ -2988,22 +3055,76 @@ NTSTATUS WINAPI NtQueryDirectoryFile( HANDLE handle, HANDLE event, PIO_APC_ROUTI
+@@ -2988,22 +3076,76 @@ NTSTATUS WINAPI NtQueryDirectoryFile( HANDLE handle, HANDLE event, PIO_APC_ROUTI
  }
  
  
@@ -984,7 +1064,7 @@ index 2a00ad5..415b71e 100644
  
      /* try a shortcut for this directory */
  
-@@ -3078,6 +3199,24 @@ static NTSTATUS find_file_in_dir( int root_fd, char *unix_name, int pos, const W
+@@ -3078,6 +3220,24 @@ static NTSTATUS find_file_in_dir( int root_fd, char *unix_name, int pos, const W
      }
  #endif /* VFAT_IOCTL_READDIR_BOTH */
  
@@ -1009,7 +1089,7 @@ index 2a00ad5..415b71e 100644
      if ((fd = openat( root_fd, unix_name, O_RDONLY )) == -1) return errno_to_status( errno );
      if (!(dir = fdopendir( fd )))
      {
-@@ -3111,6 +3250,7 @@ static NTSTATUS find_file_in_dir( int root_fd, char *unix_name, int pos, const W
+@@ -3111,6 +3271,7 @@ static NTSTATUS find_file_in_dir( int root_fd, char *unix_name, int pos, const W
          }
      }
      closedir( dir );
@@ -1017,7 +1097,7 @@ index 2a00ad5..415b71e 100644
  
  not_found:
      unix_name[pos - 1] = 0;
-@@ -3517,6 +3657,7 @@ static NTSTATUS file_id_to_unix_file_name( const OBJECT_ATTRIBUTES *attr, char *
+@@ -3517,6 +3678,7 @@ static NTSTATUS file_id_to_unix_file_name( const OBJECT_ATTRIBUTES *attr, char *
          goto done;
      }
  
@@ -1025,7 +1105,7 @@ index 2a00ad5..415b71e 100644
      fstat( root_fd, &root_st );
      if (root_st.st_ino == file_id)  /* shortcut for "." */
      {
-@@ -3639,6 +3780,7 @@ static NTSTATUS lookup_unix_name( int root_fd, OBJECT_ATTRIBUTES *attr, UNICODE_
+@@ -3639,6 +3801,7 @@ static NTSTATUS lookup_unix_name( int root_fd, OBJECT_ATTRIBUTES *attr, UNICODE_
      {
          const WCHAR *end, *next;
          WCHAR *reparse_name;
@@ -1033,7 +1113,7 @@ index 2a00ad5..415b71e 100644
  
          end = name;
          while (end < name + name_len && *end != '\\') end++;
-@@ -3656,10 +3798,11 @@ static NTSTATUS lookup_unix_name( int root_fd, OBJECT_ATTRIBUTES *attr, UNICODE_
+@@ -3656,10 +3819,11 @@ static NTSTATUS lookup_unix_name( int root_fd, OBJECT_ATTRIBUTES *attr, UNICODE_
              unix_name = *buffer = new_name;
          }
  
@@ -1047,7 +1127,7 @@ index 2a00ad5..415b71e 100644
          {
              int reparse_fd;
  
-@@ -3668,11 +3811,11 @@ static NTSTATUS lookup_unix_name( int root_fd, OBJECT_ATTRIBUTES *attr, UNICODE_
+@@ -3668,11 +3832,11 @@ static NTSTATUS lookup_unix_name( int root_fd, OBJECT_ATTRIBUTES *attr, UNICODE_
  
              if (!name_len && open_reparse)
              {
@@ -1061,7 +1141,7 @@ index 2a00ad5..415b71e 100644
                      && (reparse_fd = openat( root_fd, unix_name, O_RDONLY )) >= 0)
                  {
                      status = resolve_reparse_point( reparse_fd, root_fd, attr, nt_name, nt_pos, next - name, buffer,
-@@ -3876,6 +4019,7 @@ static NTSTATUS nt_to_unix_file_name( OBJECT_ATTRIBUTES *attr, UNICODE_STRING *n
+@@ -3876,6 +4040,7 @@ static NTSTATUS nt_to_unix_file_name( OBJECT_ATTRIBUTES *attr, UNICODE_STRING *n
          }
          else
          {
@@ -1069,7 +1149,52 @@ index 2a00ad5..415b71e 100644
              status = lookup_unix_name( root_fd, attr, nt_name, 0, &unix_name, unix_len,
                                         1, disposition, open_reparse, FALSE, 0 );
              if (needs_close) close( root_fd );
-@@ -4274,10 +4418,20 @@ static NTSTATUS find_drive_nt_root( char *unix_name, unsigned int len,
+@@ -4259,6 +4424,44 @@ static NTSTATUS find_drive_nt_root( char *unix_name, unsigned int len,
+     while (len > 1 && unix_name[len - 1] == '/') len--;
+     unix_name[len] = 0;
+ 
++#ifdef __ORBIS__
++    /* PS4: stat() reports st_dev/st_ino as 0, so a directory cannot be matched
++     * to a drive by identity.  Map by path instead: the prefix's drive_c is
++     * C:, everything else is under Z: (which is "/").  Programs get ordinary
++     * drive-letter paths rather than the \??\unix\ form. */
++    if (unix_name[0] == '/')
++    {
++        size_t clen = strlen( config_dir );
++        unsigned int drive = 'Z' - 'A';
++
++        pos = 1;
++        if (!strncmp( unix_name, config_dir, clen ) && !strncmp( unix_name + clen, "/drive_c", 8 ) &&
++            (unix_name[clen + 8] == '/' || !unix_name[clen + 8]))
++        {
++            drive = 'C' - 'A';
++            pos = clen + 8;
++        }
++        if (stat( unix_name, &st ))
++        {
++            if (disposition == FILE_OPEN || disposition == FILE_OVERWRITE)
++                return STATUS_OBJECT_NAME_NOT_FOUND;
++            status = STATUS_NO_SUCH_FILE;
++        }
++        while (pos < len && unix_name[pos] == '/') pos++;
++        len -= pos;
++        buffer = malloc( (len + ARRAY_SIZE(dos_prefixW) + 1) * sizeof(WCHAR) );
++        if (!buffer) return STATUS_NO_MEMORY;
++        memcpy( buffer, dos_prefixW, sizeof(dos_prefixW) );
++        buffer[4] += drive;
++        lenW = ARRAY_SIZE(dos_prefixW);
++        lenW += ntdll_umbstowcs( unix_name + pos, len, buffer + lenW, len );
++        buffer[lenW] = 0;
++        *nt_name = collapse_path( buffer );
++        PS4LOG("fdnr: path-mapped to drive %c:\n", 'A' + drive);
++        return status;
++    }
++#endif
++
+     for (pos = len; pos; pos = remove_last_component( unix_name, pos ))
+     {
+         char prev = unix_name[pos];
+@@ -4274,10 +4477,20 @@ static NTSTATUS find_drive_nt_root( char *unix_name, unsigned int len,
          unix_name[pos] = prev;
          if (!S_ISDIR( st.st_mode )) continue;
  
@@ -1090,7 +1215,7 @@ index 2a00ad5..415b71e 100644
              while (pos < len && unix_name[pos] == '/') pos++;
              len -= pos;
              buffer = malloc( (len + ARRAY_SIZE(dos_prefixW) + 1) * sizeof(WCHAR) );
-@@ -4436,13 +4590,33 @@ NTSTATUS get_nt_and_unix_names( OBJECT_ATTRIBUTES *attr, UNICODE_STRING *nt_name
+@@ -4436,13 +4649,33 @@ NTSTATUS get_nt_and_unix_names( OBJECT_ATTRIBUTES *attr, UNICODE_STRING *nt_name
   */
  NTSTATUS get_full_path( char *name, const WCHAR *curdir, UNICODE_STRING *nt_name )
  {
@@ -1127,7 +1252,7 @@ index 2a00ad5..415b71e 100644
  
      if (IS_SEPARATOR(name[0]) && name[1] == '?' && name[2] == '?' && IS_SEPARATOR(name[3]))  /* \??\ */
      {
-@@ -4488,9 +4662,12 @@ NTSTATUS get_full_path( char *name, const WCHAR *curdir, UNICODE_STRING *nt_name
+@@ -4488,9 +4721,12 @@ NTSTATUS get_full_path( char *name, const WCHAR *curdir, UNICODE_STRING *nt_name
          memcpy( ret, curdir, prefix_len * sizeof(WCHAR) );
      }
  
@@ -1141,16 +1266,36 @@ index 2a00ad5..415b71e 100644
      return STATUS_SUCCESS;
  }
 diff --git a/dlls/ntdll/unix/loader.c b/dlls/ntdll/unix/loader.c
-index 0d43c5c..12d35af 100644
+index 0d43c5c..78569c2 100644
 --- a/dlls/ntdll/unix/loader.c
 +++ b/dlls/ntdll/unix/loader.c
-@@ -29,6 +29,21 @@
+@@ -24,11 +24,41 @@
+ 
+ #include "config.h"
+ 
++/* PS4 bring-up probes write to /data/pcps4_srv.log.  They sit in hot paths
++ * (every path lookup and descriptor transfer), so they are off unless the
++ * file /data/pcps4_probes exists. */
++#ifndef PS4_PROBE_OPEN_DEFINED
++#define PS4_PROBE_OPEN_DEFINED
++#include <stdio.h>
++#include <unistd.h>
++static inline FILE *ps4_probe_open(void)
++{
++    static int on = -1;
++    if (on < 0) on = !access( "/data/pcps4_probes", 0 );
++    return on ? fopen( "/data/pcps4_srv.log", "a" ) : NULL;
++}
++#endif
++
+ #include <assert.h>
+ #include <errno.h>
  #include <fcntl.h>
  #include <stdarg.h>
  #include <stdio.h>
 +
 +#ifdef __PROSPERO__
-+#define PS4LOG(...) do{ FILE*_pl=fopen("/data/pcps4_srv.log","a"); if(_pl){ fprintf(_pl,__VA_ARGS__); fclose(_pl);} }while(0)
++#define PS4LOG(...) do{ FILE*_pl=ps4_probe_open(); if(_pl){ fprintf(_pl,__VA_ARGS__); fclose(_pl);} }while(0)
 +static inline void ps4_log_wstr( const char *tag, const unsigned short *w, unsigned bytes )
 +{
 +    char b[260]; unsigned i, n = bytes / 2;
@@ -1166,7 +1311,7 @@ index 0d43c5c..12d35af 100644
  #include <signal.h>
  #include <spawn.h>
  #include <string.h>
-@@ -132,8 +147,7 @@ static void fatal_error( const char *err, ... )
+@@ -132,8 +162,7 @@ static void fatal_error( const char *err, ... )
      va_list args;
  
      va_start( args, err );
@@ -1176,7 +1321,23 @@ index 0d43c5c..12d35af 100644
      va_end( args );
      exit(1);
  }
-@@ -352,6 +366,7 @@ static void set_home_dir(void)
+@@ -298,9 +327,14 @@ static void set_dll_path(void)
+ 
+     if (path) for (p = path, count = 1; *p; p++) if (*p == ':') count++;
+ 
+-    dll_paths = malloc( (count + 2) * sizeof(*dll_paths) );
++    dll_paths = malloc( (count + 3) * sizeof(*dll_paths) );
+     count = 0;
+ 
++#ifdef __ORBIS__
++    /* PS4 development overlay: DLLs under /data/pcps4/sce_module/x86_64-windows
++     * are found before the packaged ones. */
++    dll_paths[count++] = "/data/pcps4/sce_module";
++#endif
+     if (!build_dir) dll_paths[count++] = dll_dir;
+ 
+     if (path)
+@@ -352,6 +386,7 @@ static void set_home_dir(void)
          }
          if (!name) name = "wine";
      }
@@ -1184,7 +1345,7 @@ index 0d43c5c..12d35af 100644
      if ((p = strrchr( name, '/' ))) name = p + 1;
      if ((p = strrchr( name, '\\' ))) name = p + 1;
      home_dir = strdup( home );
-@@ -364,6 +379,8 @@ static void set_config_dir(void)
+@@ -364,6 +399,8 @@ static void set_config_dir(void)
      char *p, *dir;
      const char *prefix = getenv( "WINEPREFIX" );
  
@@ -1193,7 +1354,7 @@ index 0d43c5c..12d35af 100644
      if (prefix)
      {
          if (prefix[0] != '/')
-@@ -383,8 +400,16 @@ static void init_paths(void)
+@@ -383,8 +420,16 @@ static void init_paths(void)
  {
      Dl_info info;
  
@@ -1210,7 +1371,7 @@ index 0d43c5c..12d35af 100644
  
      if ((build_dir = remove_tail( ntdll_dir, "/dlls/ntdll" )))
      {
-@@ -1074,6 +1099,8 @@ static NTSTATUS open_dll_file( const char *name, OBJECT_ATTRIBUTES *attr, HANDLE
+@@ -1074,6 +1119,8 @@ static NTSTATUS open_dll_file( const char *name, OBJECT_ATTRIBUTES *attr, HANDLE
                                    FILE_SHARE_READ | FILE_SHARE_DELETE, FILE_OPEN,
                                    FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE, NULL, 0 )))
      {
@@ -1219,7 +1380,7 @@ index 0d43c5c..12d35af 100644
          if (status != STATUS_OBJECT_PATH_NOT_FOUND && status != STATUS_OBJECT_NAME_NOT_FOUND)
          {
              /* if the file exists but failed to open, report the error */
-@@ -1088,6 +1115,7 @@ static NTSTATUS open_dll_file( const char *name, OBJECT_ATTRIBUTES *attr, HANDLE
+@@ -1088,6 +1135,7 @@ static NTSTATUS open_dll_file( const char *name, OBJECT_ATTRIBUTES *attr, HANDLE
      status = NtCreateSection( mapping, STANDARD_RIGHTS_REQUIRED | SECTION_QUERY |
                                SECTION_MAP_READ | SECTION_MAP_EXECUTE,
                                NULL, &size, PAGE_EXECUTE_READ, SEC_IMAGE, handle );
@@ -1227,7 +1388,7 @@ index 0d43c5c..12d35af 100644
      NtClose( handle );
      return status;
  }
-@@ -1431,12 +1459,18 @@ static NTSTATUS open_main_image( UNICODE_STRING *nt_name, void **module, SECTION
+@@ -1431,12 +1479,18 @@ static NTSTATUS open_main_image( UNICODE_STRING *nt_name, void **module, SECTION
      if (loadorder == LO_DISABLED) NtTerminateProcess( GetCurrentProcess(), STATUS_DLL_NOT_FOUND );
  
      InitializeObjectAttributes( &attr, nt_name, OBJ_CASE_INSENSITIVE, 0, NULL );
@@ -1247,7 +1408,7 @@ index 0d43c5c..12d35af 100644
          if (status == STATUS_IMAGE_MACHINE_TYPE_MISMATCH && info->ComPlusNativeReady)
          {
              info->Machine = is_machine_64bit( native_machine ) ? IMAGE_FILE_MACHINE_AMD64 : native_machine;
-@@ -1832,7 +1866,12 @@ static void load_wow64_ntdll( USHORT machine )
+@@ -1832,7 +1886,12 @@ static void load_wow64_ntdll( USHORT machine )
   */
  static ULONG_PTR get_image_address(void)
  {
@@ -1261,7 +1422,7 @@ index 0d43c5c..12d35af 100644
      ULONG_PTR size, num, phdr_addr = getauxval( AT_PHDR );
      ElfW(Phdr) *phdr;
  
-@@ -1858,24 +1897,59 @@ static ULONG_PTR get_image_address(void)
+@@ -1858,24 +1917,59 @@ static ULONG_PTR get_image_address(void)
  /***********************************************************************
   *           start_main_thread
   */
@@ -1270,7 +1431,7 @@ index 0d43c5c..12d35af 100644
 + * located. */
 +static void startup_mark( const char *step )
 +{
-+    { FILE *_l = fopen("/data/pcps4_srv.log","a"); if(_l){ fprintf(_l,"wine startup: %s\n", step); fclose(_l); } }
++    { FILE *_l = ps4_probe_open(); if(_l){ fprintf(_l,"wine startup: %s\n", step); fclose(_l); } }
 +    static int enabled = -1;
 +
 +    if (enabled < 0) enabled = getenv( "WINE_PS5_TRACE_STARTUP" ) != NULL;
@@ -1322,7 +1483,7 @@ index 0d43c5c..12d35af 100644
  }
  
  
-@@ -2018,6 +2092,10 @@ static int pre_exec(void)
+@@ -2018,6 +2112,10 @@ static int pre_exec(void)
  
  static void reexec_loader( int argc, char *argv[], char *extra_arg )
  {
@@ -1333,7 +1494,7 @@ index 0d43c5c..12d35af 100644
      WORD machine = current_machine;
      char **new_argv;
  
-@@ -2041,6 +2119,7 @@ static void reexec_loader( int argc, char *argv[], char *extra_arg )
+@@ -2041,6 +2139,7 @@ static void reexec_loader( int argc, char *argv[], char *extra_arg )
  
      loader_exec( new_argv, machine );
      fatal_error( "could not exec the wine loader\n" );
@@ -1341,7 +1502,48 @@ index 0d43c5c..12d35af 100644
  }
  
  /***********************************************************************
-@@ -2111,6 +2190,7 @@ DECLSPEC_EXPORT void __wine_main( int argc, char *argv[] )
+@@ -2106,11 +2205,48 @@ static void check_command_line( int argc, char *argv[] )
+  *
+  * Main entry point called by the wine loader.
+  */
++#ifdef __ORBIS__
++/* PS4: the bootstrap passes a fixed command line.  Let a text file override
++ * it (one argument per line, the program first) so a different program or
++ * different options need no repackaging. */
++static void ps4_read_command_line( int *argc, char ***argv )
++{
++    static char buf[4096];
++    static char *av[34];
++    FILE *f = fopen( "/data/pcps4_cmdline.txt", "r" );
++    size_t n;
++    char *p;
++    int ac = 1;
++
++    if (!f) return;
++    n = fread( buf, 1, sizeof(buf) - 1, f );
++    fclose( f );
++    buf[n] = 0;
++    av[0] = (char *)"wine";
++    for (p = buf; *p && ac < 32; )
++    {
++        char *eol = p + strcspn( p, "\r\n" );
++        char *next = *eol ? eol + 1 : eol;
++        *eol = 0;
++        if (*p) av[ac++] = p;
++        p = next;
++    }
++    av[ac] = NULL;
++    if (ac < 2) return;
++    *argc = ac;
++    *argv = av;
++}
++#endif
++
+ DECLSPEC_EXPORT void __wine_main( int argc, char *argv[] )
+ {
++#ifdef __ORBIS__
++    ps4_read_command_line( &argc, &argv );
++#endif
      main_argc = argc;
      main_argv = argv;
  
@@ -1349,7 +1551,7 @@ index 0d43c5c..12d35af 100644
      init_paths();
      if (!getenv( "WINELOADERNOEXEC" ) || argc <= 1) check_command_line( argc, argv );
      unsetenv( "WINELOADERNOEXEC" );
-@@ -2125,11 +2205,14 @@ DECLSPEC_EXPORT void __wine_main( int argc, char *argv[] )
+@@ -2125,11 +2261,14 @@ DECLSPEC_EXPORT void __wine_main( int argc, char *argv[] )
      set_max_limit( RLIMIT_NICE );
  #endif
  
@@ -1651,13 +1853,28 @@ index d234b20..1b2e7a6 100644
                      if (size >= sizeof(VM_COUNTERS_EX))
                          pvmi.PrivateUsage = pvmi.PagefileUsage;
 diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
-index 06eb740..163bc67 100644
+index 06eb740..2fcdfe2 100644
 --- a/dlls/ntdll/unix/server.c
 +++ b/dlls/ntdll/unix/server.c
-@@ -24,8 +24,16 @@
+@@ -24,8 +24,31 @@
  
  #include "config.h"
  
++/* PS4 bring-up probes write to /data/pcps4_srv.log.  They sit in hot paths
++ * (every path lookup and descriptor transfer), so they are off unless the
++ * file /data/pcps4_probes exists. */
++#ifndef PS4_PROBE_OPEN_DEFINED
++#define PS4_PROBE_OPEN_DEFINED
++#include <stdio.h>
++#include <unistd.h>
++static inline FILE *ps4_probe_open(void)
++{
++    static int on = -1;
++    if (on < 0) on = !access( "/data/pcps4_probes", 0 );
++    return on ? fopen( "/data/pcps4_srv.log", "a" ) : NULL;
++}
++#endif
++
 +#if defined(__PROSPERO__) && !defined(WINE_INPROCESS_SERVER)
 +/* A PS5 title cannot create processes: the server runs in-process. */
 +#define WINE_INPROCESS_SERVER 1
@@ -1671,7 +1888,7 @@ index 06eb740..163bc67 100644
  #include <errno.h>
  #include <fcntl.h>
  #ifdef HAVE_LWP_H
-@@ -129,8 +137,7 @@ static void fatal_error( const char *err, ... )
+@@ -129,8 +152,7 @@ static void fatal_error( const char *err, ... )
      va_list args;
  
      va_start( args, err );
@@ -1681,7 +1898,7 @@ index 06eb740..163bc67 100644
      va_end( args );
      exit(1);
  }
-@@ -140,11 +147,14 @@ static void fatal_perror( const char *err, ... )
+@@ -140,11 +162,14 @@ static void fatal_perror( const char *err, ... )
  {
      va_list args;
  
@@ -1699,7 +1916,7 @@ index 06eb740..163bc67 100644
      exit(1);
  }
  
-@@ -282,14 +292,418 @@ static inline unsigned int wait_reply( int reply_fd, struct __server_request_inf
+@@ -282,14 +307,418 @@ static inline unsigned int wait_reply( int reply_fd, struct __server_request_inf
  /***********************************************************************
   *           server_call_unlocked
   */
@@ -2119,7 +2336,7 @@ index 06eb740..163bc67 100644
  }
  
  
-@@ -326,8 +740,15 @@ NTSTATUS unixcall_wine_server_call( void *args )
+@@ -326,8 +755,15 @@ NTSTATUS unixcall_wine_server_call( void *args )
   */
  void server_enter_uninterrupted_section( pthread_mutex_t *mutex, sigset_t *sigset )
  {
@@ -2135,7 +2352,7 @@ index 06eb740..163bc67 100644
  }
  
  
-@@ -916,6 +1337,7 @@ unsigned int server_queue_process_apc( HANDLE process, const union apc_call *cal
+@@ -916,6 +1352,7 @@ unsigned int server_queue_process_apc( HANDLE process, const union apc_call *cal
              server_enter_uninterrupted_section( &fd_cache_mutex, &sigset );
  
              /* remove the handle from the cache, get_apc_result will close it for us */
@@ -2143,22 +2360,22 @@ index 06eb740..163bc67 100644
              close_inproc_sync( handle );
  
              SERVER_START_REQ( get_apc_result )
-@@ -941,6 +1363,7 @@ unsigned int server_queue_process_apc( HANDLE process, const union apc_call *cal
+@@ -941,6 +1378,7 @@ unsigned int server_queue_process_apc( HANDLE process, const union apc_call *cal
   */
  void CDECL wine_server_send_fd( int fd )
  {
-+    { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"wssf: enter fd=%d\n",fd);fclose(_l);} }
++    { FILE*_l=ps4_probe_open(); if(_l){fprintf(_l,"wssf: enter fd=%d\n",fd);fclose(_l);} }
      struct send_fd data;
      struct msghdr msghdr;
      struct iovec vec;
-@@ -959,15 +1382,32 @@ void CDECL wine_server_send_fd( int fd )
+@@ -959,15 +1397,32 @@ void CDECL wine_server_send_fd( int fd )
      vec.iov_base = (void *)&data;
      vec.iov_len  = sizeof(data);
  
-+    { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"wssf2: before GetCurrentThreadId\n");fclose(_l);} }
++    { FILE*_l=ps4_probe_open(); if(_l){fprintf(_l,"wssf2: before GetCurrentThreadId\n");fclose(_l);} }
      data.tid = GetCurrentThreadId();
      data.fd  = fd;
-+    { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"wssf2: tid=%u fd=%d, before write\n",data.tid,data.fd);fclose(_l);} }
++    { FILE*_l=ps4_probe_open(); if(_l){fprintf(_l,"wssf2: tid=%u fd=%d, before write\n",data.tid,data.fd);fclose(_l);} }
  
 +#ifdef __PROSPERO__   /* PS4: no SCM_RIGHTS; send_fd.data.fd carries the fd (same process). Use plain write(). */
 +    (void)cmsg; (void)msghdr;
@@ -2166,7 +2383,7 @@ index 06eb740..163bc67 100644
 +    for (;;)
 +    {
 +        int ret2 = send( fd_socket, &data, sizeof(data), MSG_NOSIGNAL );
-+        { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"wssf3: send ret=%d errno=%d\n",ret2,ret2<0?errno:0);fclose(_l);} }
++        { FILE*_l=ps4_probe_open(); if(_l){fprintf(_l,"wssf3: send ret=%d errno=%d\n",ret2,ret2<0?errno:0);fclose(_l);} }
 +        if (ret2 == sizeof(data)) return;
 +        if (ret2 >= 0) server_protocol_error( "partial write %d\n", ret2 );
 +        if (errno == EINTR) continue;
@@ -2184,7 +2401,7 @@ index 06eb740..163bc67 100644
  
      for (;;)
      {
-@@ -987,6 +1427,34 @@ void CDECL wine_server_send_fd( int fd )
+@@ -987,6 +1442,34 @@ void CDECL wine_server_send_fd( int fd )
   */
  int wine_server_receive_fd( obj_handle_t *handle )
  {
@@ -2203,7 +2420,7 @@ index 06eb740..163bc67 100644
 +                /* PS4: shared fd table -- dup so this side owns its own
 +                 * descriptor, matching SCM_RIGHTS semantics. */
 +                int dfd = (rfd >= 0) ? dup( rfd ) : -1;
-+                { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"cfd: r=%d rfd=%d dup=%d errno=%d\n",r,rfd,dfd,dfd<0?errno:0);fclose(_l);} }
++                { FILE*_l=ps4_probe_open(); if(_l){fprintf(_l,"cfd: r=%d rfd=%d dup=%d errno=%d\n",r,rfd,dfd,dfd<0?errno:0);fclose(_l);} }
 +                if (dfd < 0) dfd = rfd;   /* fall back to the raw fd */
 +                return dfd;
 +            }
@@ -2219,7 +2436,7 @@ index 06eb740..163bc67 100644
      struct iovec vec;
      struct msghdr msghdr;
      char cmsg_buffer[256];
-@@ -1199,6 +1667,13 @@ int server_get_unix_fd( HANDLE handle, unsigned int wanted_access, int *unix_fd,
+@@ -1199,6 +1682,13 @@ int server_get_unix_fd( HANDLE handle, unsigned int wanted_access, int *unix_fd,
      server_leave_uninterrupted_section( &fd_cache_mutex, &sigset );
  
  done:
@@ -2233,7 +2450,7 @@ index 06eb740..163bc67 100644
      if (!ret && ((access & wanted_access) != wanted_access))
      {
          ret = STATUS_ACCESS_DENIED;
-@@ -1333,8 +1808,10 @@ static int setup_config_dir(void)
+@@ -1333,8 +1823,10 @@ static int setup_config_dir(void)
          {
              while (p > dir + 1 && p[-1] == '/') p--;
              *p = 0;
@@ -2244,7 +2461,7 @@ index 06eb740..163bc67 100644
          }
          free( dir );
          mkdir( config_dir, 0777 );
-@@ -1343,7 +1820,9 @@ static int setup_config_dir(void)
+@@ -1343,7 +1835,9 @@ static int setup_config_dir(void)
      }
  
      if (stat( ".", &st ) == -1) fatal_perror( "stat %s", config_dir );
@@ -2254,7 +2471,7 @@ index 06eb740..163bc67 100644
  
      server_dir = init_server_dir( st.st_dev, st.st_ino );
  
-@@ -1394,6 +1873,143 @@ static void server_connect_error( const char *serverdir )
+@@ -1394,6 +1888,143 @@ static void server_connect_error( const char *serverdir )
  }
  
  
@@ -2398,7 +2615,7 @@ index 06eb740..163bc67 100644
  /***********************************************************************
   *           server_connect
   *
-@@ -1407,6 +2023,14 @@ static int server_connect(void)
+@@ -1407,6 +2038,14 @@ static int server_connect(void)
  
      initial_cwd = setup_config_dir();
  
@@ -2413,56 +2630,56 @@ index 06eb740..163bc67 100644
      /* chdir to the server directory */
      if (chdir( server_dir ) == -1)
      {
-@@ -1564,12 +2188,18 @@ static int init_thread_pipe( struct thread_data *data )
+@@ -1564,12 +2203,18 @@ static int init_thread_pipe( struct thread_data *data )
      ss.ss_sp    = data->signal_stack;
      ss.ss_size  = signal_stack_size;
      ss.ss_flags = 0;
-+    { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"itp: before sigaltstack\n");fclose(_l);} }
++    { FILE*_l=ps4_probe_open(); if(_l){fprintf(_l,"itp: before sigaltstack\n");fclose(_l);} }
      sigaltstack( &ss, NULL );
-+    { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"itp: after sigaltstack\n");fclose(_l);} }
++    { FILE*_l=ps4_probe_open(); if(_l){fprintf(_l,"itp: after sigaltstack\n");fclose(_l);} }
  
      if (server_pipe( reply_pipe ) == -1) server_protocol_perror( "pipe" );
-+    { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"itp: reply_pipe ok\n");fclose(_l);} }
++    { FILE*_l=ps4_probe_open(); if(_l){fprintf(_l,"itp: reply_pipe ok\n");fclose(_l);} }
      if (server_pipe( data->wait_fd ) == -1) server_protocol_perror( "pipe" );
-+    { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"itp: wait_fd ok\n");fclose(_l);} }
++    { FILE*_l=ps4_probe_open(); if(_l){fprintf(_l,"itp: wait_fd ok\n");fclose(_l);} }
      wine_server_send_fd( reply_pipe[1] );
-+    { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"itp: sent reply fd\n");fclose(_l);} }
++    { FILE*_l=ps4_probe_open(); if(_l){fprintf(_l,"itp: sent reply fd\n");fclose(_l);} }
      wine_server_send_fd( data->wait_fd[1] );
-+    { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"itp: sent wait fd\n");fclose(_l);} }
++    { FILE*_l=ps4_probe_open(); if(_l){fprintf(_l,"itp: sent wait fd\n");fclose(_l);} }
      data->reply_fd = reply_pipe[0];
      return reply_pipe[1];
  }
-@@ -1649,6 +2279,7 @@ size_t server_init_process(void)
+@@ -1649,6 +2294,7 @@ size_t server_init_process(void)
  
      /* receive the first thread request fd on the main socket */
      data->request_fd = wine_server_receive_fd( &version );
-+    { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"siproc: recv_fd ver=%u reqfd=%d\n",version,data->request_fd);fclose(_l);} }
++    { FILE*_l=ps4_probe_open(); if(_l){fprintf(_l,"siproc: recv_fd ver=%u reqfd=%d\n",version,data->request_fd);fclose(_l);} }
  
  #ifdef SO_PASSCRED
      /* now that we hopefully received the server_pid, disable SO_PASSCRED */
-@@ -1676,8 +2307,14 @@ size_t server_init_process(void)
+@@ -1676,8 +2322,14 @@ size_t server_init_process(void)
      sigemptyset( &sig_act.sa_mask );
      sigaction( SIGPIPE, &sig_act, NULL );
  
-+    { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"siproc: before init_thread_pipe\n");fclose(_l);} }
++    { FILE*_l=ps4_probe_open(); if(_l){fprintf(_l,"siproc: before init_thread_pipe\n");fclose(_l);} }
      reply_pipe = init_thread_pipe( data );
-+    { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"siproc: reply_pipe=%d, calling init_first_thread\n",reply_pipe);fclose(_l);} }
++    { FILE*_l=ps4_probe_open(); if(_l){fprintf(_l,"siproc: reply_pipe=%d, calling init_first_thread\n",reply_pipe);fclose(_l);} }
  
 +#ifdef WINE_INPROCESS_SERVER
 +    register_inprocess_thread( get_unix_tid() );
 +#endif
-+    { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"siproc: registered inprocess thread\n");fclose(_l);} }
++    { FILE*_l=ps4_probe_open(); if(_l){fprintf(_l,"siproc: registered inprocess thread\n");fclose(_l);} }
      SERVER_START_REQ( init_first_thread )
      {
          req->unix_pid    = getpid();
-@@ -1687,15 +2324,22 @@ size_t server_init_process(void)
+@@ -1687,15 +2339,22 @@ size_t server_init_process(void)
          req->debug_level = (TRACE_ON(server) != 0);
          req->page_size   = get_host_page_size();
          wine_server_set_reply( req, supported_machines, sizeof(supported_machines) );
 -        if (!(ret = wine_server_call( req )))
-+        { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"siproc: before wine_server_call(init_first_thread)\n");fclose(_l);} }
++        { FILE*_l=ps4_probe_open(); if(_l){fprintf(_l,"siproc: before wine_server_call(init_first_thread)\n");fclose(_l);} }
 +        ret = wine_server_call( req );
-+        { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"siproc: wsc ret=%x\n",ret);fclose(_l);} }
++        { FILE*_l=ps4_probe_open(); if(_l){fprintf(_l,"siproc: wsc ret=%x\n",ret);fclose(_l);} }
 +        if (!ret)
          {
              obj_handle_t handle;
@@ -2475,11 +2692,11 @@ index 06eb740..163bc67 100644
              info_size         = reply->info_size;
              server_start_time = reply->server_start;
              supported_machines_count = wine_server_reply_size( reply ) / sizeof(*supported_machines);
-+            { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"siproc: nmach=%u inproc_device=%x\n",supported_machines_count,reply->inproc_device);fclose(_l);} }
++            { FILE*_l=ps4_probe_open(); if(_l){fprintf(_l,"siproc: nmach=%u inproc_device=%x\n",supported_machines_count,reply->inproc_device);fclose(_l);} }
              if (reply->inproc_device)
              {
                  inproc_device_fd = wine_server_receive_fd( &handle );
-@@ -1704,7 +2348,14 @@ size_t server_init_process(void)
+@@ -1704,7 +2363,14 @@ size_t server_init_process(void)
          }
      }
      SERVER_END_REQ;
@@ -2490,11 +2707,11 @@ index 06eb740..163bc67 100644
 +     * the fd the server wrapped as thread->reply_fd.  Closing it here would
 +     * tear down the server's own reply channel. */
 +#endif
-+    { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"siproc: after init_first_thread ret=%x\n",ret);fclose(_l);} }
++    { FILE*_l=ps4_probe_open(); if(_l){fprintf(_l,"siproc: after init_first_thread ret=%x\n",ret);fclose(_l);} }
  
      if (ret) server_protocol_error( "init_first_thread failed with status %x\n", ret );
  
-@@ -1793,8 +2444,13 @@ void server_init_thread( struct thread_data *data )
+@@ -1793,8 +2459,13 @@ void server_init_thread( struct thread_data *data )
  
      data->pthread_id = pthread_self();
      pthread_setspecific( thread_data_key, data );
@@ -2508,7 +2725,7 @@ index 06eb740..163bc67 100644
      SERVER_START_REQ( init_thread )
      {
          req->unix_tid  = get_unix_tid();
-@@ -1806,7 +2462,12 @@ void server_init_thread( struct thread_data *data )
+@@ -1806,7 +2477,12 @@ void server_init_thread( struct thread_data *data )
          data->suspend = reply->suspend;
      }
      SERVER_END_REQ;
@@ -2516,12 +2733,12 @@ index 06eb740..163bc67 100644
      close( reply_pipe );
 +#else
 +    /* PS4: shared fd table -- reply_pipe is the server's thread->reply_fd. */
-+    { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"sit: thread init done, keeping reply fd %d\n",reply_pipe);fclose(_l);} }
++    { FILE*_l=ps4_probe_open(); if(_l){fprintf(_l,"sit: thread init done, keeping reply fd %d\n",reply_pipe);fclose(_l);} }
 +#endif
  
      if (data->teb)
      {
-@@ -1857,6 +2518,8 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
+@@ -1857,6 +2533,8 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
      unsigned int ret;
      int fd = -1;
  
@@ -2530,7 +2747,7 @@ index 06eb740..163bc67 100644
      if (dest) *dest = 0;
  
      if ((options & DUPLICATE_CLOSE_SOURCE) && source_process != NtCurrentProcess())
-@@ -1889,6 +2552,7 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
+@@ -1889,6 +2567,7 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
      if (options & DUPLICATE_CLOSE_SOURCE)
      {
          fd = remove_fd_from_cache( source );
@@ -2538,7 +2755,7 @@ index 06eb740..163bc67 100644
          close_inproc_sync( source );
      }
  
-@@ -1909,7 +2573,9 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
+@@ -1909,7 +2588,9 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
  
      server_leave_uninterrupted_section( &fd_cache_mutex, &sigset );
  
@@ -2548,7 +2765,7 @@ index 06eb740..163bc67 100644
      return ret;
  }
  
-@@ -1953,6 +2619,7 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
+@@ -1953,6 +2634,7 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
      unsigned int ret;
      int fd;
  
@@ -2556,7 +2773,7 @@ index 06eb740..163bc67 100644
      if (HandleToLong( handle ) >= ~5 && HandleToLong( handle ) <= ~0)
          return STATUS_SUCCESS;
  
-@@ -1963,6 +2630,7 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
+@@ -1963,6 +2645,7 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
      /* always remove the cached fd; if the server request fails we'll just
       * retrieve it again */
      fd = remove_fd_from_cache( handle );
@@ -2564,7 +2781,7 @@ index 06eb740..163bc67 100644
      close_inproc_sync( handle );
  
      SERVER_START_REQ( close_handle )
-@@ -1974,7 +2642,9 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
+@@ -1974,7 +2657,9 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
  
      server_leave_uninterrupted_section( &fd_cache_mutex, &sigset );
  
@@ -3884,10 +4101,32 @@ index 5e30f0e..107d5d1 100644
          {
              static int clockrate_name[] = { CTL_KERN, KERN_CLOCKRATE };
 diff --git a/dlls/ntdll/unix/thread.c b/dlls/ntdll/unix/thread.c
-index c6b99b7..2aee778 100644
+index c6b99b7..d77395a 100644
 --- a/dlls/ntdll/unix/thread.c
 +++ b/dlls/ntdll/unix/thread.c
-@@ -1116,6 +1116,10 @@ static void contexts_from_server( CONTEXT *context, struct context_data server_c
+@@ -24,6 +24,21 @@
+ 
+ #include "config.h"
+ 
++/* PS4 bring-up probes write to /data/pcps4_srv.log.  They sit in hot paths
++ * (every path lookup and descriptor transfer), so they are off unless the
++ * file /data/pcps4_probes exists. */
++#ifndef PS4_PROBE_OPEN_DEFINED
++#define PS4_PROBE_OPEN_DEFINED
++#include <stdio.h>
++#include <unistd.h>
++static inline FILE *ps4_probe_open(void)
++{
++    static int on = -1;
++    if (on < 0) on = !access( "/data/pcps4_probes", 0 );
++    return on ? fopen( "/data/pcps4_srv.log", "a" ) : NULL;
++}
++#endif
++
+ #include <assert.h>
+ #include <errno.h>
+ #include <fcntl.h>
+@@ -1116,6 +1131,10 @@ static void contexts_from_server( CONTEXT *context, struct context_data server_c
  static DECLSPEC_NORETURN void pthread_exit_wrapper( int status )
  {
      struct thread_data *data = get_thread_data();
@@ -3898,7 +4137,7 @@ index c6b99b7..2aee778 100644
      close( data->alert_fd );
      close( data->wait_fd[0] );
      close( data->wait_fd[1] );
-@@ -1292,7 +1296,14 @@ static NTSTATUS create_server_thread( HANDLE *handle, struct thread_data **data_
+@@ -1292,7 +1311,14 @@ static NTSTATUS create_server_thread( HANDLE *handle, struct thread_data **data_
              *handle = wine_server_ptr_handle( reply->handle );
              tid = reply->tid;
          }
@@ -3906,14 +4145,14 @@ index c6b99b7..2aee778 100644
 +        /* PS4: the in-process server could not dup() the descriptor, so it is
 +         * using this very fd number as the new thread's request pipe.  It owns
 +         * it now (and closes it itself on failure). */
-+        { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"cst: new_thread status=%08x tid=%04x req_fd=%d\n",(unsigned)status,(unsigned)tid,request_pipe[0]);fclose(_l);} }
++        { FILE*_l=ps4_probe_open(); if(_l){fprintf(_l,"cst: new_thread status=%08x tid=%04x req_fd=%d\n",(unsigned)status,(unsigned)tid,request_pipe[0]);fclose(_l);} }
 +#else
          close( request_pipe[0] );
 +#endif
      }
      SERVER_END_REQ;
  
-@@ -1312,6 +1323,9 @@ static NTSTATUS create_server_thread( HANDLE *handle, struct thread_data **data_
+@@ -1312,6 +1338,9 @@ static NTSTATUS create_server_thread( HANDLE *handle, struct thread_data **data_
  
      data->request_fd = request_pipe[1];
      data->tid        = tid;
@@ -3923,7 +4162,7 @@ index c6b99b7..2aee778 100644
      data->start      = start;
      data->param      = param;
  
-@@ -1336,11 +1350,18 @@ static NTSTATUS spawn_thread( struct thread_data *data )
+@@ -1336,11 +1365,18 @@ static NTSTATUS spawn_thread( struct thread_data *data )
      pthread_attr_setguardsize( &attr, 0 );
      pthread_attr_setscope( &attr, PTHREAD_SCOPE_SYSTEM ); /* force creating a kernel thread */
      InterlockedIncrement( &nb_threads );
@@ -3932,7 +4171,7 @@ index c6b99b7..2aee778 100644
 +    {
 +    int _rc = pthread_create( &pthread_id, &attr, (void * (*)(void *))server_init_thread, data );
 +#ifdef __ORBIS__
-+    { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"spt: pthread_create rc=%d stack=%p size=%lx\n",_rc,get_kernel_stack( data ),(unsigned long)kernel_stack_size);fclose(_l);} }
++    { FILE*_l=ps4_probe_open(); if(_l){fprintf(_l,"spt: pthread_create rc=%d stack=%p size=%lx\n",_rc,get_kernel_stack( data ),(unsigned long)kernel_stack_size);fclose(_l);} }
 +#endif
 +    if (_rc)
      {
@@ -3943,7 +4182,7 @@ index c6b99b7..2aee778 100644
      pthread_attr_destroy( &attr );
      pthread_sigmask( SIG_SETMASK, &sigset, NULL );
      return status;
-@@ -1459,7 +1480,13 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle, ACCESS_MASK access, OBJECT_ATT
+@@ -1459,7 +1495,13 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle, ACCESS_MASK access, OBJECT_ATT
      teb = data->teb;
      set_thread_id( data );
  
@@ -3958,7 +4197,7 @@ index c6b99b7..2aee778 100644
          goto done;
  
      teb->SkipThreadAttach = !!(flags & THREAD_CREATE_FLAGS_SKIP_THREAD_ATTACH);
-@@ -1951,6 +1978,7 @@ NTSTATUS get_thread_context( HANDLE handle, void *context, BOOL *self, USHORT ma
+@@ -1951,6 +1993,7 @@ NTSTATUS get_thread_context( HANDLE handle, void *context, BOOL *self, USHORT ma
          server_enter_uninterrupted_section( &fd_cache_mutex, &sigset );
  
          /* remove the handle from the cache, get_thread_context will close it for us */
@@ -5177,10 +5416,10 @@ index 26bab84..5636fd5 100644
  extern struct user_thread_info *get_user_thread_info(void);
 diff --git a/dlls/win32u/ps5drv.c b/dlls/win32u/ps5drv.c
 new file mode 100644
-index 0000000..4e0a9bf
+index 0000000..6be8361
 --- /dev/null
 +++ b/dlls/win32u/ps5drv.c
-@@ -0,0 +1,970 @@
+@@ -0,0 +1,974 @@
 +/*
 + * In-process user driver for the PS5
 + *
@@ -5268,7 +5507,11 @@ index 0000000..4e0a9bf
 +static int (*input_fd)(void);
 +
 +static pthread_mutex_t screen_lock = PTHREAD_MUTEX_INITIALIZER;
++#ifdef __ORBIS__
++static UINT screen_width = 1920, screen_height = 1080;  /* the console's output */
++#else
 +static UINT screen_width = 800, screen_height = 600;
++#endif
 +/* The display mode an application set, at most the desktop's. win32u maps
 + * a smaller mode onto the desktop scaled uniformly from its top left, so
 + * frames show that part, content_width x content_height, which the title
@@ -6297,7 +6540,7 @@ index 6ed5b77..3db7885 100644
          return (ULONG_PTR)get_dialog_proc( (DLGPROC)arg1, arg2 );
  
 diff --git a/dlls/win32u/vulkan.c b/dlls/win32u/vulkan.c
-index 261c10c..04d9108 100644
+index 261c10c..6a385c5 100644
 --- a/dlls/win32u/vulkan.c
 +++ b/dlls/win32u/vulkan.c
 @@ -448,12 +448,14 @@ static VkResult convert_instance_create_info( struct mempool *pool, VkInstanceCr
@@ -6343,7 +6586,21 @@ index 261c10c..04d9108 100644
  }
  
  static VkResult win32u_vkGetPhysicalDeviceSurfaceCapabilitiesKHR( VkPhysicalDevice client_physical_device, VkSurfaceKHR client_surface,
-@@ -1854,13 +1865,23 @@ static VkResult win32u_vkCreateSwapchainKHR( VkDevice client_device, const VkSwa
+@@ -1815,6 +1826,13 @@ static VkBool32 win32u_vkGetPhysicalDeviceWin32PresentationSupportKHR( VkPhysica
+ 
+ static BOOL extents_equals( const VkExtent2D *extents, const RECT *rect )
+ {
++#ifdef __ORBIS__
++    /* PS4: swapchains are always the display's size (video-out accepts nothing
++     * else), whatever the window's client area is.  Reporting that mismatch as
++     * VK_SUBOPTIMAL_KHR from every acquire and present would send applications
++     * that treat it as "recreate the swapchain" into an endless loop. */
++    return TRUE;
++#endif
+     return extents->width == rect->right - rect->left && extents->height == rect->bottom - rect->top;
+ }
+ 
+@@ -1854,13 +1872,23 @@ static VkResult win32u_vkCreateSwapchainKHR( VkDevice client_device, const VkSwa
       * display mode change emulation), MoltenVK's vkQueuePresentKHR returns VK_SUBOPTIMAL_KHR.
       * Create the swapchain with VkSwapchainPresentScalingCreateInfoEXT to avoid this.
       */
@@ -6368,7 +6625,7 @@ index 261c10c..04d9108 100644
          create_info_host.pNext = &scaling;
      }
  
-@@ -2020,6 +2041,13 @@ static VkResult win32u_vkQueuePresentKHR( VkQueue client_queue, const VkPresentI
+@@ -2020,6 +2048,13 @@ static VkResult win32u_vkQueuePresentKHR( VkQueue client_queue, const VkPresentI
  
      if (swapchains != swapchains_buffer) free( swapchains );
  
@@ -6382,7 +6639,7 @@ index 261c10c..04d9108 100644
      if (TRACE_ON( fps ))
      {
          static unsigned long frames, frames_total;
-@@ -3163,14 +3191,17 @@ struct vulkan_instance *vulkan_instance_create( const struct vulkan_instance_ext
+@@ -3163,14 +3198,17 @@ struct vulkan_instance *vulkan_instance_create( const struct vulkan_instance_ext
      const struct vulkan_funcs *funcs = __wine_get_vulkan_driver( WINE_VULKAN_DRIVER_VERSION );
      VkInstanceCreateInfo create_info = {.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
      const char *extension_names[sizeof(*extensions) * 8];
@@ -6401,7 +6658,7 @@ index 261c10c..04d9108 100644
      ALL_VK_INSTANCE_EXTS
  #undef USE_VK_EXT
  
-@@ -3180,7 +3211,7 @@ struct vulkan_instance *vulkan_instance_create( const struct vulkan_instance_ext
+@@ -3180,7 +3218,7 @@ struct vulkan_instance *vulkan_instance_create( const struct vulkan_instance_ext
  
          if (!(wrapper = calloc( 1, offsetof(struct instance_wrapper, client.physical_device[device_count]) ))) return NULL;
          wrapper->client.physical_device_count = device_count;
@@ -14088,26 +14345,42 @@ index 37fa946..fdc2188 100644
  
      dir_add_to_existing_notify( dir );
 diff --git a/server/directory.c b/server/directory.c
-index 2b9d03e..5437ce0 100644
+index 2b9d03e..af84763 100644
 --- a/server/directory.c
 +++ b/server/directory.c
-@@ -22,6 +22,8 @@
+@@ -21,7 +21,24 @@
+ 
  #include "config.h"
  
++/* PS4 bring-up probes write to /data/pcps4_srv.log.  They sit in hot paths
++ * (every path lookup and descriptor transfer), so they are off unless the
++ * file /data/pcps4_probes exists. */
++#ifndef PS4_PROBE_OPEN_DEFINED
++#define PS4_PROBE_OPEN_DEFINED
++#include <stdio.h>
++#include <unistd.h>
++static inline FILE *ps4_probe_open(void)
++{
++    static int on = -1;
++    if (on < 0) on = !access( "/data/pcps4_probes", 0 );
++    return on ? fopen( "/data/pcps4_srv.log", "a" ) : NULL;
++}
++#endif
++
  #include <assert.h>
 +#include <errno.h> /* pcps4 */
 +#include <stdio.h>
  #include <stdarg.h>
  #include <stdlib.h>
  #include <stdio.h>
-@@ -476,8 +478,8 @@ void init_directories( struct fd *intl_fd )
+@@ -476,8 +493,8 @@ void init_directories( struct fd *intl_fd )
      release_object( create_keyed_event( &dir_kernel->obj, keyed_event_crit_sect_str, OBJ_PERMANENT, NULL ));
  
      /* mappings */
 -    release_object( create_fd_mapping( &dir_nls->obj, intl_str, intl_fd, OBJ_PERMANENT, NULL ));
 -    release_object( create_user_data_mapping( &dir_kernel->obj, user_data_str, OBJ_PERMANENT, NULL ));
-+    { struct object *o=create_fd_mapping( &dir_nls->obj, intl_str, intl_fd, OBJ_PERMANENT, NULL ); fprintf(stderr,"pcps4: nls_map=%p errno=%d\n",(void*)o,o?0:errno); {FILE*_lf=fopen("/data/pcps4_srv.log","a"); if(_lf){fprintf(_lf,"nls_map=%p errno=%d\n",(void*)o,o?0:errno);fclose(_lf);}} if(o)release_object(o); }
-+    { struct object *o=create_user_data_mapping( &dir_kernel->obj, user_data_str, OBJ_PERMANENT, NULL ); fprintf(stderr,"pcps4: kuser_map=%p errno=%d\n",(void*)o,o?0:errno); {FILE*_lf=fopen("/data/pcps4_srv.log","a"); if(_lf){fprintf(_lf,"kuser_map=%p errno=%d\n",(void*)o,o?0:errno);fclose(_lf);}} if(o)release_object(o); }
++    { struct object *o=create_fd_mapping( &dir_nls->obj, intl_str, intl_fd, OBJ_PERMANENT, NULL ); fprintf(stderr,"pcps4: nls_map=%p errno=%d\n",(void*)o,o?0:errno); {FILE*_lf=ps4_probe_open(); if(_lf){fprintf(_lf,"nls_map=%p errno=%d\n",(void*)o,o?0:errno);fclose(_lf);}} if(o)release_object(o); }
++    { struct object *o=create_user_data_mapping( &dir_kernel->obj, user_data_str, OBJ_PERMANENT, NULL ); fprintf(stderr,"pcps4: kuser_map=%p errno=%d\n",(void*)o,o?0:errno); {FILE*_lf=ps4_probe_open(); if(_lf){fprintf(_lf,"kuser_map=%p errno=%d\n",(void*)o,o?0:errno);fclose(_lf);}} if(o)release_object(o); }
      release_object( intl_fd );
  
      session_mapping = create_session_mapping( &dir_kernel->obj, session_str, OBJ_PERMANENT, NULL );
@@ -14498,23 +14771,45 @@ index b0cb6b1..b1765ff 100644
      reply->manual_reset = sync->manual;
      reply->state = sync->signaled;
 diff --git a/server/fd.c b/server/fd.c
-index e035719..a2d97ef 100644
+index e035719..76dbdfb 100644
 --- a/server/fd.c
 +++ b/server/fd.c
-@@ -29,6 +29,12 @@
+@@ -21,6 +21,21 @@
+ 
+ #include "config.h"
+ 
++/* PS4 bring-up probes write to /data/pcps4_srv.log.  They sit in hot paths
++ * (every path lookup and descriptor transfer), so they are off unless the
++ * file /data/pcps4_probes exists. */
++#ifndef PS4_PROBE_OPEN_DEFINED
++#define PS4_PROBE_OPEN_DEFINED
++#include <stdio.h>
++#include <unistd.h>
++static inline FILE *ps4_probe_open(void)
++{
++    static int on = -1;
++    if (on < 0) on = !access( "/data/pcps4_probes", 0 );
++    return on ? fopen( "/data/pcps4_srv.log", "a" ) : NULL;
++}
++#endif
++
+ #include <assert.h>
+ #include <dirent.h>
+ #include <errno.h>
+@@ -29,6 +44,12 @@
  #include <signal.h>
  #include <stdarg.h>
  #include <stdio.h>
 +
 +#ifdef __PROSPERO__
-+#define PS4LOG(...) do{ FILE*_pl=fopen("/data/pcps4_srv.log","a"); if(_pl){ fprintf(_pl,__VA_ARGS__); fclose(_pl);} }while(0)
++#define PS4LOG(...) do{ FILE*_pl=ps4_probe_open(); if(_pl){ fprintf(_pl,__VA_ARGS__); fclose(_pl);} }while(0)
 +#else
 +#define PS4LOG(...) do{}while(0)
 +#endif
  #include <string.h>
  #include <stdlib.h>
  #include <stdint.h>
-@@ -288,6 +294,49 @@ timeout_t monotonic_time;
+@@ -288,6 +309,49 @@ timeout_t monotonic_time;
  struct _KUSER_SHARED_DATA *user_shared_data = NULL;
  static const timeout_t user_shared_data_timeout = 16 * 10000;
  
@@ -14564,7 +14859,7 @@ index e035719..a2d97ef 100644
  static void atomic_store_ulong(volatile ULONG *ptr, ULONG value)
  {
      /* on x86 there should be total store order guarantees, so volatile is
-@@ -381,6 +430,9 @@ struct timeout_user *add_timeout_user( timeout_t when, timeout_callback func, vo
+@@ -381,6 +445,9 @@ struct timeout_user *add_timeout_user( timeout_t when, timeout_callback func, vo
      user->when     = timeout_to_abstime( when );
      user->callback = func;
      user->private  = private;
@@ -14574,7 +14869,7 @@ index e035719..a2d97ef 100644
  
      /* Now insert it in the linked list */
  
-@@ -538,13 +590,22 @@ static inline void main_loop_epoll(void)
+@@ -538,13 +605,22 @@ static inline void main_loop_epoll(void)
      assert( POLLHUP == EPOLLHUP );
  
      if (epoll_fd == -1) return;
@@ -14597,7 +14892,7 @@ index e035719..a2d97ef 100644
  
  #ifdef HAVE_EPOLL_PWAIT2
          if (!failed_epoll_pwait2)
-@@ -557,6 +618,13 @@ static inline void main_loop_epoll(void)
+@@ -557,6 +633,13 @@ static inline void main_loop_epoll(void)
  #endif
              ret = epoll_wait( epoll_fd, events, ARRAY_SIZE( events ), timeout );
  
@@ -14611,7 +14906,7 @@ index e035719..a2d97ef 100644
          set_current_time();
  
          /* put the events into the pollfd array first, like poll does */
-@@ -643,16 +711,32 @@ static inline void main_loop_epoll(void)
+@@ -643,16 +726,32 @@ static inline void main_loop_epoll(void)
      struct kevent events[128];
  
      if (kqueue_fd == -1) return;
@@ -14644,7 +14939,7 @@ index e035719..a2d97ef 100644
          set_current_time();
  
          /* put the events into the pollfd array first, like poll does */
-@@ -830,6 +914,9 @@ static void remove_poll_user( struct fd *fd, int user )
+@@ -830,6 +929,9 @@ static void remove_poll_user( struct fd *fd, int user )
      assert( poll_users[user] == fd );
  
      remove_epoll_user( fd, user );
@@ -14654,7 +14949,7 @@ index e035719..a2d97ef 100644
      pollfd[user].fd = -1;
      pollfd[user].events = 0;
      pollfd[user].revents = 0;
-@@ -916,16 +1003,37 @@ static int get_next_timeout( struct timespec *ts )
+@@ -916,16 +1018,37 @@ static int get_next_timeout( struct timespec *ts )
      return ret;
  }
  
@@ -14692,7 +14987,7 @@ index e035719..a2d97ef 100644
  
      while (active_users)
      {
-@@ -933,7 +1041,14 @@ void main_loop(void)
+@@ -933,7 +1056,14 @@ void main_loop(void)
  
          if (!active_users) break;  /* last user removed by a timeout */
  
@@ -14707,7 +15002,7 @@ index e035719..a2d97ef 100644
          set_current_time();
  
          if (ret > 0)
-@@ -948,6 +1063,10 @@ void main_loop(void)
+@@ -948,6 +1078,10 @@ void main_loop(void)
              }
          }
      }
@@ -14718,7 +15013,7 @@ index e035719..a2d97ef 100644
  }
  
  
-@@ -1611,6 +1730,9 @@ void set_fd_events( struct fd *fd, int events )
+@@ -1611,6 +1745,9 @@ void set_fd_events( struct fd *fd, int events )
      int user = fd->poll_index;
      assert( poll_users[user] == fd );
  
@@ -14728,7 +15023,7 @@ index e035719..a2d97ef 100644
      set_fd_epoll_events( fd, user, events );
  
      if (events == -1)  /* stop waiting on this fd completely */
-@@ -1738,6 +1860,38 @@ struct fd *alloc_pseudo_fd( const struct fd_ops *fd_user_ops, struct object *use
+@@ -1738,6 +1875,38 @@ struct fd *alloc_pseudo_fd( const struct fd_ops *fd_user_ops, struct object *use
  }
  
  /* duplicate an fd object for a different user */
@@ -14767,7 +15062,7 @@ index e035719..a2d97ef 100644
  struct fd *dup_fd_object( struct fd *orig, unsigned int access, unsigned int sharing, unsigned int options )
  {
      unsigned int err;
-@@ -1763,7 +1917,7 @@ struct fd *dup_fd_object( struct fd *orig, unsigned int access, unsigned int sha
+@@ -1763,7 +1932,7 @@ struct fd *dup_fd_object( struct fd *orig, unsigned int access, unsigned int sha
      {
          struct closed_fd *closed = mem_alloc( sizeof(*closed) );
          if (!closed) goto failed;
@@ -14776,7 +15071,7 @@ index e035719..a2d97ef 100644
          {
              file_set_error();
              free( closed );
-@@ -1781,7 +1935,7 @@ struct fd *dup_fd_object( struct fd *orig, unsigned int access, unsigned int sha
+@@ -1781,7 +1950,7 @@ struct fd *dup_fd_object( struct fd *orig, unsigned int access, unsigned int sha
              goto failed;
          }
      }
@@ -14785,7 +15080,7 @@ index e035719..a2d97ef 100644
      {
          file_set_error();
          goto failed;
-@@ -1793,6 +1947,81 @@ failed:
+@@ -1793,6 +1962,81 @@ failed:
      return NULL;
  }
  
@@ -14867,7 +15162,7 @@ index e035719..a2d97ef 100644
  /* find an existing fd object that can be reused for a mapping */
  struct fd *get_fd_object_for_mapping( struct fd *fd, unsigned int access, unsigned int sharing )
  {
-@@ -1801,7 +2030,7 @@ struct fd *get_fd_object_for_mapping( struct fd *fd, unsigned int access, unsign
+@@ -1801,7 +2045,7 @@ struct fd *get_fd_object_for_mapping( struct fd *fd, unsigned int access, unsign
      if (!fd->inode) return NULL;
  
      LIST_FOR_EACH_ENTRY( fd_ptr, &fd->inode->open, struct fd, inode_entry )
@@ -14876,7 +15171,7 @@ index e035719..a2d97ef 100644
              return (struct fd *)grab_object( fd_ptr );
  
      return NULL;
-@@ -1815,6 +2044,23 @@ void set_fd_user( struct fd *fd, const struct fd_ops *user_ops, struct object *u
+@@ -1815,6 +2059,23 @@ void set_fd_user( struct fd *fd, const struct fd_ops *user_ops, struct object *u
      fd->user   = user;
  }
  
@@ -14900,7 +15195,7 @@ index e035719..a2d97ef 100644
  char *dup_fd_name( struct fd *root, const char *name )
  {
      char *ret;
-@@ -1969,7 +2215,7 @@ struct fd *open_fd( struct fd *root, const char *name, struct unicode_str nt_nam
+@@ -1969,7 +2230,7 @@ struct fd *open_fd( struct fd *root, const char *name, struct unicode_str nt_nam
  
          if ((path = dup_fd_name( root, name )))
          {
@@ -14909,7 +15204,7 @@ index e035719..a2d97ef 100644
              free( path );
          }
  
-@@ -2876,7 +3122,7 @@ static void set_fd_name( struct fd *fd, struct fd *root, const char *nameptr, da
+@@ -2876,7 +3137,7 @@ static void set_fd_name( struct fd *fd, struct fd *root, const char *nameptr, da
      free( fd->nt_name );
      fd->nt_name = dup_nt_name( root, nt_name, &fd->nt_namelen );
      free( fd->unix_name );
@@ -14918,7 +15213,7 @@ index e035719..a2d97ef 100644
      free( name );
      if (!fd->unix_name)
          set_error( STATUS_NO_MEMORY );
-@@ -3024,6 +3270,11 @@ DECL_HANDLER(get_handle_unix_name)
+@@ -3024,6 +3285,11 @@ DECL_HANDLER(get_handle_unix_name)
      }
  }
  
@@ -14990,10 +15285,31 @@ index 1933b2f..2a3e31f 100644
          src_access = entry->access;
      else  /* pseudo-handle, give it full access */
 diff --git a/server/main.c b/server/main.c
-index 46419a0..0059821 100644
+index 46419a0..e189b82 100644
 --- a/server/main.c
 +++ b/server/main.c
-@@ -26,6 +26,7 @@
+@@ -20,12 +20,28 @@
+ 
+ #include "config.h"
+ 
++/* PS4 bring-up probes write to /data/pcps4_srv.log.  They sit in hot paths
++ * (every path lookup and descriptor transfer), so they are off unless the
++ * file /data/pcps4_probes exists. */
++#ifndef PS4_PROBE_OPEN_DEFINED
++#define PS4_PROBE_OPEN_DEFINED
++#include <stdio.h>
++#include <unistd.h>
++static inline FILE *ps4_probe_open(void)
++{
++    static int on = -1;
++    if (on < 0) on = !access( "/data/pcps4_probes", 0 );
++    return on ? fopen( "/data/pcps4_srv.log", "a" ) : NULL;
++}
++#endif
++
+ #include <assert.h>
+ #include <ctype.h>
+ #include <fcntl.h>
  #include <signal.h>
  #include <stdio.h>
  #include <stdlib.h>
@@ -15001,7 +15317,7 @@ index 46419a0..0059821 100644
  #include <sys/time.h>
  #include <unistd.h>
  #ifdef HAVE_SYS_RESOURCE_H
-@@ -241,6 +242,53 @@ static void init_limits(void)
+@@ -241,6 +257,53 @@ static void init_limits(void)
  #endif
  }
  
@@ -15013,7 +15329,7 @@ index 46419a0..0059821 100644
 +
 +static void *inprocess_server_thread( void *arg )
 +{
-+    { FILE*_lf=fopen("/data/pcps4_srv.log","a"); if(_lf){fprintf(_lf,"srvthread: entering main_loop\n");fclose(_lf);} }
++    { FILE*_lf=ps4_probe_open(); if(_lf){fprintf(_lf,"srvthread: entering main_loop\n");fclose(_lf);} }
 +    main_loop();
 +    return NULL;
 +}
@@ -15035,7 +15351,7 @@ index 46419a0..0059821 100644
 +    pthread_attr_init( &attr );
 +    pthread_attr_setstacksize( &attr, 1024 * 1024 );
 +    pthread_attr_setdetachstate( &attr, PTHREAD_CREATE_DETACHED );
-+    { int pcr=pthread_create( &thread, &attr, inprocess_server_thread, NULL ); fprintf(stderr,"pcps4: server pthread_create=%d\n",pcr); FILE*_lf=fopen("/data/pcps4_srv.log","a"); if(_lf){fprintf(_lf,"pthread_create=%d\n",pcr);fclose(_lf);} inprocess_started = !pcr; }
++    { int pcr=pthread_create( &thread, &attr, inprocess_server_thread, NULL ); fprintf(stderr,"pcps4: server pthread_create=%d\n",pcr); FILE*_lf=ps4_probe_open(); if(_lf){fprintf(_lf,"pthread_create=%d\n",pcr);fclose(_lf);} inprocess_started = !pcr; }
 +    pthread_attr_destroy( &attr );
 +}
 +
@@ -15048,7 +15364,7 @@ index 46419a0..0059821 100644
 +
 +    if (!inprocess_nls_dir && nls_dir) inprocess_nls_dir = strdup( nls_dir );
 +    pthread_once( &once, start_inprocess_server );
-+    { int _cfd = inprocess_started ? connect_inprocess_client() : -1; FILE*_lf=fopen("/data/pcps4_srv.log","a"); if(_lf){fprintf(_lf,"connect client fd=%d\n",_cfd);fclose(_lf);} return _cfd; }
++    { int _cfd = inprocess_started ? connect_inprocess_client() : -1; FILE*_lf=ps4_probe_open(); if(_lf){fprintf(_lf,"connect client fd=%d\n",_cfd);fclose(_lf);} return _cfd; }
 +}
 +#endif
 +
@@ -15056,12 +15372,28 @@ index 46419a0..0059821 100644
  {
      setvbuf( stderr, NULL, _IOLBF, 0 );
 diff --git a/server/mapping.c b/server/mapping.c
-index 7446c70..bba0eee 100644
+index 7446c70..199af5e 100644
 --- a/server/mapping.c
 +++ b/server/mapping.c
-@@ -21,9 +21,16 @@
+@@ -20,10 +20,32 @@
+ 
  #include "config.h"
  
++/* PS4 bring-up probes write to /data/pcps4_srv.log.  They sit in hot paths
++ * (every path lookup and descriptor transfer), so they are off unless the
++ * file /data/pcps4_probes exists. */
++#ifndef PS4_PROBE_OPEN_DEFINED
++#define PS4_PROBE_OPEN_DEFINED
++#include <stdio.h>
++#include <unistd.h>
++static inline FILE *ps4_probe_open(void)
++{
++    static int on = -1;
++    if (on < 0) on = !access( "/data/pcps4_probes", 0 );
++    return on ? fopen( "/data/pcps4_srv.log", "a" ) : NULL;
++}
++#endif
++
  #include <assert.h>
 +#include <errno.h>
  #include <fcntl.h>
@@ -15069,14 +15401,14 @@ index 7446c70..bba0eee 100644
  #include <stdio.h>
 +
 +#ifdef __PROSPERO__
-+#define PS4LOG(...) do{ FILE*_pl=fopen("/data/pcps4_srv.log","a"); if(_pl){ fprintf(_pl,__VA_ARGS__); fclose(_pl);} }while(0)
++#define PS4LOG(...) do{ FILE*_pl=ps4_probe_open(); if(_pl){ fprintf(_pl,__VA_ARGS__); fclose(_pl);} }while(0)
 +#else
 +#define PS4LOG(...) do{}while(0)
 +#endif
  #include <stdlib.h>
  #include <sys/types.h>
  #include <sys/stat.h>
-@@ -224,6 +231,14 @@ static inline mem_size_t round_size( mem_size_t size, mem_size_t mask )
+@@ -224,6 +246,14 @@ static inline mem_size_t round_size( mem_size_t size, mem_size_t mask )
  void init_memory(void)
  {
      host_page_mask = sysconf( _SC_PAGESIZE ) - 1;
@@ -15091,7 +15423,7 @@ index 7446c70..bba0eee 100644
      free_map_addr( 0x60000000, 0x1c000000 );
      free_map_addr( 0x600000000000, 0x100000000000 );
  }
-@@ -356,6 +371,39 @@ static int create_temp_file( file_pos_t size )
+@@ -356,6 +386,39 @@ static int create_temp_file( file_pos_t size )
      return fd;
  }
  
@@ -15131,7 +15463,7 @@ index 7446c70..bba0eee 100644
  /* find a memory view from its base address */
  struct memory_view *find_mapped_view( struct process *process, client_ptr_t base )
  {
-@@ -1090,22 +1138,28 @@ static bool mapping_init( struct object *obj, const void *init_data )
+@@ -1090,22 +1153,28 @@ static bool mapping_init( struct object *obj, const void *init_data )
          if (data->flags & SEC_IMAGE) mapping_access |= FILE_MAPPING_IMAGE;
          else if (data->file_access & FILE_WRITE_DATA) mapping_access |= FILE_MAPPING_WRITE;
  
@@ -15160,7 +15492,7 @@ index 7446c70..bba0eee 100644
              if (!err) return true;
              set_error( err );
              goto error;
-@@ -1137,7 +1191,7 @@ static bool mapping_init( struct object *obj, const void *init_data )
+@@ -1137,7 +1206,7 @@ static bool mapping_init( struct object *obj, const void *init_data )
          }
          if ((data->flags & SEC_RESERVE) && !(mapping->committed = create_ranges())) return false;
          mapping->size = round_size( mapping->size, page_mask );
@@ -15169,7 +15501,7 @@ index 7446c70..bba0eee 100644
          if (!(mapping->fd = create_anonymous_fd( &mapping_fd_ops, unix_fd, &mapping->obj,
                                                   FILE_SYNCHRONOUS_IO_NONALERT ))) goto error;
          allow_fd_caching( mapping->fd );
-@@ -1170,7 +1224,7 @@ static struct mapping *get_mapping_obj( struct process *process, obj_handle_t ha
+@@ -1170,7 +1239,7 @@ static struct mapping *get_mapping_obj( struct process *process, obj_handle_t ha
  /* open a new file for the file descriptor backing the view */
  struct file *get_view_file( const struct memory_view *view, unsigned int access, unsigned int sharing )
  {
@@ -15178,7 +15510,7 @@ index 7446c70..bba0eee 100644
      return create_file_for_fd_obj( view->fd, access, sharing );
  }
  
-@@ -1244,11 +1298,50 @@ static struct fd *mapping_get_fd( struct object *obj )
+@@ -1244,11 +1313,50 @@ static struct fd *mapping_get_fd( struct object *obj )
      return (struct fd *)grab_object( mapping->fd );
  }
  
@@ -15230,7 +15562,7 @@ index 7446c70..bba0eee 100644
      if (mapping->committed) release_object( mapping->committed );
      if (mapping->shared) release_object( mapping->shared );
      free( mapping->exp_name );
-@@ -1489,7 +1582,10 @@ struct object *create_user_data_mapping( struct object *root, struct unicode_str
+@@ -1489,7 +1597,10 @@ struct object *create_user_data_mapping( struct object *root, struct unicode_str
  {
      void *ptr;
      struct mapping *mapping;
@@ -15913,10 +16245,32 @@ index e71d023..cc16b2e 100644
      fprintf( f, ";; All keys relative to " );
      dump_path( key, NULL, f );
 diff --git a/server/request.c b/server/request.c
-index 5135ed5..e7f9fb8 100644
+index 5135ed5..980b315 100644
 --- a/server/request.c
 +++ b/server/request.c
-@@ -60,6 +60,11 @@
+@@ -20,6 +20,21 @@
+ 
+ #include "config.h"
+ 
++/* PS4 bring-up probes write to /data/pcps4_srv.log.  They sit in hot paths
++ * (every path lookup and descriptor transfer), so they are off unless the
++ * file /data/pcps4_probes exists. */
++#ifndef PS4_PROBE_OPEN_DEFINED
++#define PS4_PROBE_OPEN_DEFINED
++#include <stdio.h>
++#include <unistd.h>
++static inline FILE *ps4_probe_open(void)
++{
++    static int on = -1;
++    if (on < 0) on = !access( "/data/pcps4_probes", 0 );
++    return on ? fopen( "/data/pcps4_srv.log", "a" ) : NULL;
++}
++#endif
++
+ #include <assert.h>
+ #include <errno.h>
+ #include <fcntl.h>
+@@ -60,6 +75,11 @@
  #include "security.h"
  #include "handle.h"
  #include "request_handlers.h"
@@ -15928,7 +16282,7 @@ index 5135ed5..e7f9fb8 100644
  
  /* Some versions of glibc don't define this */
  #ifndef SCM_RIGHTS
-@@ -102,6 +107,9 @@ int server_dir_fd = -1;    /* file descriptor for the server dir */
+@@ -102,6 +122,9 @@ int server_dir_fd = -1;    /* file descriptor for the server dir */
  int config_dir_fd = -1;    /* file descriptor for the config dir */
  
  static struct master_socket *master_socket;  /* the master socket object */
@@ -15938,7 +16292,7 @@ index 5135ed5..e7f9fb8 100644
  static struct timeout_user *master_timeout;
  
  /* complain about a protocol error and terminate the client connection */
-@@ -274,12 +282,17 @@ static void call_req_handler( struct thread *thread )
+@@ -274,12 +297,17 @@ static void call_req_handler( struct thread *thread )
      enum request req = thread->req.request_header.req;
  
      current = thread;
@@ -15956,7 +16310,7 @@ index 5135ed5..e7f9fb8 100644
      if (req < REQ_NB_REQUESTS)
          req_handlers[req]( &current->req, &reply );
      else
-@@ -301,8 +314,308 @@ static void call_req_handler( struct thread *thread )
+@@ -301,8 +329,308 @@ static void call_req_handler( struct thread *thread )
          }
      }
      current = NULL;
@@ -16016,8 +16370,8 @@ index 5135ed5..e7f9fb8 100644
 +    ps5_mutex_server_reconcile();
 +    pthread_mutex_unlock( &inprocess_server_mutex );
 +    return ret;
-+}
-+
+ }
+ 
 +/* Native caller-local outputs, with server signals blocked by the client's
 + * fd_cache_mutex section. ABI discovery is passive; this lookup may activate. */
 +static int get_shared_mutex_word( uint32_t version, uint32_t tid, uint64_t teb, uint32_t handle,
@@ -16175,8 +16529,8 @@ index 5135ed5..e7f9fb8 100644
 +#endif
 +    }
 +    pthread_mutex_lock( &inprocess_server_mutex );
- }
- 
++}
++
 +/* Run a request on the calling thread, which is the client thread tid of
 + * this process, instead of sending it to the server thread through the
 + * request pipe and waiting for the reply pipe: two thread switches (about
@@ -16265,7 +16619,7 @@ index 5135ed5..e7f9fb8 100644
  /* read a request from a thread */
  void read_request( struct thread *thread )
  {
-@@ -386,10 +699,22 @@ int receive_fd( struct process *process )
+@@ -386,10 +714,22 @@ int receive_fd( struct process *process )
  
      if (ret == sizeof(data))
      {
@@ -16276,7 +16630,7 @@ index 5135ed5..e7f9fb8 100644
 +         * same open file description -- exactly what SCM_RIGHTS would have given
 +         * us -- which makes every close() in the server correct again. */
 +        { int _d = dup( data.fd );
-+          FILE*_l=fopen("/data/pcps4_srv.log","a");
++          FILE*_l=ps4_probe_open();
 +          if(_l){fprintf(_l,"rfd: ret=%d tid=%u datafd=%d dup=%d errno=%d\n",ret,data.tid,data.fd,_d,_d<0?errno:0);fclose(_l);}
 +          fd = (_d >= 0) ? _d : data.fd;   /* fall back to the raw fd if dup is refused */
 +        }
@@ -16285,11 +16639,11 @@ index 5135ed5..e7f9fb8 100644
  
          if (data.tid) thread = get_thread_from_id( data.tid );
 -        else thread = (struct thread *)grab_object( get_process_first_thread( process ));
-+        else { void *_ft = get_process_first_thread( process ); { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"rfd: first_thread=%p\n",_ft);fclose(_l);} } thread = (struct thread *)(_ft ? grab_object( _ft ) : NULL); }
++        else { void *_ft = get_process_first_thread( process ); { FILE*_l=ps4_probe_open(); if(_l){fprintf(_l,"rfd: first_thread=%p\n",_ft);fclose(_l);} } thread = (struct thread *)(_ft ? grab_object( _ft ) : NULL); }
  
          if (!thread || thread->process != process || thread->state == TERMINATED)
          {
-@@ -452,19 +777,34 @@ int send_client_fd( struct process *process, int fd, obj_handle_t handle )
+@@ -452,19 +792,34 @@ int send_client_fd( struct process *process, int fd, obj_handle_t handle )
      vec.iov_base = (void *)&handle;
      vec.iov_len  = sizeof(handle);
  
@@ -16325,7 +16679,7 @@ index 5135ed5..e7f9fb8 100644
  
      if (ret >= 0)
      {
-@@ -518,6 +858,98 @@ static void master_socket_destroy( struct object *obj )
+@@ -518,6 +873,98 @@ static void master_socket_destroy( struct object *obj )
      release_object( sock->fd );
  }
  
@@ -16376,7 +16730,7 @@ index 5135ed5..e7f9fb8 100644
 + * process exactly as it would a connection on the master socket */
 +int connect_inprocess_client(void)
 +{
-+#define SRVLOG(...) do{FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,__VA_ARGS__);fclose(_l);}}while(0)
++#define SRVLOG(...) do{FILE*_l=ps4_probe_open(); if(_l){fprintf(_l,__VA_ARGS__);fclose(_l);}}while(0)
 +    char dummy = 0;
 +    struct iovec vec = { &dummy, 1 };
 +    union { struct cmsghdr header; char buffer[CMSG_SPACE( sizeof(int) )]; } control;
@@ -16424,7 +16778,7 @@ index 5135ed5..e7f9fb8 100644
  /* handle a socket event */
  static void master_socket_poll_event( struct fd *fd, int event )
  {
-@@ -535,17 +967,24 @@ static void master_socket_poll_event( struct fd *fd, int event )
+@@ -535,17 +982,24 @@ static void master_socket_poll_event( struct fd *fd, int event )
      else if (event & POLLIN)
      {
          struct process *process;
@@ -16437,19 +16791,19 @@ index 5135ed5..e7f9fb8 100644
 +#endif
          if (client == -1) return;
          fcntl( client, F_SETFL, O_NONBLOCK );
-+        { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"mpoll: client=%d\n",client);fclose(_l);} }
++        { FILE*_l=ps4_probe_open(); if(_l){fprintf(_l,"mpoll: client=%d\n",client);fclose(_l);} }
          if ((process = create_process( client, NULL, 0, NULL, NULL, NULL, 0, NULL )))
          {
              struct thread *thread = create_thread( -1, process, NULL );
-+            { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"mpoll: process=%p thread=%p\n",(void*)process,(void*)thread);fclose(_l);} }
++            { FILE*_l=ps4_probe_open(); if(_l){fprintf(_l,"mpoll: process=%p thread=%p\n",(void*)process,(void*)thread);fclose(_l);} }
              if (thread) add_process_thread( process, thread );
              release_object( process );
          }
-+        else { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"mpoll: create_process FAILED\n");fclose(_l);} }
++        else { FILE*_l=ps4_probe_open(); if(_l){fprintf(_l,"mpoll: create_process FAILED\n");fclose(_l);} }
      }
  }
  
-@@ -569,14 +1008,17 @@ static void create_dir( const char *name, struct stat *st )
+@@ -569,14 +1023,17 @@ static void create_dir( const char *name, struct stat *st )
              fatal_error( "lstat %s: %s\n", name, strerror( errno ));
      }
      if (!S_ISDIR(st->st_mode)) fatal_error( "%s is not a directory\n", name );
@@ -16467,7 +16821,7 @@ index 5135ed5..e7f9fb8 100644
      char *p, *config_dir, *base_dir;
      struct stat st, st2;
  
-@@ -620,7 +1062,7 @@ static char *create_server_dir( int force )
+@@ -620,7 +1077,7 @@ static char *create_server_dir( int force )
  
      /* create the base directory if needed */
  
@@ -16476,7 +16830,7 @@ index 5135ed5..e7f9fb8 100644
      if (asprintf( &base_dir, "%s/.wineserver", config_dir ) == -1)
          fatal_error( "out of memory\n" );
  #else
-@@ -643,8 +1085,10 @@ static char *create_server_dir( int force )
+@@ -643,8 +1100,10 @@ static char *create_server_dir( int force )
          fatal_error( "open %s: %s\n", server_dir, strerror( errno ));
      if (fstat( server_dir_fd, &st2 ) == -1)
          fatal_error( "stat %s: %s\n", server_dir, strerror( errno ));
@@ -16487,7 +16841,7 @@ index 5135ed5..e7f9fb8 100644
  
      free( base_dir );
      free( config_dir );
-@@ -828,6 +1272,42 @@ void open_master_socket(void)
+@@ -828,6 +1287,42 @@ void open_master_socket(void)
      assert( sizeof(union generic_request) == sizeof(struct request_max_size) );
      assert( sizeof(union generic_reply) == sizeof(struct request_max_size) );
  
@@ -16530,7 +16884,7 @@ index 5135ed5..e7f9fb8 100644
      /* make sure the stdio fds are open */
      fd = open( "/dev/null", O_RDWR );
      while (fd >= 0 && fd <= 2) fd = dup( fd );
-@@ -887,6 +1367,9 @@ static void close_socket_timeout( void *arg )
+@@ -887,6 +1382,9 @@ static void close_socket_timeout( void *arg )
  {
      master_timeout = NULL;
      flush_registry();
@@ -16540,7 +16894,7 @@ index 5135ed5..e7f9fb8 100644
      if (debug_level) fprintf( stderr, "wineserver: exiting (pid=%ld)\n", (long) getpid() );
  
  #ifdef DEBUG_OBJECTS
-@@ -898,11 +1381,13 @@ static void close_socket_timeout( void *arg )
+@@ -898,11 +1396,13 @@ static void close_socket_timeout( void *arg )
  /* close the master socket and stop waiting for new clients */
  void close_master_socket( timeout_t timeout )
  {
@@ -16825,24 +17179,45 @@ index c8f7764..bdcbb2c 100644
          reply->current = sync->count;
          reply->max = sync->max;
 diff --git a/server/thread.c b/server/thread.c
-index bdf48c4..4b96bfe 100644
+index bdf48c4..4abf8de 100644
 --- a/server/thread.c
 +++ b/server/thread.c
-@@ -26,6 +26,13 @@
+@@ -20,12 +20,34 @@
+ 
+ #include "config.h"
+ 
++/* PS4 bring-up probes write to /data/pcps4_srv.log.  They sit in hot paths
++ * (every path lookup and descriptor transfer), so they are off unless the
++ * file /data/pcps4_probes exists. */
++#ifndef PS4_PROBE_OPEN_DEFINED
++#define PS4_PROBE_OPEN_DEFINED
++#include <stdio.h>
++#include <unistd.h>
++static inline FILE *ps4_probe_open(void)
++{
++    static int on = -1;
++    if (on < 0) on = !access( "/data/pcps4_probes", 0 );
++    return on ? fopen( "/data/pcps4_srv.log", "a" ) : NULL;
++}
++#endif
++
+ #include <assert.h>
+ #include <errno.h>
+ #include <fcntl.h>
  #include <signal.h>
  #include <stdarg.h>
  #include <stdio.h>
 +#include <sys/ioctl.h>
 +
 +#ifdef __PROSPERO__
-+#define PS4LOG(...) do{ FILE*_pl=fopen("/data/pcps4_srv.log","a"); if(_pl){ fprintf(_pl,__VA_ARGS__); fclose(_pl);} }while(0)
++#define PS4LOG(...) do{ FILE*_pl=ps4_probe_open(); if(_pl){ fprintf(_pl,__VA_ARGS__); fclose(_pl);} }while(0)
 +#else
 +#define PS4LOG(...) do{}while(0)
 +#endif
  #include <stdlib.h>
  #include <string.h>
  #include <sys/types.h>
-@@ -74,6 +81,7 @@ struct thread_wait
+@@ -74,6 +96,7 @@ struct thread_wait
      client_ptr_t            key;        /* wait key for keyed events */
      client_ptr_t            cookie;     /* magic cookie to return to client */
      abstime_t               when;
@@ -16850,7 +17225,7 @@ index bdf48c4..4b96bfe 100644
      struct timeout_user    *user;
      int                     status;     /* status to return (unless STATUS_PENDING) */
      struct wait_queue_entry queues[1];
-@@ -329,6 +337,56 @@ static void apply_thread_priority( struct thread *thread )
+@@ -329,6 +352,56 @@ static void apply_thread_priority( struct thread *thread )
      mach_port_deallocate( mach_task_self(), thread_port );
  }
  
@@ -16907,7 +17282,7 @@ index bdf48c4..4b96bfe 100644
  #else
  
  void init_threading(void)
-@@ -365,6 +423,9 @@ static inline void init_thread_structure( struct thread *thread )
+@@ -365,6 +438,9 @@ static inline void init_thread_structure( struct thread *thread )
      thread->reply_fd        = NULL;
      thread->wait_fd         = NULL;
      thread->state           = RUNNING;
@@ -16917,7 +17292,7 @@ index bdf48c4..4b96bfe 100644
      thread->exit_code       = 0;
      thread->priority        = 0;
      thread->base_priority   = 0;
-@@ -399,6 +460,16 @@ static inline int is_thread_suspended( struct thread *thread )
+@@ -399,6 +475,16 @@ static inline int is_thread_suspended( struct thread *thread )
      return !thread->bypass_proc_suspend && thread->process->suspend;
  }
  
@@ -16934,19 +17309,19 @@ index bdf48c4..4b96bfe 100644
  /* check if address looks valid for a client-side data structure (TEB etc.) */
  static inline int is_valid_address( client_ptr_t addr )
  {
-@@ -471,7 +542,10 @@ struct thread *create_thread( int fd, struct process *process, const struct secu
+@@ -471,7 +557,10 @@ struct thread *create_thread( int fd, struct process *process, const struct secu
              close( request_pipe[1] );
              return NULL;
          }
 -        close( request_pipe[1] );
-+        { FILE*_l=fopen("/data/pcps4_srv.log","a"); if(_l){fprintf(_l,"cthr: sent version, rp0=%d rp1=%d\n",request_pipe[0],request_pipe[1]);fclose(_l);} }
++        { FILE*_l=ps4_probe_open(); if(_l){fprintf(_l,"cthr: sent version, rp0=%d rp1=%d\n",request_pipe[0],request_pipe[1]);fclose(_l);} }
 +#ifndef __PROSPERO__
 +        close( request_pipe[1] );   /* PS4: shared fd table - client uses this same fd, do not close */
 +#endif
          fd = request_pipe[0];
      }
  
-@@ -1054,6 +1128,112 @@ static unsigned int end_wait( struct thread *thread, unsigned int status )
+@@ -1054,6 +1143,112 @@ static unsigned int end_wait( struct thread *thread, unsigned int status )
  }
  
  /* build the thread wait structure */
@@ -17059,7 +17434,7 @@ index bdf48c4..4b96bfe 100644
  static int wait_on( const union select_op *select_op, unsigned int count, struct object *objects[],
                      int flags, abstime_t when )
  {
-@@ -1070,8 +1250,10 @@ static int wait_on( const union select_op *select_op, unsigned int count, struct
+@@ -1070,8 +1265,10 @@ static int wait_on( const union select_op *select_op, unsigned int count, struct
      wait->cookie  = 0;
      wait->user    = NULL;
      wait->when = when;
@@ -17070,7 +17445,7 @@ index bdf48c4..4b96bfe 100644
  
      for (i = 0, entry = wait->queues; i < count; i++, entry++)
      {
-@@ -1546,21 +1728,30 @@ int thread_add_inflight_fd( struct thread *thread, int client, int server )
+@@ -1546,21 +1743,30 @@ int thread_add_inflight_fd( struct thread *thread, int client, int server )
  int thread_get_inflight_fd( struct thread *thread, int client )
  {
      int i, ret;
@@ -17101,7 +17476,7 @@ index bdf48c4..4b96bfe 100644
      return -1;
  }
  
-@@ -1642,12 +1833,25 @@ DECL_HANDLER(new_thread)
+@@ -1642,12 +1848,25 @@ DECL_HANDLER(new_thread)
              goto done;
          }
      }
@@ -17127,7 +17502,7 @@ index bdf48c4..4b96bfe 100644
      else if (!(get_handle_access( current->process, req->process ) & PROCESS_CREATE_THREAD))
      {
          close( request_fd );
-@@ -1662,7 +1866,11 @@ DECL_HANDLER(new_thread)
+@@ -1662,7 +1881,11 @@ DECL_HANDLER(new_thread)
      }
      if (params.root) release_object( params.root );  /* unused */
  
@@ -17140,7 +17515,7 @@ index bdf48c4..4b96bfe 100644
      {
          thread->system_regs = current->system_regs;
          if (req->flags & THREAD_CREATE_FLAGS_CREATE_SUSPENDED) thread->suspend++;
-@@ -1685,43 +1893,81 @@ done:
+@@ -1685,43 +1908,81 @@ done:
  
  static int init_thread( struct thread *thread, int reply_fd, int wait_fd )
  {
@@ -17224,7 +17599,7 @@ index bdf48c4..4b96bfe 100644
  
      current->unix_pid = process->unix_pid = req->unix_pid;
      current->unix_tid = req->unix_tid;
-@@ -1730,24 +1976,34 @@ DECL_HANDLER(init_first_thread)
+@@ -1730,24 +1991,34 @@ DECL_HANDLER(init_first_thread)
          process->affinity = current->affinity = get_thread_affinity( current );
      else
          set_thread_affinity( current, current->affinity );

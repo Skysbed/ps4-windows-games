@@ -8,14 +8,12 @@ wineserver all live inside one PS4 app, talking to the console's GNM GPU through
 RADV (Mesa's AMD Vulkan driver) behind a minimal native layer.
 
 Everything here is **early, experimental homebrew**. Today, on real hardware,
-**a Windows Direct3D 11 program draws a shaded triangle on the television**: Wine
-boots, its in-process wineserver handshake completes, a Windows x64 executable and its
-DLL import closure load and initialise (`kernel32`, `user32`, `gdi32`, `d3d11`, `dxgi`,
-`wined3d`, …), Wine runs multiple Windows threads, `wined3d` creates a Vulkan device
-on the console's GPU through RADV, translates the program's DXBC shaders, and presents
-1920x1080 frames through `sceVideoOut`. The process then shuts down cleanly. This is a
-small test program — **no commercial game has been tried yet**; input, audio, and a
-broader set of DLLs are still to come.
+**SuperTuxKart 1.5 — the official 64-bit Windows build, unmodified — is playable**:
+menus, cutscene, overworld and races, at 1920x1080 with the console's controller,
+using the game's Vulkan renderer through Wine's `winevulkan` and RADV. Before that, a
+Direct3D 11 test program drew through `wined3d`. It is far from finished: there is
+**no audio yet**, there is occasional stutter, closing the game after a long session
+has hung the console once, and only this one game has been tried.
 Follow development in [WINE_PS4_STATUS.md](WINE_PS4_STATUS.md), which documents every
 milestone, the kernel findings behind them, and the current blocker in detail.
 
@@ -24,8 +22,8 @@ milestone, the kernel findings behind them, and the current blocker in detail.
 | Path | What it is |
 |---|---|
 | `wine-ps4-all-changes.patch` | The complete diff against upstream Wine that makes it build and run for PS4 (113 files; includes bring-up instrumentation) |
-| `build-ps4-module/` | Per-module build pipeline: linker script (16 KiB alignment), TLS stripping, PRX descriptor generation, packaging manifest, a stub Unix half for `opengl32`, the RADV/`win32u`/`winevulkan` link shims, an import-tag verifier, and a build-host HLSL compiler helper |
-| `eboot-src/` | The tiny bootstrap that loads `ntdll.prx` and calls `__wine_main` |
+| `build-ps4-module/` | Per-module build pipeline: linker script (16 KiB alignment), TLS stripping, PRX descriptor generation, packaging manifest, a stub Unix half for `opengl32`, the RADV/`win32u`/`winevulkan` link shims, an import-tag verifier, a build-host HLSL compiler helper, the `scePad`-backed XInput module, and the module-loader overlay patch |
+| `eboot-src/` | The tiny bootstrap that loads `ntdll.prx` (from `/data/pcps4` if present) and calls `__wine_main` |
 | `wine-ps4-shims/` | Headers and shims for the gaps between Wine and OrbisOS/FreeBSD 9 |
 | `WINE_PS4_STATUS.md` | Build recipe + status; start here to understand the port |
 | `BUILD.md` | Step-by-step guide to build the whole thing from source |

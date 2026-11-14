@@ -703,28 +703,73 @@ itself still requires a new package.
   this prefix does not have.
 - **The bootstrap must not return.** Its `main` slept for ten minutes and returned,
   which begins process exit underneath a running program. It now stays for the life of
-  the process. (Suspected cause of the hang described below; not yet confirmed.)
+  the process.
 - **Bring-up probes are off by default.** They wrote a log line on every path lookup and
   descriptor transfer; they now do nothing unless `/data/pcps4_probes` exists.
 
 ### Known problems
 
-- Closing the game from the system menu after a long session hung at "Closing
-  application" while the game kept rendering; klog showed
-  `[SceShellCore] Main thread has frozen in sceLncServiceKeepAlive()`, and the console
-  later went down. The bootstrap fix above is the suspected remedy and is untested.
 - No audio.
 - No COM class registry (no `wineboot`), so anything that needs `CoCreateInstance` of a
   system class fails.
+- Brief freezes during play (see the update below).
 - Tracing channels left on (for example `+xinput`) flood the kernel log and cause
   visible stutter.
 
 ### Next
 
-1. Confirm the close/exit fix on hardware.
+1. Verify the on-disk shader cache and measure the remaining freezes.
 2. Audio: a `winmm`/`mmdevapi` driver over `sceAudioOut`.
 3. A prepared prefix with the standard registry, so COM works.
 4. Measure the remaining jitter with tracing off (shader/pipeline compilation is the
    next suspect).
 5. More games, and DXVK for Direct3D titles.
+
+## Update: closing the game, and a clean exit
+
+After a long session, closing SuperTuxKart from the system menu hung at "Closing
+application" while the game kept rendering, and the console eventually went down. The
+kernel log names the cause:
+
+```
+### Can't suspend pid:72. submitDone() is not called.
+```
+
+To close (or background) a title the system first suspends it, and it waits for the
+title's per-frame `sceGnmSubmitDone()` to do so. The Vulkan driver never made that
+call. The system waited 8.8 s, gave up and reported a crash; on the earlier occasion
+`SceShellCore` logged `Main thread has frozen in sceLncServiceKeepAlive()` and the
+console crashed.
+
+The driver already had a switch for the call, made at the frame boundary after the GPU
+is idle and off by default because it had not been measured on hardware. It is set from
+the settings file:
+
+```
+ORBIS_SUBMIT_DONE=1
+```
+
+Measured: it returns 0 every frame in about 21 microseconds, with no stalls. Suspend on
+close went from 8,836 ms (then a crash report) to 96 ms, with no crash report.
+
+Three related changes, all confirmed on hardware:
+
+- **Clean exit.** Leaving through `exit()` from Wine's Unix side ended in a fatal signal
+  and a system crash report on every run. Wine now creates `/data/pcps4_stop`; the
+  bootstrap, which no longer returns from `main`, sees it and ends the application with
+  `sceSystemServiceLoadExec("exit")`, the way a console title does. The system log shows
+  `onAppExit()` and no crash report.
+- **Stop switch.** The same file can be uploaded by hand to end a session that is stuck,
+  as long as the console's file server still answers.
+- **Lower overhead.** With tracing and the bring-up probes off, the game holds 60 fps
+  using about 0.4 of one core in a race (it was 0.3-0.4 at the *menu* before).
+
+### Remaining stutter
+
+Frame rate averages 60 fps in 5-second windows during a race, with occasional short
+freezes (one window measured 55 fps, roughly a 0.4 s stop). That pattern fits pipeline
+compilation the first time a material is drawn. The driver is built with Mesa's on-disk
+shader cache but had no directory for it; `MESA_SHADER_CACHE_DIR` is now set in the
+settings file. Whether the cache works on this console has not been verified yet, and
+loading from disk during play has not been ruled out as a second cause.
 

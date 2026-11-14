@@ -1853,7 +1853,7 @@ index d234b20..1b2e7a6 100644
                      if (size >= sizeof(VM_COUNTERS_EX))
                          pvmi.PrivateUsage = pvmi.PagefileUsage;
 diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
-index 06eb740..2fcdfe2 100644
+index 06eb740..a120209 100644
 --- a/dlls/ntdll/unix/server.c
 +++ b/dlls/ntdll/unix/server.c
 @@ -24,8 +24,31 @@
@@ -2649,7 +2649,24 @@ index 06eb740..2fcdfe2 100644
      data->reply_fd = reply_pipe[0];
      return reply_pipe[1];
  }
-@@ -1649,6 +2294,7 @@ size_t server_init_process(void)
+@@ -1592,9 +2237,16 @@ static void init_teb_data( struct thread_data *data )
+  *
+  * Close server socket and exit process normally.
+  */
++#ifdef __ORBIS__
++extern void ps4_request_exit(void);
++#endif
+ void process_exit_wrapper( int status )
+ {
++#ifdef __ORBIS__
++    ps4_request_exit();   /* the in-process server shares fd_socket: leave it open */
++#else
+     close( fd_socket );
++#endif
+     exit( status );
+ }
+ 
+@@ -1649,6 +2301,7 @@ size_t server_init_process(void)
  
      /* receive the first thread request fd on the main socket */
      data->request_fd = wine_server_receive_fd( &version );
@@ -2657,7 +2674,7 @@ index 06eb740..2fcdfe2 100644
  
  #ifdef SO_PASSCRED
      /* now that we hopefully received the server_pid, disable SO_PASSCRED */
-@@ -1676,8 +2322,14 @@ size_t server_init_process(void)
+@@ -1676,8 +2329,14 @@ size_t server_init_process(void)
      sigemptyset( &sig_act.sa_mask );
      sigaction( SIGPIPE, &sig_act, NULL );
  
@@ -2672,7 +2689,7 @@ index 06eb740..2fcdfe2 100644
      SERVER_START_REQ( init_first_thread )
      {
          req->unix_pid    = getpid();
-@@ -1687,15 +2339,22 @@ size_t server_init_process(void)
+@@ -1687,15 +2346,22 @@ size_t server_init_process(void)
          req->debug_level = (TRACE_ON(server) != 0);
          req->page_size   = get_host_page_size();
          wine_server_set_reply( req, supported_machines, sizeof(supported_machines) );
@@ -2696,7 +2713,7 @@ index 06eb740..2fcdfe2 100644
              if (reply->inproc_device)
              {
                  inproc_device_fd = wine_server_receive_fd( &handle );
-@@ -1704,7 +2363,14 @@ size_t server_init_process(void)
+@@ -1704,7 +2370,14 @@ size_t server_init_process(void)
          }
      }
      SERVER_END_REQ;
@@ -2711,7 +2728,7 @@ index 06eb740..2fcdfe2 100644
  
      if (ret) server_protocol_error( "init_first_thread failed with status %x\n", ret );
  
-@@ -1793,8 +2459,13 @@ void server_init_thread( struct thread_data *data )
+@@ -1793,8 +2466,13 @@ void server_init_thread( struct thread_data *data )
  
      data->pthread_id = pthread_self();
      pthread_setspecific( thread_data_key, data );
@@ -2725,7 +2742,7 @@ index 06eb740..2fcdfe2 100644
      SERVER_START_REQ( init_thread )
      {
          req->unix_tid  = get_unix_tid();
-@@ -1806,7 +2477,12 @@ void server_init_thread( struct thread_data *data )
+@@ -1806,7 +2484,12 @@ void server_init_thread( struct thread_data *data )
          data->suspend = reply->suspend;
      }
      SERVER_END_REQ;
@@ -2738,7 +2755,7 @@ index 06eb740..2fcdfe2 100644
  
      if (data->teb)
      {
-@@ -1857,6 +2533,8 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
+@@ -1857,6 +2540,8 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
      unsigned int ret;
      int fd = -1;
  
@@ -2747,7 +2764,7 @@ index 06eb740..2fcdfe2 100644
      if (dest) *dest = 0;
  
      if ((options & DUPLICATE_CLOSE_SOURCE) && source_process != NtCurrentProcess())
-@@ -1889,6 +2567,7 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
+@@ -1889,6 +2574,7 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
      if (options & DUPLICATE_CLOSE_SOURCE)
      {
          fd = remove_fd_from_cache( source );
@@ -2755,7 +2772,7 @@ index 06eb740..2fcdfe2 100644
          close_inproc_sync( source );
      }
  
-@@ -1909,7 +2588,9 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
+@@ -1909,7 +2595,9 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
  
      server_leave_uninterrupted_section( &fd_cache_mutex, &sigset );
  
@@ -2765,7 +2782,7 @@ index 06eb740..2fcdfe2 100644
      return ret;
  }
  
-@@ -1953,6 +2634,7 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
+@@ -1953,6 +2641,7 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
      unsigned int ret;
      int fd;
  
@@ -2773,7 +2790,7 @@ index 06eb740..2fcdfe2 100644
      if (HandleToLong( handle ) >= ~5 && HandleToLong( handle ) <= ~0)
          return STATUS_SUCCESS;
  
-@@ -1963,6 +2645,7 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
+@@ -1963,6 +2652,7 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
      /* always remove the cached fd; if the server request fails we'll just
       * retrieve it again */
      fd = remove_fd_from_cache( handle );
@@ -2781,7 +2798,7 @@ index 06eb740..2fcdfe2 100644
      close_inproc_sync( handle );
  
      SERVER_START_REQ( close_handle )
-@@ -1974,7 +2657,9 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
+@@ -1974,7 +2664,9 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
  
      server_leave_uninterrupted_section( &fd_cache_mutex, &sigset );
  
@@ -4101,7 +4118,7 @@ index 5e30f0e..107d5d1 100644
          {
              static int clockrate_name[] = { CTL_KERN, KERN_CLOCKRATE };
 diff --git a/dlls/ntdll/unix/thread.c b/dlls/ntdll/unix/thread.c
-index c6b99b7..d77395a 100644
+index c6b99b7..e9286e3 100644
 --- a/dlls/ntdll/unix/thread.c
 +++ b/dlls/ntdll/unix/thread.c
 @@ -24,6 +24,21 @@
@@ -4197,7 +4214,32 @@ index c6b99b7..d77395a 100644
          goto done;
  
      teb->SkipThreadAttach = !!(flags & THREAD_CREATE_FLAGS_SKIP_THREAD_ATTACH);
-@@ -1951,6 +1993,7 @@ NTSTATUS get_thread_context( HANDLE handle, void *context, BOOL *self, USHORT ma
+@@ -1524,8 +1566,24 @@ void abort_thread( int status )
+ /***********************************************************************
+  *           abort_process
+  */
++#ifdef __ORBIS__
++/* PS4: leaving through exit()/_exit() from this module ends in a fatal signal
++ * and a system crash report.  Ask the bootstrap to end the application the
++ * way a console title does instead: it watches for this file.  If nothing
++ * answers within a few seconds (an older bootstrap), fall back. */
++void ps4_request_exit(void)
++{
++    int i, fd = open( "/data/pcps4_stop", O_WRONLY | O_CREAT | O_TRUNC, 0666 );
++    if (fd != -1) close( fd );
++    for (i = 0; fd != -1 && i < 50; i++) usleep( 100000 );
++}
++#endif
++
+ void abort_process( int status )
+ {
++#ifdef __ORBIS__
++    ps4_request_exit();
++#endif
+     _exit( get_unix_exit_code( status ));
+ }
+ 
+@@ -1951,6 +2009,7 @@ NTSTATUS get_thread_context( HANDLE handle, void *context, BOOL *self, USHORT ma
          server_enter_uninterrupted_section( &fd_cache_mutex, &sigset );
  
          /* remove the handle from the cache, get_thread_context will close it for us */

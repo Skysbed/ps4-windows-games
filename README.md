@@ -11,9 +11,9 @@ Everything here is **early, experimental homebrew**. Today, on real hardware,
 **SuperTuxKart 1.5 — the official 64-bit Windows build, unmodified — is playable**:
 menus, cutscene, overworld and races, at 1920x1080 with the console's controller,
 using the game's Vulkan renderer through Wine's `winevulkan` and RADV. Before that, a
-Direct3D 11 test program drew through `wined3d`. It is far from finished: there is
-**no audio yet**, there is occasional stutter, closing the game after a long session
-has hung the console once, and only this one game has been tried.
+Direct3D 11 test program drew through `wined3d`. The game exits and closes cleanly, the way a console
+title does. It is far from finished: there is **no audio yet**, there are brief
+freezes during play, and only this one game has been tried.
 Follow development in [WINE_PS4_STATUS.md](WINE_PS4_STATUS.md), which documents every
 milestone, the kernel findings behind them, and the current blocker in detail.
 

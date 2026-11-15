@@ -7,13 +7,21 @@ FreeBSD side runs nearly unmodified: the loader, ntdll, win32u, and an in-proces
 wineserver all live inside one PS4 app, talking to the console's GNM GPU through
 RADV (Mesa's AMD Vulkan driver) behind a minimal native layer.
 
-Everything here is **early, experimental homebrew**. Today, on real hardware,
-**SuperTuxKart 1.5 — the official 64-bit Windows build, unmodified — is playable**:
-menus, cutscene, overworld and races, at 1920x1080 with the console's controller,
-using the game's Vulkan renderer through Wine's `winevulkan` and RADV. Before that, a
-Direct3D 11 test program drew through `wined3d`. The game exits and closes cleanly, the way a console
-title does. It is far from finished: there is **no audio yet**, there are brief
-freezes during play, and only this one game has been tried.
+Everything here is **early, experimental homebrew**. Today, on real hardware:
+
+- **Minecraft: Java Edition 26.3 is playable** — Java 25 (Temurin) under Wine, the game's
+  own **Vulkan renderer** on RADV, about 60 FPS in a world at 1920x1080, with the
+  controller mapped to keyboard and mouse, and saving worlds. Chunk generation still
+  causes short hitches.
+- **SuperTuxKart 1.5** (official 64-bit Windows build, unmodified) is playable on Vulkan,
+  and on Direct3D 9 through DXVK.
+- **Direct3D 8/9/10/11 through DXVK 3.1** and **OpenGL 4.6 through Mesa's Zink** draw on
+  the television.
+- A console-style **launcher** lists the installed games, and every title closes
+  cleanly back to it.
+
+It is far from finished: there is **no audio yet**, Minecraft needs an offline account,
+and startup is slow.
 Follow development in [WINE_PS4_STATUS.md](WINE_PS4_STATUS.md), which documents every
 milestone, the kernel findings behind them, and the current blocker in detail.
 
@@ -21,9 +29,12 @@ milestone, the kernel findings behind them, and the current blocker in detail.
 
 | Path | What it is |
 |---|---|
-| `wine-ps4-all-changes.patch` | The complete diff against upstream Wine that makes it build and run for PS4 (113 files; includes bring-up instrumentation) |
-| `build-ps4-module/` | Per-module build pipeline: linker script (16 KiB alignment), TLS stripping, PRX descriptor generation, packaging manifest, a stub Unix half for `opengl32`, the RADV/`win32u`/`winevulkan` link shims, an import-tag verifier, a build-host HLSL compiler helper, the `scePad`-backed XInput module, and the module-loader overlay patch |
-| `eboot-src/` | The tiny bootstrap that loads `ntdll.prx` (from `/data/pcps4` if present) and calls `__wine_main` |
+| `wine-ps4-all-changes.patch` | The complete diff against upstream Wine that makes it build and run for PS4 (119 files; includes bring-up instrumentation) |
+| `mesa-radv-orbis-changes.patch` | Changes to the RADV ORBIS Mesa tree (base commit `1a59cc1`): splitting submissions larger than one console IB, video-out handover between swapchains, BGRA scan-out, copy-mode scan-out without overwriting queued frames, a bounded image acquire |
+| `build-ps4-module/` | Per-module build pipeline: linker script (16 KiB alignment), TLS stripping, PRX descriptor generation, packaging manifest, the RADV/`win32u`/`winevulkan` link shims, an import-tag verifier, the `scePad` XInput module, the controller-as-keyboard/mouse module, the kernel-pipe fallback, the GPU submit keepalive, the PS4 direct-memory backend, and the module build scripts |
+| `eboot-src/` | The bootstrap: runs the launcher, then loads `ntdll.prx` (from `/data/pcps4` if present) and calls `__wine_main`; returns to the launcher when a game exits |
+| `launcher/` | The native PS4 game launcher (software-rendered to video-out, `scePad` input); `gen_font.py` builds its font header |
+| `tools/` | On-console test programs (filesystem, clock and wait accuracy, OpenGL), a Java thread-dump agent, and the Minecraft download/arguments scripts |
 | `wine-ps4-shims/` | Headers and shims for the gaps between Wine and OrbisOS/FreeBSD 9 |
 | `WINE_PS4_STATUS.md` | Build recipe + status; start here to understand the port |
 | `BUILD.md` | Step-by-step guide to build the whole thing from source |
@@ -67,10 +78,12 @@ the current build and collecting diagnostic logs.
    mapped; Windows syscalls dispatch into Wine; the PE loader loads DLLs~~ ✅
 7. ~~The program's full import closure loads and initialises; a Windows program
    runs to `ExitProcess`~~ ✅
-8. **Graphics: Vulkan renderer selection, `win32u` Unix half, RADV** — current work
-9. Ship a prepared Wine prefix (the console cannot create one — process creation is
-   unavailable), so the runtime can leave bootstrap mode
-10. A native presentation/input layer so frames can reach the screen, then real games.
+8. ~~Graphics: Vulkan, Direct3D (wined3d and DXVK) and OpenGL (Zink) reach the screen~~ ✅
+9. ~~Real games: SuperTuxKart, then Minecraft: Java Edition on Vulkan~~ ✅
+10. ~~Launcher, controller input, clean exit back to the launcher~~ ✅
+11. **Audio** — next
+12. Faster startup (Java class-data sharing), fewer chunk-generation hitches
+13. Microsoft account sign-in for Minecraft; Steam integration
 
 ## Credits and standing on shoulders
 

@@ -3,6 +3,7 @@
 #include <stddef.h>
 
 extern char __wine_main[];
+extern char pw_wine_dl_adopt[];
 extern char dlerror[];
 extern char pw_wine_heap_stats[];
 extern char pw_wine_set_present_sink[];
@@ -12,6 +13,9 @@ extern char pw_wine_next_input[];
 extern char pw_cwd_set[];
 extern char pw_wine_set_display_release[];
 extern char pw_wine_release_display[];
+extern char pcps4_pad_start[];
+extern char pw_wine_input_fd[];
+extern char pcps4_pad_cursor_visible[];
 extern void (*__init_array_start[])(void) __attribute__((visibility("hidden")));
 extern void (*__init_array_end[])(void) __attribute__((visibility("hidden")));
 
@@ -42,15 +46,16 @@ int module_stop(size_t argc, const void *argv)
 struct pw_prx_exports_table {
     uint64_t magic;
     uint32_t version, count;
-    PwPrxExport exports[11];
+    PwPrxExport exports[15];
 };
 _Static_assert(offsetof(struct pw_prx_exports_table, exports) == offsetof(PwPrxDescriptor, exports),
                "PRXDESC1 layout");
 
 __attribute__((used, aligned(PW_PRX_ALIGN)))
 const struct pw_prx_exports_table pw_prx_exports = {
-    PW_PRX_MAGIC, PW_PRX_VERSION, 11, {
+    PW_PRX_MAGIC, PW_PRX_VERSION, 15, {
         { "__wine_main", __wine_main },
+        { "pw_wine_dl_adopt", pw_wine_dl_adopt },
         { "dlerror", dlerror },
         { "pw_wine_heap_stats", pw_wine_heap_stats },
         { "pw_wine_set_present_sink", pw_wine_set_present_sink },
@@ -60,6 +65,9 @@ const struct pw_prx_exports_table pw_prx_exports = {
         { "pw_cwd_set", pw_cwd_set },
         { "pw_wine_set_display_release", pw_wine_set_display_release },
         { "pw_wine_release_display", pw_wine_release_display },
+        { "pcps4_pad_start", pcps4_pad_start },
+        { "pw_wine_input_fd", pw_wine_input_fd },
+        { "pcps4_pad_cursor_visible", pcps4_pad_cursor_visible },
         { "module_start", (const void *)module_start },
     }
 };

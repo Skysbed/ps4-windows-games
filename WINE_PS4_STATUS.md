@@ -773,3 +773,73 @@ shader cache but had no directory for it; `MESA_SHADER_CACHE_DIR` is now set in 
 settings file. Whether the cache works on this console has not been verified yet, and
 loading from disk during play has not been ruled out as a second cause.
 
+
+## Update: Minecraft: Java Edition runs on Vulkan
+
+Minecraft 26.3 (Java 25, LWJGL 3.4, SDL3 window) loads, creates and saves worlds, and plays
+at about 60 FPS on the game's own Vulkan renderer. The controller is mapped to keyboard and
+mouse. Getting there turned up a series of PS4-specific problems, most of which affect every
+title, not just Minecraft.
+
+### Process and file-system fixes (Wine)
+
+- **Pipes are socket pairs, and sockets run out.** The compat layer turns every `pipe()` into a
+  socket pair, and a PS4 process can hold only about 256 sockets. With Java's thread count,
+  new Wine threads died with EMFILE while hundreds of ordinary descriptors were still free.
+  `ps4_pipe_fallback.c` keeps socket pairs first and falls back to libkernel's real `pipe()`
+  (looked up with `sceKernelDlsym`).
+- **Two clocks.** ntdll and the in-process wineserver each link their own C library, and
+  their `clock_gettime()` start counting from different points (tens of milliseconds to
+  seconds apart). Every short timed wait reached the server already expired, so Java's
+  threads spun: about 5.5 cores busy, the game server ticks falling seconds behind, and visible
+  jitter. Both `monotonic_counter()`s now read `sceKernelGetProcessTimeCounter`, and CPU use
+  dropped to about 0.6 cores.
+- **`stat()` reports device/inode 0, `fstat()` reports the real ones.** The server matched
+  files for delete-on-close and rename by device/inode, so no delete or `rmdir` ever happened,
+  and a rename over an existing file was taken for a rename onto itself. The server now opens
+  and `fstat()`s a path when `stat()` returns 0/0. `is_dir_empty()` used `dup()`, which the
+  console refuses, so it now reads the directory by path.
+- **Shared descriptor numbers.** Without `dup()`, client and in-process server use the same
+  descriptor numbers, so a descriptor must be closed by exactly one side. Two cases closed one
+  twice, and a reused number then broke another thread's pipe ("reply write: Bad file
+  descriptor"): the thread-exit path closing `wait_fd[1]`, and win32u handing the input wake
+  pipe to the server.
+
+### Graphics fixes (Mesa RADV ORBIS, win32u)
+
+- **One video-out port.** SDL and LWJGL create a swapchain for a hidden probe window first. A
+  newer swapchain now takes the port over and the older one drops its presents.
+- **Submissions larger than one IB.** The arm flattens each submission into a staging slot,
+  and one console submission holds at most 0xFFFFF dwords. Minecraft records more than that.
+  When the 4 MiB slot fills, the driver ends the part with an end-of-pipe write of a part
+  counter, submits it, waits for it (2 s bound), and refills the slot.
+- **Surface size range.** win32u reported min = max = current = 1920x1080. Minecraft asks
+  for 1921x1080 and never got a swapchain. It now reports a range; images stay 1920x1080.
+- **BGRA swapchains.** Zink presents B8G8R8A8; those are registered with video-out as
+  A8R8G8B8 so red and blue are not swapped.
+- **Clean close before the first frame.** The system will not suspend a process that
+  submitted GPU work without `sceGnmSubmitDone`. A keepalive in the libvulkan wrapper sends it
+  when work is pending and no frame has followed for 400 ms (close went from 8.7 s plus a
+  crash report to 89 ms).
+- **Copy-mode scan-out** (`ORBIS_WSI_COPY=1`) uses its own buffers round-robin with at most
+  count-2 flips queued, so a frame still queued for the display is never overwritten. Image
+  acquire yields and gives up after 3 s instead of spinning forever when the display loses
+  pending flips.
+
+### Running Minecraft
+
+`tools/minecraft/mc_fetch.py` downloads the official client, libraries and assets. Then
+`mc_args.py` writes the Java argument file. The launch also needs these JVM options:
+
+```
+-Dorg.lwjgl.system.allocator=system        (jemalloc refuses 16 KiB pages)
+-Dorg.lwjgl.librarypath=<pre-extracted natives>
+-XX:-UseCompressedOops -XX:-UseCompressedClassPointers -Xshare:off
+-Xmx1280M -XX:ReservedCodeCacheSize=128m -XX:CICompilerCount=2
+--graphicsBackend vulkan                    (game argument; otherwise it may fall back to OpenGL)
+```
+
+Game entry environment: `PCPS4_PAD_INPUT=minecraft`, `ORBIS_WSI_COPY=1`,
+`ORBIS_WSI_NO_DEFER=1`, `ORBIS_ARENA_MIB=1280`. Java reserves memory eagerly on this
+platform, so the Java limits and the GPU arena have to fit together inside the 4.6 GB of
+direct memory.

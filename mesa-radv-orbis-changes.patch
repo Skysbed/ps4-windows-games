@@ -1,0 +1,390 @@
+diff --git a/src/amd/common/ac_orbis_drm.c b/src/amd/common/ac_orbis_drm.c
+index e4055c6..4090ccf 100644
+--- a/src/amd/common/ac_orbis_drm.c
++++ b/src/amd/common/ac_orbis_drm.c
+@@ -1226,7 +1226,7 @@ static simple_mtx_t orbis_retire_lock = SIMPLE_MTX_INITIALIZER;
+  * 2 MiB x ORBIS_FENCE_CB_SLOTS comes out of the arena's private slice - 32 MiB of a 1 GiB arena - which is a cost
+  * worth naming and not worth arguing about. The refusal stays, and it now prints how much was needed, so the next
+  * time this bounds a real workload the number comes from the console rather than from an estimate. */
+-#define ORBIS_FENCE_CB_BYTES (2 * 1024 * 1024)
++#define ORBIS_FENCE_CB_BYTES (4 * 1024 * 1024)   /* 2 MiB refused Minecraft's Vulkan renderer; an IB holds at most 0xFFFFF dwords */
+ 
+ /* ⚠ FLATTENING, AND IT REPLACES A ONE-LEVEL PATCH THAT COULD ONLY EVER BE A DOWN PAYMENT.
+  *
+@@ -1282,6 +1282,59 @@ orbis_emit_eop(uint32_t *dw, uint64_t va, uint32_t value, uint32_t sel)
+ }
+ 
+ 
++/* ⚠ SPLITTING A SUBMISSION THAT DOES NOT FIT, because one submission to the console holds at most 0xFFFFF dwords
++ * and Minecraft's Vulkan renderer records more than that per submit. When the staging slot fills, the part that
++ * fits is closed with an end-of-pipe write of a part counter, submitted, and waited for; then the same slot is
++ * refilled from the next packet. The CP sees ordinary submissions back to back on the same ring, so state carries
++ * over exactly as it does between any two submissions. Bounded like every wait here: a part that does not retire
++ * in 2 s refuses the submission, which is what happened before this existed. */
++static uint32_t *orbis_pad_ib(uint32_t *dw, const uint32_t *base);
++static struct {
++   bool      active, failed;
++   uint32_t *base;
++   uint32_t  counter, parts;
++} orbis_split;
++static volatile uint32_t *orbis_part_word;
++
++static uint32_t *
++orbis_split_flush(uint32_t *dw)
++{
++#if defined(__PS4__)
++   uint32_t *const base = orbis_split.base;
++   if (!orbis_split.active || orbis_split.failed || orbis_part_word == NULL || dw == base)
++      return NULL;
++   const uint32_t value = ++orbis_split.counter;
++   dw = orbis_emit_eop(dw, (uint64_t)(uintptr_t)orbis_part_word, value,
++                       ORBIS_EOP_DST_SEL_MC | (0u << ORBIS_EOP_INT_SEL_SHIFT) | ORBIS_EOP_DATA_SEL_32BIT);
++   dw = orbis_pad_ib(dw, base);
++   void    *part_dcb[1] = {base};
++   uint32_t part_bytes[1] = {(uint32_t)((dw - base) * 4)};
++   sceGnmFlushGarlic();
++   const int32_t err = sceGnmSubmitCommandBuffers(1, part_dcb, part_bytes, NULL, NULL);
++   if (err != 0) {
++      mesa_loge("orbis-drm: split part %u (%u dwords) refused by sceGnmSubmitCommandBuffers: 0x%08x",
++                orbis_split.parts + 1, part_bytes[0] / 4, (unsigned)err);
++      orbis_split.failed = true;
++      return NULL;
++   }
++   const uint64_t deadline = os_time_get_nano() + 2000000000ull;
++   while (*orbis_part_word != value) {
++      if (os_time_get_nano() >= deadline) {
++         mesa_loge("orbis-drm: split part %u (%u dwords) did not retire in 2 s - refusing the submission",
++                   orbis_split.parts + 1, part_bytes[0] / 4);
++         orbis_split.failed = true;
++         return NULL;
++      }
++      orbis_poll_pause();
++   }
++   ++orbis_split.parts;
++   return base;
++#else
++   (void)dw;
++   return NULL;
++#endif
++}
++
+ static uint32_t *
+ orbis_copy_ib(uint32_t *dst, const uint32_t *dst_end, const uint32_t *src, uint32_t n, unsigned depth,
+               unsigned *chains, const uint32_t *out_base, uint32_t marks, uint32_t *next_mark,
+@@ -1300,7 +1353,7 @@ orbis_copy_ib(uint32_t *dst, const uint32_t *dst_end, const uint32_t *src, uint3
+       if ((hdr & 0xC0000000u) != 0xC0000000u) {
+          /* Not a type-3 header: stop parsing and pass the tail through untouched. */
+          const uint32_t rest = n - i;
+-         if (dst + rest > dst_end)
++         if (dst + rest > dst_end && (!(dst = orbis_split_flush(dst)) || dst + rest > dst_end))
+             return NULL;
+          memcpy(dst, src + i, (size_t)rest * 4);
+          return dst + rest;
+@@ -1366,7 +1419,7 @@ orbis_copy_ib(uint32_t *dst, const uint32_t *dst_end, const uint32_t *src, uint3
+          /* A packet that claims more than the IB holds. Copy what is there and stop; the alternative is reading
+           * past the buffer to describe it. */
+          const uint32_t rest = n - i;
+-         if (dst + rest > dst_end)
++         if (dst + rest > dst_end && (!(dst = orbis_split_flush(dst)) || dst + rest > dst_end))
+             return NULL;
+          memcpy(dst, src + i, (size_t)rest * 4);
+          return dst + rest;
+@@ -1406,7 +1459,7 @@ orbis_copy_ib(uint32_t *dst, const uint32_t *dst_end, const uint32_t *src, uint3
+          }
+       }
+ 
+-      if (dst + words > dst_end)
++      if (dst + words > dst_end && (!(dst = orbis_split_flush(dst)) || dst + words > dst_end))
+          return NULL;
+ 
+       /* ⚠ THE MARKER GOES AT A PACKET BOUNDARY, WHICH IS WHY IT LIVES HERE. This walk is the only place that
+@@ -1496,8 +1549,8 @@ orbis_build_flat(uint32_t *cb, uint32_t cb_dwords, void **dcb, uint32_t *dcb_byt
+          /* The produced size is what sizes this buffer, so it is printed: "does not fit" without a number is a
+           * refusal nobody can act on. `before - cb` is what fitted; the chunk's own size is a floor on the rest. */
+          mesa_loge("orbis-drm: submission does not fit the %u dword staging buffer - chunk %u of %u, %u dwords "
+-                   "already written, this chunk alone is %u dwords before its chains",
+-                   cb_dwords, i, n_dcb, (unsigned)(before - cb), dcb_bytes[i] / 4);
++                   "already written, this chunk alone is %u dwords before its chains (%u chains followed)",
++                   cb_dwords, i, n_dcb, (unsigned)(before - cb), dcb_bytes[i] / 4, chains);
+          return NULL;
+       }
+    }
+@@ -1505,6 +1558,14 @@ orbis_build_flat(uint32_t *cb, uint32_t cb_dwords, void **dcb, uint32_t *dcb_byt
+    if (orbis_trace())
+       mesa_logi("orbis-drm: submit #%" PRIu64 ": flattened %u chunk(s) and %u chain(s) into %u dwords", seq,
+                 n_dcb, chains, (unsigned)(dw - cb));
++   {
++      static unsigned big_said;
++      if ((unsigned)(dw - cb) > 262144 && big_said < 12) {
++         ++big_said;
++         mesa_logi("orbis-drm: large submit #%" PRIu64 ": %u chunk(s), %u chain(s), %u dwords (%u KiB)", seq, n_dcb,
++                   chains, (unsigned)(dw - cb), (unsigned)(dw - cb) / 256);
++      }
++   }
+    return dw;
+ }
+ 
+@@ -5389,6 +5450,8 @@ orbis_arena_setup_once(void)
+    orbis_retired_word = (volatile uint32_t *)(uintptr_t)(orbis_arena_private + 192);
+    *orbis_retired_word = 0;
+    orbis_drain_word = (volatile uint32_t *)(uintptr_t)(orbis_arena_private + 224);
++   orbis_part_word = (volatile uint32_t *)(uintptr_t)(orbis_arena_private + 320);
++   *orbis_part_word = 0;
+    *orbis_drain_word = 0;
+ 
+ 
+@@ -9865,7 +9928,19 @@ ac_drm_cs_submit_raw2(ac_drm_device *dev, uint32_t ctx_id, uint32_t bo_list_hand
+        * padding; the builder refuses rather than overrunning the slot. */
+       /* timed: the flatten is the one thing in this path nobody has measured */
+       const uint64_t orbis_flat_t0 = os_time_get_nano();
++      orbis_split.active = true;
++      orbis_split.failed = false;
++      orbis_split.base = cb;
++      orbis_split.parts = 0;
+       uint32_t *dw = orbis_build_flat(cb, ORBIS_FENCE_CB_BYTES / 4, dcb, dcb_bytes, n_dcb, seq, 32);
++      orbis_split.active = false;
++      if (orbis_split.parts) {
++         static unsigned split_said;
++         if (split_said < 12 || (split_said % 256) == 0)
++            mesa_logi("orbis-drm: submit #%" PRIu64 " split into %u part(s) plus the final one", seq,
++                      orbis_split.parts);
++         ++split_said;
++      }
+       orbis_api_time(ORBIS_ID_ARM_BUILD_FLAT, os_time_get_nano() - orbis_flat_t0);
+       orbis_api_count(ORBIS_ID_ARM_BUILD_FLAT, 1);
+       if (dw == NULL) {
+diff --git a/src/vulkan/wsi/wsi_common_headless.c b/src/vulkan/wsi/wsi_common_headless.c
+index 72da70e..4201810 100644
+--- a/src/vulkan/wsi/wsi_common_headless.c
++++ b/src/vulkan/wsi/wsi_common_headless.c
+@@ -485,6 +485,34 @@ wsi_headless_swapchain_acquire_next_image(struct wsi_swapchain *wsi_chain,
+       /* Check for timeout. */
+       struct timespec current_time;
+       clock_gettime(CLOCK_MONOTONIC, &current_time);
++#ifdef HAVE_ORBIS_PLATFORM
++      /* Never spin forever: an "infinite" acquire whose images the display never hands back (a display
++       * reset loses pending flips) froze the title with one core spinning and the JVM stalled behind it.
++       * Yield while waiting, say so after a second, and after three report the swapchain out of date so
++       * the application rebuilds it. */
++      {
++         const int64_t waited_ms = ((int64_t)current_time.tv_sec - start_time.tv_sec) * 1000 +
++                                   ((int64_t)current_time.tv_nsec - start_time.tv_nsec) / 1000000;
++         static unsigned said;
++         if (waited_ms >= 1000 && said < 8) {
++            ++said;
++            mesa_logw("wsi/orbis: acquire has waited %lld ms for a free image (%u images, %u held for the display)",
++                      (long long)waited_ms, chain->base.image_count, chain->orbis_flip_n);
++         }
++         if (waited_ms >= 3000 && info->timeout > 3000000000ull) {
++            mesa_logw("wsi/orbis: no image came back in 3 s - reporting the swapchain out of date");
++            for (uint32_t q = 0; q < chain->orbis_flip_n; q++)
++               if (chain->orbis_flip_q[q] >= 0)
++                  chain->images[chain->orbis_flip_q[q]].busy_on_host = false;
++            chain->orbis_flip_n = 0;
++            return VK_ERROR_OUT_OF_DATE_KHR;
++         }
++         if (info->timeout != 0) {
++            extern int32_t sceKernelUsleep(uint32_t usec);
++            sceKernelUsleep(200);
++         }
++      }
++#endif
+       if (timespec_after(&current_time, &end_time)) {
+ #ifdef HAVE_ORBIS_PLATFORM
+          /* ⚠ THE FAILURE MODE OF REGISTERING THE SWAPCHAIN'S OWN IMAGES, said out loud rather than
+@@ -874,7 +902,22 @@ wsi_headless_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
+       void *addrs[8];
+       uint32_t pitch_px = 0;
+       bool direct = chain->base.image_count <= ARRAY_SIZE(addrs);
++      /* ORBIS_WSI_COPY=1: never scan out the application's own images - copy each presented frame into
++       * buffers the display owns, so an image handed back to the application can never be on screen. */
++      {
++         const char *const copy = getenv("ORBIS_WSI_COPY");
++         if (copy != NULL && *copy != '\0' && *copy != '0') {
++            static bool said;
++            if (!said) {
++               mesa_logi("wsi/orbis: ORBIS_WSI_COPY - copying every frame into display-owned buffers");
++               said = true;
++            }
++            direct = false;
++         }
++      }
+ 
++      wsi_orbis_scanout_set_bgra(pCreateInfo->imageFormat == VK_FORMAT_B8G8R8A8_UNORM ||
++                                 pCreateInfo->imageFormat == VK_FORMAT_B8G8R8A8_SRGB);
+       for (uint32_t i = 0; direct && i < chain->base.image_count; i++) {
+          const struct wsi_image *img = &chain->images[i].base;
+          const uint32_t p = (uint32_t)(img->row_pitches[0] / 4);
+diff --git a/src/vulkan/wsi/wsi_orbis.c b/src/vulkan/wsi/wsi_orbis.c
+index 82c3304..e9ce180 100644
+--- a/src/vulkan/wsi/wsi_orbis.c
++++ b/src/vulkan/wsi/wsi_orbis.c
+@@ -232,8 +232,22 @@ struct wsi_orbis_scanout {
+     * directly - then there is nothing to copy and nothing here to release, because RADV owns those
+     * pages. See the note on wsi_orbis_scanout_create. */
+    bool     owns_buffers;
++   /* Video-out was handed to a newer swapchain; this one presents nothing from then on. */
++   bool     stolen;
++   /* Copy mode: the display buffer the next frame goes into, round-robin. The application's image
++    * index says nothing about which of OUR buffers is free - using it overwrote frames still queued
++    * for the display, which then showed newer-then-older frames: motion jumping backwards. */
++   uint32_t next_buf;
+ };
+ 
++/* ONE VIDEO-OUT PORT, AND THE NEWEST SWAPCHAIN GETS IT. The console has a single main video-out and
++ * sceVideoOutOpen refuses a second open while one is held. Applications routinely make a swapchain for
++ * a hidden probe window first (SDL/LWJGL do, before the real window exists) and keep it alive, so the
++ * real window's swapchain could never reach the screen. A newer swapchain therefore takes the port from
++ * the older one, which keeps running but drops its presents. */
++static struct wsi_orbis_scanout *orbis_scanout_owner;
++uint32_t wsi_orbis_flips_pending(struct wsi_orbis_scanout *so);
++
+ static void
+ wsi_orbis_release(struct wsi_orbis_scanout *so)
+ {
+@@ -245,6 +259,8 @@ wsi_orbis_release(struct wsi_orbis_scanout *so)
+    if (so->video >= 0)
+       sceVideoOutClose(so->video);
+    so->video = -1;
++   if (orbis_scanout_owner == so)
++      orbis_scanout_owner = NULL;
+ }
+ 
+ /* ⚠ THE COPY IS THE LAST THING BETWEEN THE FRAME AND THE TELEVISION, and it costs 2.3 ms of a
+@@ -264,6 +280,19 @@ wsi_orbis_release(struct wsi_orbis_scanout *so)
+  * `pitch_px` is the image's OWN row pitch in pixels, which need not equal the width - video-out
+  * takes it as a separate argument, so an image RADV padded is registered as it is rather than
+  * copied to remove the padding. */
++/* The next scan-out holds B8G8R8A8: register it as A8R8G8B8 so red and blue are not swapped. Applications are
++ * offered R8G8B8A8 only, but Zink sizes its swapchain from the GL drawable's format and asks for BGRA anyway. */
++#ifndef ORBIS_VIDEO_OUT_PIXEL_FORMAT_A8R8G8B8_SRGB
++#define ORBIS_VIDEO_OUT_PIXEL_FORMAT_A8R8G8B8_SRGB 0x80000000   /* B in the low byte */
++#endif
++static bool orbis_next_bgra;
++
++void
++wsi_orbis_scanout_set_bgra(bool bgra)
++{
++   orbis_next_bgra = bgra;
++}
++
+ struct wsi_orbis_scanout *
+ wsi_orbis_scanout_create(uint32_t width, uint32_t height, uint32_t count, void *const *addrs,
+                          uint32_t pitch_px)
+@@ -285,6 +314,19 @@ wsi_orbis_scanout_create(uint32_t width, uint32_t height, uint32_t count, void *
+    so->bytes = ((uint64_t)width * height * 4 + WSI_ORBIS_DIRECT_ALIGN - 1) & ~(WSI_ORBIS_DIRECT_ALIGN - 1);
+ 
+    so->video = sceVideoOutOpen(ORBIS_VIDEO_USER_MAIN, ORBIS_VIDEO_OUT_BUS_MAIN, 0, NULL);
++   if (so->video < 0 && orbis_scanout_owner != NULL && orbis_scanout_owner->video >= 0) {
++      struct wsi_orbis_scanout *old = orbis_scanout_owner;
++      const uint64_t deadline = os_time_get_nano() + 500000000ull;
++      while (wsi_orbis_flips_pending(old) > 0 && os_time_get_nano() < deadline)
++         sceKernelUsleep(500);
++      mesa_logi("wsi/orbis: video-out busy (%d) - taking it from the older swapchain after %llu flip(s); "
++                "that one presents nothing from now on", (int)so->video, (unsigned long long)old->flips);
++      sceVideoOutClose(old->video);
++      old->video = -1;
++      old->stolen = true;
++      orbis_scanout_owner = NULL;
++      so->video = sceVideoOutOpen(ORBIS_VIDEO_USER_MAIN, ORBIS_VIDEO_OUT_BUS_MAIN, 0, NULL);
++   }
+    if (so->video < 0) {
+       mesa_loge("wsi/orbis: sceVideoOutOpen -> %d", (int)so->video);
+       goto fail;
+@@ -333,8 +375,21 @@ wsi_orbis_scanout_create(uint32_t width, uint32_t height, uint32_t count, void *
+                                  ORBIS_VIDEO_OUT_TILING_MODE_LINEAR, ORBIS_VIDEO_OUT_ASPECT_RATIO_16_9,
+                                  width, height, pitch_px != 0 ? pitch_px : width);
+ 
+-   int32_t err = sceVideoOutRegisterBuffers(so->video, 0, so->owns_buffers ? own : (void *const *)addrs,
+-                                            count, &attr);
++   int32_t err = -1;
++   if (orbis_next_bgra) {
++      OrbisVideoOutBufferAttribute bgra_attr;
++      memset(&bgra_attr, 0, sizeof(bgra_attr));
++      sceVideoOutSetBufferAttribute(&bgra_attr, ORBIS_VIDEO_OUT_PIXEL_FORMAT_A8R8G8B8_SRGB,
++                                    ORBIS_VIDEO_OUT_TILING_MODE_LINEAR, ORBIS_VIDEO_OUT_ASPECT_RATIO_16_9,
++                                    width, height, pitch_px != 0 ? pitch_px : width);
++      err = sceVideoOutRegisterBuffers(so->video, 0, so->owns_buffers ? own : (void *const *)addrs, count,
++                                       &bgra_attr);
++      mesa_logi("wsi/orbis: BGRA swapchain - video-out A8R8G8B8 %s (0x%08x)", err < 0 ? "refused, colours will be "
++                "swapped" : "accepted", (unsigned)err);
++   }
++   if (err < 0)
++      err = sceVideoOutRegisterBuffers(so->video, 0, so->owns_buffers ? own : (void *const *)addrs,
++                                       count, &attr);
+    if (err < 0) {
+       /* Not an error line when the caller still has a fallback to try: the addresses it offered may
+        * simply not be scan-out-able, which is a fact about this console rather than a fault. */
+@@ -355,6 +410,7 @@ wsi_orbis_scanout_create(uint32_t width, uint32_t height, uint32_t count, void *
+              pitch_px != 0 ? pitch_px : width, count, so->owns_buffers ? "GARLIC" : "swapchain",
+              so->owns_buffers ? " - one full-screen copy per frame" : " - ZERO COPY, the flip shows what "
+                                                                      "the GPU rendered into");
++   orbis_scanout_owner = so;
+    return so;
+ 
+ fail:
+@@ -442,7 +498,9 @@ wsi_orbis_wait_for_flip_slot(struct wsi_orbis_scanout *so)
+     * With the copy there is no such arithmetic: the copy is a snapshot, a flipped buffer is free the
+     * moment it returns, and count-1 only keeps the display from being overtaken. */
+    const int32_t  reserve = so->owns_buffers ? 0 : (int32_t)so->reserve;
+-   const int32_t  limit = MAX2((int32_t)so->count - 1 - reserve, 1);
++   /* copy mode: one buffer on screen, at most count-2 queued, so the one written next is neither */
++   const int32_t  limit = so->owns_buffers ? MAX2((int32_t)so->count - 2, 1)
++                                           : MAX2((int32_t)so->count - 1 - reserve, 1);
+    const uint64_t deadline = os_time_get_nano() + WSI_ORBIS_THROTTLE_NS;
+ 
+    for (;;) {
+@@ -595,6 +653,9 @@ wsi_orbis_scanout_present(struct wsi_orbis_scanout *so, uint32_t index, const vo
+    const uint64_t orbis_pr_t0 = os_time_get_nano();
+    if (so == NULL || index >= so->count || src == NULL)
+       ORBIS_BOOK_RETURN(ORBIS_ID_WSI_PRESENT, orbis_pr_t0, false);
++   /* Video-out belongs to a newer swapchain: the frame is dropped, not an error. */
++   if (so->stolen || so->video < 0)
++      ORBIS_BOOK_RETURN(ORBIS_ID_WSI_PRESENT, orbis_pr_t0, true);
+ 
+    /* ⚠ THE GPU FIRST. This copy reads pixels the GPU is writing, and until this line it did not ask whether the
+     * writing had finished - which is what put a staircase of tiles over half the menu on every screen change. See
+@@ -687,6 +748,31 @@ wsi_orbis_scanout_present(struct wsi_orbis_scanout *so, uint32_t index, const vo
+    if (!wsi_orbis_wait_for_flip_slot(so))
+       ORBIS_BOOK_RETURN(ORBIS_ID_WSI_PRESENT, orbis_pr_t0, false);
+ 
++   if (so->owns_buffers) {
++      index = so->next_buf;
++      so->next_buf = (so->next_buf + 1) % so->count;
++   }
++
++   /* frame pacing: gaps between presents, as a histogram every 256 frames */
++   {
++      static uint64_t last_ns, worst_ns;
++      static unsigned hist[7], n;
++      const uint64_t now = os_time_get_nano();
++      if (last_ns) {
++         const uint64_t gap = now - last_ns;
++         const double ms = gap / 1e6;
++         hist[ms < 10 ? 0 : ms < 20 ? 1 : ms < 30 ? 2 : ms < 40 ? 3 : ms < 60 ? 4 : ms < 100 ? 5 : 6]++;
++         if (gap > worst_ns) worst_ns = gap;
++         if (++n == 256) {
++            mesa_logi("wsi/orbis: pacing over 256 frames - gaps <10ms %u, 10-20 %u, 20-30 %u, 30-40 %u, 40-60 %u, "
++                      "60-100 %u, >100 %u; worst %.1f ms", hist[0], hist[1], hist[2], hist[3], hist[4], hist[5], hist[6],
++                      worst_ns / 1e6);
++            memset(hist, 0, sizeof(hist)); n = 0; worst_ns = 0;
++         }
++      }
++      last_ns = now;
++   }
++
+    /* ⚠ ROW BY ROW WHEN THE PITCHES DIFFER. WSI picks the image's row pitch and it need not be width*4 - RADV
+     * aligns a linear image's pitch to the hardware's requirement. One flat memcpy would then shift every row
+     * and produce a sheared picture, which looks like a tiling bug and is not one. */
+diff --git a/src/vulkan/wsi/wsi_orbis.h b/src/vulkan/wsi/wsi_orbis.h
+index c2a0310..ec7ba42 100644
+--- a/src/vulkan/wsi/wsi_orbis.h
++++ b/src/vulkan/wsi/wsi_orbis.h
+@@ -40,6 +40,7 @@ struct wsi_orbis_scanout;
+ /* `addrs` are the swapchain's own images, registered directly so the present is a flip and nothing
+  * is copied; NULL asks this code to allocate GARLIC buffers of its own, which is the fallback when
+  * video-out refuses them. `pitch_px` is the image's row pitch in pixels, 0 meaning "the width". */
++void wsi_orbis_scanout_set_bgra(bool bgra);
+ struct wsi_orbis_scanout *wsi_orbis_scanout_create(uint32_t width, uint32_t height, uint32_t count,
+                                                    void *const *addrs, uint32_t pitch_px);
+ 

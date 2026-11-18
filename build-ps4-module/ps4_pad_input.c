@@ -144,8 +144,22 @@ static float shape(float v, float dead)
     return v < 0 ? -a : a;
 }
 
+
+/* WinePS4's lesson (port/include/ps4_prio.h there): the PS4 runs an app's threads by priority alone, with
+ * no turns among threads of one priority, so a helper every game thread depends on must sit ABOVE them
+ * (700) or it waits behind busy workers. FreeBSD's SCHED_RR is 3 (the toolchain's header says 2). */
+#include <pthread.h>
+#include <sched.h>
+static void pcps4_raise_self( int prio )
+{
+    struct sched_param p;
+    p.sched_priority = prio;
+    pthread_setschedparam( pthread_self(), 3, &p );
+}
+
 static void *pad_thread(void *arg)
 {
+    pcps4_raise_self( 620 );
     int32_t user = 0, handle = -1;
     uint64_t last = now_us(), l1_at = 0, r1_at = 0;
     float fx = 0, fy = 0;

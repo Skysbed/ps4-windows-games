@@ -20,8 +20,15 @@ Everything here is **early, experimental homebrew**. Today, on real hardware:
 - A console-style **launcher** lists the installed games, and every title closes
   cleanly back to it.
 
-It is far from finished: there is **no audio yet**, Minecraft needs an offline account,
-and startup is slow.
+- **Horizon** (an unofficial Rust rewrite of Minecraft 26.3, run from its Windows build) is playable:
+  real controller support, worlds that save, and a ~40 s load thanks to a RAM preload layer.
+- **Audio** through the PS4's `sceAudioOut` (a Wine audio driver adapted from prospero-win's).
+- **Real gamepad**: the DualShock 4 appears as an Xbox controller to XInput and
+  Windows.Gaming.Input, alongside the optional keyboard/mouse mapping.
+- **Networking**: DNS through Sony's resolver, TLS through a GnuTLS build for the PS4.
+
+It is far from finished: Minecraft needs an offline account, TLS handshakes are slow, and
+PS4 Pro mode is experimental.
 Follow development in [WINE_PS4_STATUS.md](WINE_PS4_STATUS.md), which documents every
 milestone, the kernel findings behind them, and the current blocker in detail.
 
@@ -81,9 +88,9 @@ the current build and collecting diagnostic logs.
 8. ~~Graphics: Vulkan, Direct3D (wined3d and DXVK) and OpenGL (Zink) reach the screen~~ ✅
 9. ~~Real games: SuperTuxKart, then Minecraft: Java Edition on Vulkan~~ ✅
 10. ~~Launcher, controller input, clean exit back to the launcher~~ ✅
-11. **Audio** — next
-12. Faster startup (Java class-data sharing), fewer chunk-generation hitches
-13. Microsoft account sign-in for Minecraft; Steam integration
+11. ~~Audio, real gamepad, networking (DNS + TLS)~~ ✅
+12. **PS4 Pro mode** (driver describes the Pro GPU in NEO mode) — in testing
+13. Faster TLS, fewer frame-time spikes, 32-bit (WoW64) games, Steam integration
 
 ## Credits and standing on shoulders
 

@@ -46,8 +46,23 @@ static void ka_unlock(void)
     __atomic_store_n(&ka_lock_word, 0, __ATOMIC_RELEASE);
 }
 
+
+/* WinePS4's lesson (port/include/ps4_prio.h there): the PS4 runs an app's threads by priority alone, with
+ * no turns among threads of one priority, so a helper every game thread depends on must sit ABOVE them
+ * (700) or it waits behind busy workers. FreeBSD's SCHED_RR is 3 (the toolchain's header says 2). */
+struct sched_param { int sched_priority; };
+extern int pthread_setschedparam(void *thread, int policy, const struct sched_param *param);
+extern void *pthread_self(void);
+static void pcps4_raise_self( int prio )
+{
+    struct sched_param p;
+    p.sched_priority = prio;
+    pthread_setschedparam( pthread_self(), 3, &p );
+}
+
 static void *ka_thread(void *arg)
 {
+    pcps4_raise_self( 620 );
     uint64_t calls = 0, skipped = 0;
     (void)arg;
     mesa_log(2, "MESA", "pcps4: submit keepalive running (idle %d ms)", KEEPALIVE_IDLE_MS);

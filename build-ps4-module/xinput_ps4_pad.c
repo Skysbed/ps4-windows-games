@@ -46,6 +46,9 @@ extern int32_t sceUserServiceInitialize( void * );
 extern int32_t sceUserServiceGetInitialUser( int32_t * );
 extern int32_t scePadInit( void );
 extern int32_t scePadOpen( int32_t user, int32_t type, int32_t index, void *param );
+extern int32_t scePadGetHandle( int32_t user, int32_t type, int32_t index );
+extern uint64_t sceKernelGetProcessTimeCounter( void );
+extern uint64_t sceKernelGetProcessTimeCounterFrequency( void );
 extern int32_t scePadReadState( int32_t handle, PadData *data );
 extern int32_t scePadSetVibration( int32_t handle, const PadVibe *param );
 
@@ -64,13 +67,22 @@ static int16_t axis( uint8_t v, int invert )
 
 static NTSTATUS pad_init( void *args )
 {
+    /* At most one attempt a second: pad_state retries through here, and a failed scePadOpen used to be
+     * repeated on every poll - hundreds of system calls a second while the pad was held elsewhere. */
+    static uint64_t next_try;
     int32_t user = 0;
+    uint64_t now = sceKernelGetProcessTimeCounter();
     (void)args;
     if (pad_handle >= 0) return STATUS_SUCCESS;
+    if (now < next_try) return STATUS_SUCCESS;
+    next_try = now + sceKernelGetProcessTimeCounterFrequency();
     sceUserServiceInitialize( 0 );              /* already initialised is fine */
     scePadInit();
     if (sceUserServiceGetInitialUser( &user ) < 0) return STATUS_SUCCESS;
     pad_handle = scePadOpen( user, 0, 0, 0 );
+    /* Already open in this process (the keyboard-and-mouse mapper, PCPS4_PAD_INPUT, or the title itself):
+     * share that handle rather than fail. */
+    if (pad_handle < 0) pad_handle = scePadGetHandle( user, 0, 0 );
     return STATUS_SUCCESS;                      /* controller 0 exists even if unplugged */
 }
 

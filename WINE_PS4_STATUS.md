@@ -843,3 +843,34 @@ Game entry environment: `PCPS4_PAD_INPUT=minecraft`, `ORBIS_WSI_COPY=1`,
 `ORBIS_WSI_NO_DEFER=1`, `ORBIS_ARENA_MIB=1280`. Java reserves memory eagerly on this
 platform, so the Java limits and the GPU arena have to fit together inside the 4.6 GB of
 direct memory.
+
+## Performance and platform round (2026-11-18)
+
+- **Scheduling: FreeBSD's `SCHED_RR` is 3.** The toolchain's musl `<sched.h>` says 2, which the PS4 kernel
+  reads as `SCHED_OTHER`, so every thread-priority request was ignored. With the right value, waking a thread
+  behind six busy threads went from 47 ms to 2 ms (0.2 ms with a raised priority). Enabled by the switch file
+  `/data/pcps4/pw_sched`.
+- **Priority tiers.** The PS4 runs an app's threads by priority alone (no turns among equals), so helpers that
+  every game thread depends on now raise themselves above the game's 700: the in-process wineserver (600),
+  the pad poller and the GPU submit keepalive (620). (Learned from WinePS4's notes.)
+- **Frame pacing.** Minecraft's tile no longer forces `ORBIS_WSI_COPY`/`ORBIS_WSI_NO_DEFER`: zero-copy flips
+  with a deferred GPU wait took it from ~39 to ~60 FPS. The remaining in-game freezes turned out to be
+  synchronous debug output; keep `WINEDEBUG` quiet while playing.
+- **Present with several wait semaphores.** `vk_drm_syncobj_copy_payloads` reached the provider's missing
+  `export_sync_file` (a NULL call) whenever a present waited on two semaphores (wgpu does); it now waits for
+  completion and signals.
+- **File loading.** The PS4 keeps almost no file data cached (2000 different small files cost ~2.5 ms each on
+  every pass; a cached read is 0.02 ms). `ps4_preload.c` (ntdll, `--wrap=read/pread`) loads one pack
+  (`tools/pack_res.py`) in a background thread and answers reads of the packed files from memory:
+  Horizon's resource load went from ~155 s to ~43 s.
+- **Starting folder.** ntdll now starts a game in its exe's folder (or `PCPS4_CWD`), not the read-only `/`,
+  which was surfacing as ERROR_DISK_FULL on any relative write.
+- **Controller.** Windows.Gaming.Input exposes the pad (read through `xinput1_3`) as an Xbox 360 gamepad;
+  WinRT activation entries and `NonRoamableId` were needed for gilrs (Rust) to accept it.
+- **Networking.** `getaddrinfo`/`gethostbyname` for ws2_32 on Sony's resolver (`ps4_getaddrinfo.c`); Java
+  needs `-Djava.net.preferIPv4Stack=true` (no IPv6 on the console).
+- **PS4 Pro (NEO) — experimental.** With `param.sfo` ATTRIBUTE `0x800000` the console runs in NEO mode and the
+  base description hung 3D. PS4 Linux shows the Pro GPU ("Gladius", 0x9924) is the same GFX7 generation with
+  4 shader engines, 9 CUs each, the same tiling, and `raster_config_1 = 0x2e`; the ORBIS backend now reports
+  that when `sceKernelIsNeoMode()` says so (`ORBIS_NO_NEO=1` forces the base description). Not yet confirmed
+  on hardware.

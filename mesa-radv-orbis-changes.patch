@@ -1,5 +1,5 @@
 diff --git a/src/amd/common/ac_orbis_drm.c b/src/amd/common/ac_orbis_drm.c
-index e4055c6..4090ccf 100644
+index e4055c6..d26f1bf 100644
 --- a/src/amd/common/ac_orbis_drm.c
 +++ b/src/amd/common/ac_orbis_drm.c
 @@ -1226,7 +1226,7 @@ static simple_mtx_t orbis_retire_lock = SIMPLE_MTX_INITIALIZER;
@@ -124,7 +124,37 @@ index e4055c6..4090ccf 100644
     return dw;
  }
  
-@@ -5389,6 +5450,8 @@ orbis_arena_setup_once(void)
+@@ -3010,6 +3071,18 @@ ac_orbis_note(const char *msg)
+ void
+ ac_orbis_api_account(unsigned slot, uint64_t ns)
+ {
++   /* one-off stalls, which per-frame averages hide: name any single call over 150 ms */
++   if (ns > 150000000ull) {
++      static unsigned said;
++      static const char *const slow_names[] = {"QueueSubmit2", "QueuePresentKHR", "AcquireNextImage2",
++                                               "WaitForFences", "UpdateDescriptorSets", "AllocateDescriptorSets",
++                                               "AllocateMemory", "GetFenceStatus"};
++      if (said < 400) {
++         ++said;
++         mesa_logw("orbis-drm: SLOW %s (slot %u): %llu ms", slot < 8 ? slow_names[slot] : "app", slot,
++                   (unsigned long long)(ns / 1000000));
++      }
++   }
+    if (slot < ORBIS_API_SLOTS) {
+       p_atomic_add(&orbis_api_slot_ns[slot], ns);
+       p_atomic_inc(&orbis_api_slot_calls[slot]);
+@@ -4624,6 +4697,10 @@ orbis_read_hw_registers(void)
+       { "SPI_CONFIG_CNTL_1",       0x913c, 0xffffffff, 0x00000004, "cik_gpu_init: VTX_DONE_DELAY(4)" },
+       { "CP_MEQ_THRESHOLDS",       0x8764, 0xffffffff, 0x00006030, "cik_gpu_init: MEQ1_START(0x30)|MEQ2_START(0x60)" },
+       { "GC_USER_RB_BACKEND_DISABLE",0x9b7c,0x00ff0000, 0x00fc0000, "spectre_golden_registers" },
++      /* PS4 Pro (NEO) topology: read in both modes so the Pro values can be compared with the base ones. */
++      { "CC_RB_BACKEND_DISABLE",   0x98f4, 0,          0,          "pro probe: hardware RB disable mask" },
++      { "CC_GC_SHADER_ARRAY_CONFIG",0x89bc,0,          0,          "pro probe: inactive CUs (fuses)" },
++      { "GC_USER_SHADER_ARRAY_CONFIG",0x89c0,0,        0,          "pro probe: inactive CUs (driver)" },
+       { "TCP_CHAN_STEER_LO",       0xac0c, 0xffffffff, 0x54763210, "spectre_golden_registers" },
+       { "TCP_CHAN_STEER_HI",       0xac10, 0,          0,          "not in the Kaveri tables - read to be known" },
+ 
+@@ -5389,6 +5466,8 @@ orbis_arena_setup_once(void)
     orbis_retired_word = (volatile uint32_t *)(uintptr_t)(orbis_arena_private + 192);
     *orbis_retired_word = 0;
     orbis_drain_word = (volatile uint32_t *)(uintptr_t)(orbis_arena_private + 224);
@@ -133,7 +163,72 @@ index e4055c6..4090ccf 100644
     *orbis_drain_word = 0;
  
  
-@@ -9865,7 +9928,19 @@ ac_drm_cs_submit_raw2(ac_drm_device *dev, uint32_t ctx_id, uint32_t bo_list_hand
+@@ -5988,6 +6067,12 @@ ac_drm_device_initialize(int fd, bool is_virtio, uint32_t *major_version, uint32
+       orbis_watchdog_start();
+    }
+ 
++   {
++      extern int sceKernelIsNeoMode(void);
++      extern int sceKernelHasNeoMode(void);
++      mesa_logi("orbis-drm: PRO PROBE - sceKernelIsNeoMode %d, sceKernelHasNeoMode %d",
++                sceKernelIsNeoMode(), sceKernelHasNeoMode());
++   }
+    mesa_logi("orbis-drm: device up, reporting amdgpu interface %u.%u, memory backed by %s",
+              dev->major_version, dev->minor_version, ORBIS_BACKING);
+    return 0;
+@@ -6085,6 +6170,24 @@ ac_drm_device_deinitialize(ac_drm_device *dev)
+ 
+ /* ---------------------------------------------------------------- device queries */
+ 
++
++/* PS4 Pro (NEO mode): the same GFX7 generation with the base GPU mirrored - 4 shader engines of 9 CUs (36) and
++ * the same 8-pipe tiling; PCI id 0x9924, which ac_gpu_info maps to CHIP_GLADIUS and its raster pair
++ * 0x2a00161a / 0x2e (the PS4 Linux kernel: max_shader_engines 4 "verified", max_tile_pipes 8 "verified").
++ * Reporting the base part on a Pro left half the GPU unconfigured and hung the first 3D frame.
++ * ORBIS_NO_NEO=1 forces the base description for comparison. */
++static bool orbis_neo(void)
++{
++   static int neo = -1;
++   if (neo < 0) {
++      extern int sceKernelIsNeoMode(void);
++      neo = (getenv("ORBIS_NO_NEO") == NULL && sceKernelIsNeoMode() == 1) ? 1 : 0;
++      mesa_logi("orbis-drm: GPU described as %s", neo ? "PS4 Pro (Gladius 0x9924, 4 SE / 36 CU, 911 MHz)"
++                                                      : "base PS4 (Liverpool 0x9920, 2 SE / 18 CU, 800 MHz)");
++   }
++   return neo == 1;
++}
++
+ /* ---------------------------------------------------------------- AMDGPU_INFO_DEV_INFO
+  *
+  * The 39 fields ac_gpu_info.c reads off drm_amdgpu_info_device. Regenerate the list with
+@@ -6155,7 +6258,7 @@ orbis_query_dev_info(struct drm_amdgpu_info_device *d)
+ 
+    ORBIS_DRM_UNCITED("drm_amdgpu_info_device.device_id", "Liverpool's PCI id is in no oracle; "
+                                                          "it reaches only radeon_info.pci_id");
+-   d->device_id = 0x9920;
++   d->device_id = orbis_neo() ? 0x9924 : 0x9920;
+ 
+    /* --- shader array topology. ALL UNCITED, and gnmtune.h:732 says so in the fork's own words:
+     * "the fork cannot cite Liverpool's CU/SIMD topology from any oracle in the stash".
+@@ -6208,7 +6311,7 @@ orbis_query_dev_info(struct drm_amdgpu_info_device *d)
+     * contradiction it sits on: GB_ADDR_CONFIG's own NUM_SHADER_ENGINES field reads ONE. */
+    {
+       const char *const se = getenv("ORBIS_NUM_SE");
+-      d->num_shader_engines = se != NULL ? (uint32_t)MAX2(atoi(se), 1) : 2u;
++      d->num_shader_engines = se != NULL ? (uint32_t)MAX2(atoi(se), 1) : (orbis_neo() ? 4u : 2u);
+       if (se != NULL)
+          mesa_logi("orbis-drm: ORBIS_NUM_SE=%u - AN EXPERIMENT. This field is uncited, "
+                    "GB_ADDR_CONFIG says one, and the GSVS ring needs exactly twice what it sizes.",
+@@ -6242,7 +6345,7 @@ orbis_query_dev_info(struct drm_amdgpu_info_device *d)
+     * gnmprof.h:477 says "100 ticks = 1 us, cross-checked against fence-wait", i.e. 100 MHz. RADV turns
+     * it into timestampPeriod = 1000000 / clock_crystal_freq = 10 ns. */
+    d->gpu_counter_freq = 100000; /* KHz. MEASURED. */
+-   d->max_engine_clock = 800000; /* KHz. gnmtune.h:138, "Liverpool's ~800 MHz". */
++   d->max_engine_clock = orbis_neo() ? 911000 : 800000; /* KHz. Liverpool ~800 MHz; the Pro 911 MHz */
+    ORBIS_DRM_UNCITED("drm_amdgpu_info_device.max_memory_clock", "GDDR5 clock not established here");
+    d->max_memory_clock = 2750000;
+ 
+@@ -9865,7 +9968,19 @@ ac_drm_cs_submit_raw2(ac_drm_device *dev, uint32_t ctx_id, uint32_t bo_list_hand
         * padding; the builder refuses rather than overrunning the slot. */
        /* timed: the flatten is the one thing in this path nobody has measured */
        const uint64_t orbis_flat_t0 = os_time_get_nano();
@@ -153,6 +248,36 @@ index e4055c6..4090ccf 100644
        orbis_api_time(ORBIS_ID_ARM_BUILD_FLAT, os_time_get_nano() - orbis_flat_t0);
        orbis_api_count(ORBIS_ID_ARM_BUILD_FLAT, 1);
        if (dw == NULL) {
+diff --git a/src/vulkan/runtime/vk_drm_syncobj.c b/src/vulkan/runtime/vk_drm_syncobj.c
+index 41e34d9..f89e58a 100644
+--- a/src/vulkan/runtime/vk_drm_syncobj.c
++++ b/src/vulkan/runtime/vk_drm_syncobj.c
+@@ -706,6 +706,25 @@ vk_drm_syncobj_copy_payloads(struct vk_device *device,
+        (device->sync != NULL && device->sync->transfer != NULL && wait_count == 1)) {
+       return vk_drm_syncobj_transfer_payloads(device, wait_count, waits,
+                                               signal_count, signals);
++   } else if (device->sync != NULL && device->sync->export_sync_file == NULL) {
++      /* ⚠ MORE THAN ONE WAIT ON A PROVIDER WITH NEITHER TIMELINES NOR SYNC FILES. The sync-file arm below
++       * starts with export_sync_file, which this provider does not have - so a present waiting on two
++       * semaphores (wgpu does this; Horizon's first frame) jumped to address zero inside
++       * vkQueuePresentKHR. The copy's meaning is "the signals fire once every wait has": so wait for the
++       * waits to COMPLETE, then signal. On a single in-order ring this is the frame the present path was
++       * about to wait for anyway; it costs a CPU wait, not a wrong answer. */
++      VkResult r = vk_drm_syncobj_wait_many(device, wait_count, waits, VK_SYNC_WAIT_COMPLETE, UINT64_MAX);
++      if (r != VK_SUCCESS)
++         return r;
++      {
++         static bool said = false;
++         if (!said) {
++            said = true;
++            mesa_logi("vk_sync: %u-wait payload copy on a provider without timelines or sync files - "
++                      "waited for completion, then signalled", wait_count);
++         }
++      }
++      return vk_drm_syncobj_signal_many(device, signal_count, signals);
+    } else {
+       return vk_drm_copy_sync_file_payloads(device, wait_count, waits,
+                                             signal_count, signals);
 diff --git a/src/vulkan/wsi/wsi_common_headless.c b/src/vulkan/wsi/wsi_common_headless.c
 index 72da70e..4201810 100644
 --- a/src/vulkan/wsi/wsi_common_headless.c
@@ -216,7 +341,7 @@ index 72da70e..4201810 100644
           const struct wsi_image *img = &chain->images[i].base;
           const uint32_t p = (uint32_t)(img->row_pitches[0] / 4);
 diff --git a/src/vulkan/wsi/wsi_orbis.c b/src/vulkan/wsi/wsi_orbis.c
-index 82c3304..e9ce180 100644
+index 82c3304..a6daf9a 100644
 --- a/src/vulkan/wsi/wsi_orbis.c
 +++ b/src/vulkan/wsi/wsi_orbis.c
 @@ -232,8 +232,22 @@ struct wsi_orbis_scanout {
@@ -344,10 +469,39 @@ index 82c3304..e9ce180 100644
  
     /* ⚠ THE GPU FIRST. This copy reads pixels the GPU is writing, and until this line it did not ask whether the
      * writing had finished - which is what put a staircase of tiles over half the menu on every screen change. See
-@@ -687,6 +748,31 @@ wsi_orbis_scanout_present(struct wsi_orbis_scanout *so, uint32_t index, const vo
-    if (!wsi_orbis_wait_for_flip_slot(so))
-       ORBIS_BOOK_RETURN(ORBIS_ID_WSI_PRESENT, orbis_pr_t0, false);
+@@ -616,6 +677,12 @@ wsi_orbis_scanout_present(struct wsi_orbis_scanout *so, uint32_t index, const vo
+         else
+            ac_orbis_wait_gpu_idle(2ull * 1000 * 1000 * 1000);
+         const uint64_t d = os_time_get_nano() - t;
++        if (d > 150000000ull) {
++           static unsigned said;
++           if (said++ < 200)
++              mesa_logw("wsi/orbis: SLOW present: waited %llu ms for the GPU to finish the frame",
++                        (unsigned long long)(d / 1000000));
++        }
+         orbis_api_time(ORBIS_ID_WSI_GPU_IDLE, d);
+         orbis_api_count(ORBIS_ID_WSI_GPU_IDLE, 1);
+         /* ⚠ AND UNCONDITIONALLY, because the two lines above only store under ORBIS_COUNT_API and
+@@ -684,8 +751,44 @@ wsi_orbis_scanout_present(struct wsi_orbis_scanout *so, uint32_t index, const vo
+       mesa_logi("wsi/orbis: present entered - index %u, src %p, src pitch %u, dst pitch %u, %ux%u", index, src,
+                 src_pitch, so->width * 4, so->width, so->height);
  
+-   if (!wsi_orbis_wait_for_flip_slot(so))
+-      ORBIS_BOOK_RETURN(ORBIS_ID_WSI_PRESENT, orbis_pr_t0, false);
++   {
++      const uint64_t fs0 = os_time_get_nano();
++      const bool fs_ok = wsi_orbis_wait_for_flip_slot(so);
++      const uint64_t fsd = os_time_get_nano() - fs0;
++      if (fsd > 150000000ull) {
++         static unsigned said;
++         if (said++ < 200)
++            mesa_logw("wsi/orbis: SLOW present: waited %llu ms for a display flip slot",
++                      (unsigned long long)(fsd / 1000000));
++      }
++      if (!fs_ok)
++         ORBIS_BOOK_RETURN(ORBIS_ID_WSI_PRESENT, orbis_pr_t0, false);
++   }
++
 +   if (so->owns_buffers) {
 +      index = so->next_buf;
 +      so->next_buf = (so->next_buf + 1) % so->count;
@@ -372,10 +526,9 @@ index 82c3304..e9ce180 100644
 +      }
 +      last_ns = now;
 +   }
-+
+ 
     /* ⚠ ROW BY ROW WHEN THE PITCHES DIFFER. WSI picks the image's row pitch and it need not be width*4 - RADV
      * aligns a linear image's pitch to the hardware's requirement. One flat memcpy would then shift every row
-     * and produce a sheared picture, which looks like a tiling bug and is not one. */
 diff --git a/src/vulkan/wsi/wsi_orbis.h b/src/vulkan/wsi/wsi_orbis.h
 index c2a0310..ec7ba42 100644
 --- a/src/vulkan/wsi/wsi_orbis.h

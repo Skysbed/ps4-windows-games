@@ -828,6 +828,51 @@ static int write_launch_files(const Game *g)
     return 0;
 }
 
+/* An external controller (for example the development host over FTP) can
+ * request a launch without synthesising pad input by writing one game folder
+ * id to this file.  The id is matched against the already-scanned library;
+ * it is never treated as a path.  Invalid requests are deliberately left in
+ * place so a typo cannot start anything or be mistaken for a successful
+ * command. */
+#define AUTO_LAUNCH_FILE "/data/pcps4/auto_launch.txt"
+
+static int poll_auto_launch(const Game **out)
+{
+    char id[sizeof(games[0].id)];
+    FILE *f;
+
+    *out = NULL;
+    if (!(f = fopen(AUTO_LAUNCH_FILE, "r"))) return 0;
+    if (!fgets(id, sizeof(id), f))
+    {
+        fclose(f);
+        return 0;
+    }
+    fclose(f);
+    trim(id);
+    if (!id[0]) return 0;
+
+    for (int i = 0; i < ngames; i++)
+        if (!strcmp(games[i].id, id))
+        {
+            if (write_launch_files(&games[i]) < 0) return 0;
+            /* Consume only after the normal launch files were written. */
+            if (remove(AUTO_LAUNCH_FILE) < 0) llog("auto launch consume failed", 0, 0);
+            *out = &games[i];
+            return 1;
+        }
+    return 0;
+}
+
+static int launch_game(const Game *g)
+{
+    if (write_launch_files(g) < 0) return -1;
+    draw_starting(g);
+    present();
+    present();
+    return 0;
+}
+
 /* ---- input ----------------------------------------------------------------- */
 static void focus_game(int i)
 {
@@ -957,8 +1002,20 @@ __attribute__((visibility("default"))) int pcps4_launcher_run(void)
     for (int frame = 0;; frame++)
     {
         PadData pd;
+        const Game *auto_game;
         uint32_t now = 0, pressed;
         const uint32_t dirs = B_LEFT | B_RIGHT | B_UP | B_DOWN;
+
+        /* Poll at roughly 4 Hz so the launcher remains responsive while an
+         * FTP client publishes the opt-in control file. */
+        if (frame % 15 == 0 && poll_auto_launch(&auto_game))
+        {
+            draw_starting(auto_game);
+            present();
+            present();
+            result = 0;
+            break;
+        }
 
         memset(&pd, 0, sizeof(pd));
         /* Started again straight after a game, the console may not have
@@ -989,11 +1046,8 @@ __attribute__((visibility("default"))) int pcps4_launcher_run(void)
             if (r == 1) { result = 1; break; }
             if (r == 0 && ngames)
             {
-                if (write_launch_files(&games[ui.sel]) == 0)
+                if (launch_game(&games[ui.sel]) == 0)
                 {
-                    draw_starting(&games[ui.sel]);
-                    present();
-                    present();
                     result = 0;
                     break;
                 }

@@ -2008,7 +2008,7 @@ index d234b20..9d975b4 100644
                      if (size >= sizeof(VM_COUNTERS_EX))
                          pvmi.PrivateUsage = pvmi.PagefileUsage;
 diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
-index 06eb740..60fae81 100644
+index 06eb740..3044492 100644
 --- a/dlls/ntdll/unix/server.c
 +++ b/dlls/ntdll/unix/server.c
 @@ -24,8 +24,31 @@
@@ -2762,13 +2762,16 @@ index 06eb740..60fae81 100644
  
      server_dir = init_server_dir( st.st_dev, st.st_ino );
  
-@@ -1394,6 +1996,143 @@ static void server_connect_error( const char *serverdir )
+@@ -1394,6 +1996,146 @@ static void server_connect_error( const char *serverdir )
  }
  
  
 +#ifdef WINE_INPROCESS_SERVER
 +static void (*unregister_server_thread)( long tid );
 +static int get_unix_tid(void);
++#ifdef __ORBIS__
++extern void pcps4_observe_handshake( int request_tid, const char *phase );
++#endif
 +
 +/* An ending thread leaves the in-process server's thread table before
 + * pthread_exit, so the server never signals or schedules a thread handle
@@ -2906,7 +2909,7 @@ index 06eb740..60fae81 100644
  /***********************************************************************
   *           server_connect
   *
-@@ -1407,6 +2146,14 @@ static int server_connect(void)
+@@ -1407,6 +2149,14 @@ static int server_connect(void)
  
      initial_cwd = setup_config_dir();
  
@@ -2921,7 +2924,7 @@ index 06eb740..60fae81 100644
      /* chdir to the server directory */
      if (chdir( server_dir ) == -1)
      {
-@@ -1564,13 +2311,21 @@ static int init_thread_pipe( struct thread_data *data )
+@@ -1564,13 +2314,21 @@ static int init_thread_pipe( struct thread_data *data )
      ss.ss_sp    = data->signal_stack;
      ss.ss_size  = signal_stack_size;
      ss.ss_flags = 0;
@@ -2943,7 +2946,7 @@ index 06eb740..60fae81 100644
      return reply_pipe[1];
  }
  
-@@ -1592,9 +2347,16 @@ static void init_teb_data( struct thread_data *data )
+@@ -1592,9 +2350,16 @@ static void init_teb_data( struct thread_data *data )
   *
   * Close server socket and exit process normally.
   */
@@ -2960,7 +2963,7 @@ index 06eb740..60fae81 100644
      exit( status );
  }
  
-@@ -1649,6 +2411,7 @@ size_t server_init_process(void)
+@@ -1649,6 +2414,7 @@ size_t server_init_process(void)
  
      /* receive the first thread request fd on the main socket */
      data->request_fd = wine_server_receive_fd( &version );
@@ -2968,7 +2971,7 @@ index 06eb740..60fae81 100644
  
  #ifdef SO_PASSCRED
      /* now that we hopefully received the server_pid, disable SO_PASSCRED */
-@@ -1676,8 +2439,14 @@ size_t server_init_process(void)
+@@ -1676,26 +2442,42 @@ size_t server_init_process(void)
      sigemptyset( &sig_act.sa_mask );
      sigaction( SIGPIPE, &sig_act, NULL );
  
@@ -2983,7 +2986,12 @@ index 06eb740..60fae81 100644
      SERVER_START_REQ( init_first_thread )
      {
          req->unix_pid    = getpid();
-@@ -1687,15 +2456,22 @@ size_t server_init_process(void)
+         req->unix_tid    = get_unix_tid();
++#ifdef __ORBIS__
++        pcps4_observe_handshake( req->unix_tid, "init_first_thread" );
++#endif
+         req->reply_fd    = reply_pipe;
+         req->wait_fd     = data->wait_fd[1];
          req->debug_level = (TRACE_ON(server) != 0);
          req->page_size   = get_host_page_size();
          wine_server_set_reply( req, supported_machines, sizeof(supported_machines) );
@@ -3007,7 +3015,7 @@ index 06eb740..60fae81 100644
              if (reply->inproc_device)
              {
                  inproc_device_fd = wine_server_receive_fd( &handle );
-@@ -1704,7 +2480,14 @@ size_t server_init_process(void)
+@@ -1704,7 +2486,14 @@ size_t server_init_process(void)
          }
      }
      SERVER_END_REQ;
@@ -3022,7 +3030,7 @@ index 06eb740..60fae81 100644
  
      if (ret) server_protocol_error( "init_first_thread failed with status %x\n", ret );
  
-@@ -1793,8 +2576,13 @@ void server_init_thread( struct thread_data *data )
+@@ -1793,11 +2582,22 @@ void server_init_thread( struct thread_data *data )
  
      data->pthread_id = pthread_self();
      pthread_setspecific( thread_data_key, data );
@@ -3033,10 +3041,19 @@ index 06eb740..60fae81 100644
 +#ifdef WINE_INPROCESS_SERVER
 +    register_inprocess_thread( get_unix_tid() );
 +#endif
++#ifdef __ORBIS__
++    { extern void pcps4_hang_register( struct thread_data * ); pcps4_hang_register( data ); }
++#endif
      SERVER_START_REQ( init_thread )
      {
          req->unix_tid  = get_unix_tid();
-@@ -1806,7 +2594,12 @@ void server_init_thread( struct thread_data *data )
++#ifdef __ORBIS__
++        pcps4_observe_handshake( req->unix_tid, "init_thread" );
++#endif
+         req->teb       = wine_server_client_ptr( teb64 ? (void *)teb64 : (void *)data->teb );
+         req->reply_fd  = reply_pipe;
+         req->wait_fd   = data->wait_fd[1];
+@@ -1806,7 +2606,12 @@ void server_init_thread( struct thread_data *data )
          data->suspend = reply->suspend;
      }
      SERVER_END_REQ;
@@ -3049,7 +3066,7 @@ index 06eb740..60fae81 100644
  
      if (data->teb)
      {
-@@ -1857,6 +2650,8 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
+@@ -1857,6 +2662,8 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
      unsigned int ret;
      int fd = -1;
  
@@ -3058,7 +3075,7 @@ index 06eb740..60fae81 100644
      if (dest) *dest = 0;
  
      if ((options & DUPLICATE_CLOSE_SOURCE) && source_process != NtCurrentProcess())
-@@ -1889,6 +2684,7 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
+@@ -1889,6 +2696,7 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
      if (options & DUPLICATE_CLOSE_SOURCE)
      {
          fd = remove_fd_from_cache( source );
@@ -3066,7 +3083,7 @@ index 06eb740..60fae81 100644
          close_inproc_sync( source );
      }
  
-@@ -1909,7 +2705,9 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
+@@ -1909,7 +2717,9 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source, HANDLE
  
      server_leave_uninterrupted_section( &fd_cache_mutex, &sigset );
  
@@ -3076,7 +3093,7 @@ index 06eb740..60fae81 100644
      return ret;
  }
  
-@@ -1953,6 +2751,7 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
+@@ -1953,6 +2763,7 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
      unsigned int ret;
      int fd;
  
@@ -3084,7 +3101,7 @@ index 06eb740..60fae81 100644
      if (HandleToLong( handle ) >= ~5 && HandleToLong( handle ) <= ~0)
          return STATUS_SUCCESS;
  
-@@ -1963,6 +2762,7 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
+@@ -1963,6 +2774,7 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
      /* always remove the cached fd; if the server request fails we'll just
       * retrieve it again */
      fd = remove_fd_from_cache( handle );
@@ -3092,7 +3109,7 @@ index 06eb740..60fae81 100644
      close_inproc_sync( handle );
  
      SERVER_START_REQ( close_handle )
-@@ -1974,7 +2774,9 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
+@@ -1974,7 +2786,9 @@ NTSTATUS WINAPI NtClose( HANDLE handle )
  
      server_leave_uninterrupted_section( &fd_cache_mutex, &sigset );
  
@@ -3103,7 +3120,7 @@ index 06eb740..60fae81 100644
      if (ret != STATUS_INVALID_HANDLE || !handle) return ret;
      if (!peb->BeingDebugged) return ret;
 diff --git a/dlls/ntdll/unix/signal_x86_64.c b/dlls/ntdll/unix/signal_x86_64.c
-index e612e5e..387aa52 100644
+index e612e5e..968f1ec 100644
 --- a/dlls/ntdll/unix/signal_x86_64.c
 +++ b/dlls/ntdll/unix/signal_x86_64.c
 @@ -29,6 +29,7 @@
@@ -3114,7 +3131,7 @@ index e612e5e..387aa52 100644
  #include <stdlib.h>
  #include <stdarg.h>
  #include <stdio.h>
-@@ -89,6 +90,57 @@ WINE_DECLARE_DEBUG_CHANNEL(seh);
+@@ -89,6 +90,64 @@ WINE_DECLARE_DEBUG_CHANNEL(seh);
  
  #include "dwarf.h"
  
@@ -3165,6 +3182,13 @@ index e612e5e..387aa52 100644
 +                                     signal, (long)action, (long)previous );
 +    return sigaction( signal, action, previous );
 +}
++#elif defined(__ORBIS__)
++static int pcps4_orbis_sigaction( int signal, const struct sigaction *action, struct sigaction *previous );
++static void pcps4_hang_init( TEB *teb );
++static struct pcps4_observation *pcps4_suspend_enter( ULONG64 rip, ULONG64 rsp );
++static void pcps4_suspend_phase( struct pcps4_observation *record, const char *phase );
++#define PCPS4_PHASE(phase) pcps4_suspend_phase( observation, phase )
++#define pw_native_sigaction pcps4_orbis_sigaction
 +#else
 +#define pw_native_sigaction sigaction
 +#endif
@@ -3172,7 +3196,7 @@ index e612e5e..387aa52 100644
  static USHORT cs32_sel;  /* selector for %cs in 32-bit mode */
  static USHORT cs64_sel;  /* selector for %cs in 64-bit mode */
  static USHORT ds64_sel;  /* selector for %ds/%es/%ss in 64-bit mode */
-@@ -97,10 +149,14 @@ static USHORT fs32_sel;  /* selector for %fs in 32-bit mode */
+@@ -97,10 +156,14 @@ static USHORT fs32_sel;  /* selector for %fs in 32-bit mode */
  /***********************************************************************
   * signal context platform-specific definitions
   */
@@ -3188,7 +3212,7 @@ index e612e5e..387aa52 100644
  
  extern int alloc_fs_sel( int sel, void *base );
  __ASM_GLOBAL_FUNC( alloc_fs_sel,
-@@ -174,6 +230,69 @@ __ASM_GLOBAL_FUNC( modify_ldt,
+@@ -174,6 +237,69 @@ __ASM_GLOBAL_FUNC( modify_ldt,
  #define FP_XSTATE_MAGIC1 0x46505853
  #endif
  
@@ -3258,7 +3282,7 @@ index e612e5e..387aa52 100644
  #define RAX_sig(context)     ((context)->uc_mcontext.gregs[REG_RAX])
  #define RBX_sig(context)     ((context)->uc_mcontext.gregs[REG_RBX])
  #define RCX_sig(context)     ((context)->uc_mcontext.gregs[REG_RCX])
-@@ -200,40 +319,112 @@ __ASM_GLOBAL_FUNC( modify_ldt,
+@@ -200,40 +326,112 @@ __ASM_GLOBAL_FUNC( modify_ldt,
  #define ERROR_sig(context)   ((context)->uc_mcontext.gregs[REG_ERR])
  #define FPU_sig(context)     ((void *)((context)->uc_mcontext.fpregs))
  #define XState_sig(fpu)      (((unsigned int *)((XMM_SAVE_AREA32 *)fpu)->Reserved4)[12] == FP_XSTATE_MAGIC1 ? (XSAVE_AREA_HEADER *)(((XMM_SAVE_AREA32 *)fpu) + 1) : NULL)
@@ -3398,7 +3422,7 @@ index e612e5e..387aa52 100644
  
  #elif defined(__NetBSD__)
  
-@@ -777,6 +968,64 @@ __ASM_GLOBAL_FUNC( clear_alignment_flag,
+@@ -777,6 +975,64 @@ __ASM_GLOBAL_FUNC( clear_alignment_flag,
                     "ret" )
  
  
@@ -3463,7 +3487,7 @@ index e612e5e..387aa52 100644
  /***********************************************************************
   *           init_handler
   */
-@@ -807,6 +1056,24 @@ static inline struct thread_data *init_handler( void *sigcontext )
+@@ -807,6 +1063,24 @@ static inline struct thread_data *init_handler( void *sigcontext )
  }
  
  
@@ -3488,7 +3512,7 @@ index e612e5e..387aa52 100644
  /***********************************************************************
   *           leave_handler
   */
-@@ -841,6 +1108,77 @@ static inline void leave_handler( struct thread_data *data, ucontext_t *sigconte
+@@ -841,6 +1115,77 @@ static inline void leave_handler( struct thread_data *data, ucontext_t *sigconte
  }
  
  
@@ -3566,7 +3590,7 @@ index e612e5e..387aa52 100644
  /***********************************************************************
   *           save_context
   *
-@@ -891,15 +1229,26 @@ static void save_context( struct thread_data *data, struct xcontext *xcontext,
+@@ -891,15 +1236,26 @@ static void save_context( struct thread_data *data, struct xcontext *xcontext,
      if (FPU_sig(sigcontext))
      {
          XSAVE_AREA_HEADER *xs;
@@ -3594,7 +3618,7 @@ index e612e5e..387aa52 100644
              assert( xcontext->c_ex.XState.Offset == (BYTE *)xs - (BYTE *)&xcontext->c_ex );
          }
      }
-@@ -952,6 +1301,9 @@ static void restore_context( struct thread_data *data, const struct xcontext *xc
+@@ -952,6 +1308,9 @@ static void restore_context( struct thread_data *data, const struct xcontext *xc
  {
      const CONTEXT *context = &xcontext->c;
      struct amd64_thread_data *amd64_data = amd64_thread_data( data );
@@ -3604,7 +3628,7 @@ index e612e5e..387aa52 100644
  
      if (amd64_data)
      {
-@@ -964,6 +1316,9 @@ static void restore_context( struct thread_data *data, const struct xcontext *xc
+@@ -964,6 +1323,9 @@ static void restore_context( struct thread_data *data, const struct xcontext *xc
      }
      set_sigcontext( context, sigcontext );
      if (FPU_sig(sigcontext)) memcpy( FPU_sig(sigcontext), &context->FltSave, sizeof(context->FltSave) );
@@ -3614,7 +3638,7 @@ index e612e5e..387aa52 100644
      leave_handler( data, sigcontext );
  }
  
-@@ -1515,6 +1870,9 @@ static void setup_raise_exception( struct thread_data *data, ucontext_t *sigcont
+@@ -1515,6 +1877,9 @@ static void setup_raise_exception( struct thread_data *data, ucontext_t *sigcont
      }
  
      CS_sig(sigcontext)  = cs64_sel;
@@ -3624,7 +3648,7 @@ index e612e5e..387aa52 100644
      RIP_sig(sigcontext) = (ULONG_PTR)pKiUserExceptionDispatcher;
      RSP_sig(sigcontext) = (ULONG_PTR)stack;
      /* clear single-step, direction, and align check flag */
-@@ -2089,6 +2447,32 @@ static BOOL handle_syscall_fault( struct thread_data *data, ucontext_t *sigconte
+@@ -2089,6 +2454,32 @@ static BOOL handle_syscall_fault( struct thread_data *data, ucontext_t *sigconte
  
      if (!is_inside_syscall( data, RSP_sig(sigcontext) )) return FALSE;
  
@@ -3657,7 +3681,7 @@ index e612e5e..387aa52 100644
      TRACE_(seh)( "code=%x flags=%x addr=%p ip=%lx\n",
                   rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress, context->Rip );
      for (i = 0; i < rec->NumberParameters; i++)
-@@ -2101,6 +2485,25 @@ static BOOL handle_syscall_fault( struct thread_data *data, ucontext_t *sigconte
+@@ -2101,6 +2492,25 @@ static BOOL handle_syscall_fault( struct thread_data *data, ucontext_t *sigconte
                   context->R8, context->R9, context->R10, context->R11 );
      TRACE_(seh)( " r12=%016lx r13=%016lx r14=%016lx r15=%016lx\n",
                   context->R12, context->R13, context->R14, context->R15 );
@@ -3683,7 +3707,7 @@ index e612e5e..387aa52 100644
  
      if (data->jmp_buf)
      {
-@@ -2270,18 +2673,71 @@ static inline BOOL check_invalid_gsbase( struct thread_data *data, ucontext_t *u
+@@ -2270,18 +2680,71 @@ static inline BOOL check_invalid_gsbase( struct thread_data *data, ucontext_t *u
  }
  
  
@@ -3757,7 +3781,7 @@ index e612e5e..387aa52 100644
      save_context( data, &context, sigcontext );
  
      switch(TRAP_sig(sigcontext))
-@@ -2319,6 +2775,8 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -2319,6 +2782,8 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
          if (!virtual_handle_fault( data, &rec, (void *)RSP_sig(sigcontext) ) ||
              check_invalid_gsbase( data, sigcontext ))
          {
@@ -3766,7 +3790,7 @@ index e612e5e..387aa52 100644
              leave_handler( data, sigcontext );
              return;
          }
-@@ -2356,6 +2814,14 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -2356,6 +2821,14 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
          rec.ExceptionCode = EXCEPTION_ILLEGAL_INSTRUCTION;
          break;
      }
@@ -3781,7 +3805,7 @@ index e612e5e..387aa52 100644
      if (handle_syscall_fault( data, sigcontext, &rec, &context.c )) return;
      setup_raise_exception( data, sigcontext, &rec, &context );
  }
-@@ -2366,7 +2832,7 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -2366,7 +2839,7 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
   *
   * Handler for SIGTRAP.
   */
@@ -3790,7 +3814,7 @@ index e612e5e..387aa52 100644
  {
      ucontext_t *sigcontext = _sigcontext;
      struct thread_data *data = init_handler( sigcontext );
-@@ -2375,6 +2841,13 @@ static void trap_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -2375,6 +2848,13 @@ static void trap_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
  
      if (handle_syscall_trap( data, sigcontext, siginfo )) return;
  
@@ -3804,7 +3828,7 @@ index e612e5e..387aa52 100644
      save_context( data, &context, sigcontext );
  
      switch (TRAP_sig(sigcontext))
-@@ -2413,7 +2886,7 @@ static void trap_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -2413,7 +2893,7 @@ static void trap_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
   *
   * Handler for SIGFPE.
   */
@@ -3813,7 +3837,7 @@ index e612e5e..387aa52 100644
  {
      ucontext_t *sigcontext = _sigcontext;
      struct thread_data *data = init_handler( sigcontext );
-@@ -2488,7 +2961,7 @@ static void fpe_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -2488,7 +2968,7 @@ static void fpe_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
   *
   * Handler for SIGINT.
   */
@@ -3822,7 +3846,7 @@ index e612e5e..387aa52 100644
  {
      ucontext_t *sigcontext = _sigcontext;
      struct thread_data *data = init_handler( sigcontext );
-@@ -2509,7 +2982,7 @@ static void int_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -2509,7 +2989,7 @@ static void int_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
   *
   * Handler for SIGABRT.
   */
@@ -3831,7 +3855,7 @@ index e612e5e..387aa52 100644
  {
      ucontext_t *sigcontext = _sigcontext;
      struct thread_data *data = init_handler( sigcontext );
-@@ -2528,10 +3001,25 @@ static void abrt_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -2528,10 +3008,25 @@ static void abrt_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
   *
   * Handler for SIGQUIT.
   */
@@ -3859,7 +3883,7 @@ index e612e5e..387aa52 100644
  
      if (is_inside_syscall( data, RSP_sig(sigcontext) )) abort_thread( 0 );
      user_mode_abort_thread( 0, get_syscall_frame( data ));
-@@ -2543,10 +3031,16 @@ static void quit_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+@@ -2543,13 +3038,30 @@ static void quit_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
   *
   * Handler for SIGUSR1, used to signal a thread that it got suspended.
   */
@@ -3870,15 +3894,69 @@ index e612e5e..387aa52 100644
 -    struct thread_data *data = init_handler( sigcontext );
 +    struct thread_data *data;
 +
++#ifdef __ORBIS__
++    struct pcps4_observation *observation = pcps4_suspend_enter( RIP_sig(sigcontext), RSP_sig(sigcontext) );
++#else
++#define PCPS4_PHASE(phase) ((void)0)
++#endif
++
 +    /* PS4: signals are process-wide, so this can land on the in-process
 +     * server thread (a plain pthread with no Wine thread data); the stack
 +     * mask below then invents a bogus `data`. Nothing there to suspend. */
-+    if (!get_thread_data()) return;
++    if (!get_thread_data())
++    {
++        PCPS4_PHASE( "no Wine thread data" );
++        return;
++    }
 +    data = init_handler( sigcontext );
  
      if (!data->teb)
      {
-@@ -2724,6 +3218,7 @@ NTSTATUS signal_alloc_thread( TEB *teb )
++        PCPS4_PHASE( "server_select" );
+         server_select( NULL, 0, SELECT_INTERRUPTIBLE, 0, NULL, NULL );
+     }
+     else if (is_inside_syscall( data, RSP_sig(sigcontext) ))
+@@ -2562,6 +3074,7 @@ static void usr1_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+         context = (struct xcontext *)(((ULONG_PTR)RSP_sig(sigcontext) - 128 /* red zone */ - sizeof(*context)) & ~15);
+         if ((char *)context < (char *)get_kernel_stack( data ))
+         {
++            PCPS4_PHASE( "kernel stack overflow" );
+             ERR_(seh)( "kernel stack overflow.\n" );
+             return;
+         }
+@@ -2572,6 +3085,7 @@ static void usr1_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+             frame->eflags = 0x200;
+             fixup_frame_fpu_state( frame, sigcontext );
+         }
++        PCPS4_PHASE( "get syscall context" );
+         NtGetContextThread( GetCurrentThread(), &context->c );
+         if (xstate_extended_features)
+         {
+@@ -2580,7 +3094,9 @@ static void usr1_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+             context_init_xstate( &context->c, &frame->xstate );
+             saved_compaction = frame->xstate.CompactionMask;
+         }
++        PCPS4_PHASE( "wait_suspend syscall" );
+         wait_suspend( &context->c );
++        PCPS4_PHASE( "restore syscall context" );
+         if (xstate_extended_features) frame->xstate.CompactionMask = saved_compaction;
+         if (context->c.ContextFlags & 0x40)
+         {
+@@ -2604,9 +3120,13 @@ static void usr1_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
+         save_context( data, &context, sigcontext );
+         context.c.ContextFlags |= CONTEXT_EXCEPTION_REPORTING;
+         if (is_wow64() && context.c.SegCs == cs64_sel) context.c.ContextFlags |= CONTEXT_EXCEPTION_ACTIVE;
++        PCPS4_PHASE( "wait_suspend user" );
+         wait_suspend( &context.c );
++        PCPS4_PHASE( "restore user context" );
+         restore_context( data, &context, sigcontext );
+     }
++    PCPS4_PHASE( "returned" );
++#undef PCPS4_PHASE
+ }
+ 
+ 
+@@ -2724,6 +3244,7 @@ NTSTATUS signal_alloc_thread( TEB *teb )
      struct amd64_thread_data *thread_data = (struct amd64_thread_data *)&teb->GdiTebBatch;
      WOW_TEB *wow_teb = get_wow_teb( teb );
  
@@ -3886,7 +3964,7 @@ index e612e5e..387aa52 100644
      if (wow_teb)
      {
          if (!fs32_sel)
-@@ -2733,6 +3228,12 @@ NTSTATUS signal_alloc_thread( TEB *teb )
+@@ -2733,6 +3254,12 @@ NTSTATUS signal_alloc_thread( TEB *teb )
          }
          else thread_data->fs = fs32_sel;
      }
@@ -3899,7 +3977,7 @@ index e612e5e..387aa52 100644
      thread_data->frame_size = frame_size;
      return STATUS_SUCCESS;
  }
-@@ -2745,7 +3246,9 @@ void signal_free_thread( TEB *teb )
+@@ -2745,7 +3272,9 @@ void signal_free_thread( TEB *teb )
  {
      struct amd64_thread_data *thread_data = (struct amd64_thread_data *)&teb->GdiTebBatch;
  
@@ -3909,7 +3987,7 @@ index e612e5e..387aa52 100644
  }
  
  
-@@ -2811,8 +3314,23 @@ void signal_init_process( TEB *teb )
+@@ -2811,8 +3340,23 @@ void signal_init_process( TEB *teb )
  
      /* sneak in a syscall dispatcher pointer at a fixed address (7ffe1000) */
      ptr = (char *)user_shared_data + page_size;
@@ -3935,7 +4013,7 @@ index e612e5e..387aa52 100644
  
      __asm__( "movw %%cs,%0" : "=m" (cs64_sel) );
      __asm__( "movw %%ss,%0" : "=m" (ds64_sel) );
-@@ -2832,28 +3350,33 @@ void signal_init_process( TEB *teb )
+@@ -2832,28 +3376,33 @@ void signal_init_process( TEB *teb )
      alloc_syscall_frame( (frame_size + 63) & ~63 );
      signal_alloc_thread( teb );
  
@@ -3986,7 +4064,7 @@ index e612e5e..387aa52 100644
  #endif
  
  #ifdef __linux__
-@@ -2861,7 +3384,7 @@ void signal_init_process( TEB *teb )
+@@ -2861,7 +3410,7 @@ void signal_init_process( TEB *teb )
      {
          struct sigaction act;
  
@@ -3995,10 +4073,13 @@ index e612e5e..387aa52 100644
          {
              WARN_(seh)( "failed to retrieve signal restorer trampoline\n" );
              syscall_dispatch_enabled = FALSE;
-@@ -2874,6 +3397,16 @@ void signal_init_process( TEB *teb )
+@@ -2874,6 +3423,19 @@ void signal_init_process( TEB *teb )
      }
  #endif
  
++#ifdef __ORBIS__
++    pcps4_hang_init( teb );
++#endif
 +#if defined(__PROSPERO__) && !defined(__ORBIS__)
 +    /* All nine raw registrations succeeded. The CPU backend still checks
 +     * its own process/thread prerequisites before entering guest mode. */
@@ -4012,7 +4093,7 @@ index e612e5e..387aa52 100644
      return;
  
   error:
-@@ -2908,8 +3441,17 @@ void init_syscall_frame( LPTHREAD_START_ROUTINE entry, void *arg, TEB *teb )
+@@ -2908,8 +3470,17 @@ void init_syscall_frame( LPTHREAD_START_ROUTINE entry, void *arg, TEB *teb )
                                             libc_addr, libc_size, &thread_data->syscall_dispatch ) < 0)
          WARN_(seh)( "could not enable syscall user dispatch\n" );
  #elif defined (__FreeBSD__) || defined (__FreeBSD_kernel__)
@@ -4030,7 +4111,7 @@ index e612e5e..387aa52 100644
  #elif defined(__NetBSD__)
      sysarch( X86_64_SET_GSBASE, &teb );
  #elif defined (__APPLE__)
-@@ -3124,6 +3666,8 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
+@@ -3124,6 +3695,8 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                     "syscall\n\t"
                     "leaq -0x98(%rbp),%rcx\n"
                     "2:\n\t"
@@ -4039,7 +4120,7 @@ index e612e5e..387aa52 100644
  #elif defined(__FreeBSD__)
                     "movq 0x320(%r13),%rsi\n\t"     /* amd64_thread_data()->pthread_teb */
                     "testq %rsi,%rsi\n\t"
-@@ -3441,6 +3985,8 @@ __ASM_GLOBAL_FUNC( __wine_unix_call_dispatcher,
+@@ -3441,6 +4014,8 @@ __ASM_GLOBAL_FUNC( __wine_unix_call_dispatcher,
                     "mov $158,%eax\n\t"             /* SYS_arch_prctl */
                     "syscall\n\t"
                     "2:\n\t"
@@ -4048,6 +4129,452 @@ index e612e5e..387aa52 100644
  #elif defined(__FreeBSD__)
                     "movq 0x320(%r13),%rsi\n\t"     /* amd64_thread_data()->pthread_teb */
                     "testq %rsi,%rsi\n\t"
+@@ -3527,3 +4102,445 @@ __ASM_GLOBAL_POINTER( __ASM_NAME("__wine_unix_call_dispatcher_gs_load_ptr"),
+                       __ASM_LOCAL_LABEL("__wine_unix_call_dispatcher_gs_load") )
+ 
+ #endif  /* __x86_64__ */
++
++#ifdef __ORBIS__
++#include <fcntl.h>
++#include <sys/stat.h>
++/***********************************************************************
++ * PCPS4: kernel-level signal handlers and the freeze report
++ *
++ * After WinePS4 (iHaiDeeZ/WinePS4, LGPL-2.1): port/ps4_wine_port.c's raw sigaction and hang.log.
++ *
++ * - PCPS4_RAW_SIGACTION=1 in /data/pcps4_env.txt: Wine's handlers are installed with the kernel's
++ *   sigaction (system call 416) instead of the PS4 thread library's, whose wrapper holds a signal back
++ *   while the thread is inside the library's own locks (a suspend request that never arrives).
++ * - The freeze report: /data/pcps4/hang.log gets every Wine thread's position (its Unix rip and, inside
++ *   a system call, the Windows rip/rsp it came from), the code addresses on its stacks, and the PE and
++ *   PS4 modules with their ranges. Written when /data/pcps4_hangdump appears (the file is removed), and
++ *   once PCPS4_HANG_DUMP=<seconds> after the start. The signal (SIGXCPU) is always installed through the
++ *   kernel, and nothing in the report takes a lock a stuck thread may hold: no stdio, no malloc.
++ */
++extern int32_t sceKernelQueryMemoryProtection( void *, void **, void **, int32_t * );
++extern int32_t sceKernelGetModuleList( uint32_t *array, size_t size, size_t *available );
++extern int32_t sceKernelGetModuleInfo( uint32_t handle, void *info );
++
++static long pcps4_sys3( long number, long a, long b, long c )
++{
++    long ret;
++    unsigned char failed;
++
++    __asm__ volatile( "syscall\n\tsetc %1"
++                      : "=a" (ret), "=qm" (failed)
++                      : "a" (number), "D" (a), "S" (b), "d" (c)
++                      : "rcx", "r8", "r9", "r10", "r11", "memory", "cc" );
++    return failed ? -1 : ret;
++}
++
++/* First observations stay available even if a later thread stalls mid-handshake. */
++#define PCPS4_OBSERVATIONS 256
++struct pcps4_observation
++{
++    long kernel_tid, request_tid;
++    ULONG64 rip, rsp;
++    const char *phase;
++};
++static struct pcps4_observation pcps4_handshakes[PCPS4_OBSERVATIONS], pcps4_suspends[PCPS4_OBSERVATIONS];
++static unsigned int pcps4_handshake_count, pcps4_suspend_count;
++_Static_assert( __atomic_always_lock_free( sizeof(unsigned int), 0 ) &&
++                __atomic_always_lock_free( sizeof(void *), 0 ), "signal observations require lock-free atomics" );
++
++static struct pcps4_observation *pcps4_record( struct pcps4_observation *records, unsigned int *count,
++                                               long request_tid, ULONG64 rip, ULONG64 rsp, const char *phase )
++{
++    unsigned int i;
++    long tid = -1;
++
++    if (__atomic_load_n( count, __ATOMIC_RELAXED ) >= PCPS4_OBSERVATIONS) return NULL;
++    i = __atomic_fetch_add( count, 1, __ATOMIC_RELAXED );
++    if (i >= PCPS4_OBSERVATIONS) return NULL;
++    if (pcps4_sys3( 432 /* SYS_thr_self */, (long)&tid, 0, 0 ) == -1) tid = -1;
++    records[i].kernel_tid = tid;
++    records[i].request_tid = request_tid;
++    records[i].rip = rip;
++    records[i].rsp = rsp;
++    __atomic_store_n( &records[i].phase, phase, __ATOMIC_RELEASE );
++    return &records[i];
++}
++
++void pcps4_observe_handshake( int request_tid, const char *phase )
++{
++    pcps4_record( pcps4_handshakes, &pcps4_handshake_count, request_tid, 0, 0, phase );
++}
++
++static struct pcps4_observation *pcps4_suspend_enter( ULONG64 rip, ULONG64 rsp )
++{
++    return pcps4_record( pcps4_suspends, &pcps4_suspend_count, 0, rip, rsp, "entered" );
++}
++
++static void pcps4_suspend_phase( struct pcps4_observation *record, const char *phase )
++{
++    if (record) __atomic_store_n( &record->phase, phase, __ATOMIC_RELEASE );
++}
++
++/* <name>=<number> from the launch's env file (the tile's env lines), else def */
++static int pcps4_env_int( const char *name, int def )
++{
++    char buf[8192];
++    size_t len = strlen( name );
++    int fd = pcps4_sys3( 5 /* SYS_open */, (long)"/data/pcps4_env.txt", 0, 0 ), n, value = def;
++    char *line, *next;
++
++    if (fd == -1) return def;
++    n = pcps4_sys3( 3 /* SYS_read */, fd, (long)buf, sizeof(buf) - 1 );
++    pcps4_sys3( 6 /* SYS_close */, fd, 0, 0 );
++    if (n <= 0) return def;
++    buf[n] = 0;
++    for (line = buf; line && *line; line = next)
++    {
++        if ((next = strchr( line, '\n' ))) *next++ = 0;
++        if (!strncmp( line, name, len ) && line[len] == '=') value = atoi( line + len + 1 );
++    }
++    return value;
++}
++
++static int pcps4_raw_sig = -1;
++
++static int pcps4_orbis_sigaction( int signal, const struct sigaction *action, struct sigaction *previous )
++{
++    if (pcps4_raw_sig < 0)
++    {
++        pcps4_raw_sig = pcps4_env_int( "PCPS4_RAW_SIGACTION", 0 ) == 1;
++        if (pcps4_raw_sig) fprintf( stderr, "pcps4: signal handlers through the kernel's sigaction\n" );
++    }
++    if (pcps4_raw_sig)
++    {
++        if (pcps4_sys3( 416 /* SYS_sigaction */, signal, (long)action, (long)previous ) != -1) return 0;
++        fprintf( stderr, "pcps4: kernel sigaction %d refused, the thread library's instead\n", signal );
++    }
++    return sigaction( signal, action, previous );
++}
++
++#define PCPS4_MAX_THREADS 512
++static struct { long tid; struct thread_data *data; } pcps4_threads[PCPS4_MAX_THREADS];
++static volatile int pcps4_dump_done;
++static volatile ULONG64 pcps4_dump_rip, pcps4_dump_rsp;
++static TEB *pcps4_main_teb;
++
++void pcps4_hang_register( struct thread_data *data )
++{
++    long tid = 0, old;
++    int i;
++
++    if (pcps4_sys3( 432 /* SYS_thr_self */, (long)&tid, 0, 0 ) == -1 || tid <= 0) return;
++    for (i = 0; i < PCPS4_MAX_THREADS; i++)
++    {
++        old = __atomic_load_n( &pcps4_threads[i].tid, __ATOMIC_ACQUIRE );
++        if (old < 0) continue;  /* being claimed */
++        if (old && pcps4_sys3( 433 /* SYS_thr_kill */, old, 0, 0 ) != -1) continue;  /* alive */
++        if (!__atomic_compare_exchange_n( &pcps4_threads[i].tid, &old, -1, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE ))
++            continue;
++        pcps4_threads[i].data = data;
++        __atomic_store_n( &pcps4_threads[i].tid, tid, __ATOMIC_RELEASE );
++        return;
++    }
++}
++
++static void pcps4_dump_handler( int signal, siginfo_t *siginfo, void *sigcontext )
++{
++    ucontext_t *context = sigcontext;
++
++    pcps4_dump_rip = RIP_sig( context );
++    pcps4_dump_rsp = RSP_sig( context );
++    __atomic_store_n( &pcps4_dump_done, 1, __ATOMIC_RELEASE );
++}
++
++struct pcps4_line { char text[4096]; int len; };
++
++static void pcps4_put( struct pcps4_line *l, const char *s )
++{
++    while (*s && l->len < (int)sizeof(l->text) - 1) l->text[l->len++] = *s++;
++}
++
++static void pcps4_hex( struct pcps4_line *l, ULONG64 v )
++{
++    char b[24];
++    int i = 0, n = 0;
++
++    b[i++] = '0'; b[i++] = 'x';
++    do { n++; } while (n < 16 && v >> (4 * n));
++    while (n--) b[i++] = "0123456789abcdef"[(v >> (4 * n)) & 15];
++    b[i] = 0;
++    pcps4_put( l, b );
++}
++
++static void pcps4_dec( struct pcps4_line *l, ULONG64 v )
++{
++    char b[24];
++    int i = 23;
++
++    b[i] = 0;
++    do { b[--i] = '0' + v % 10; v /= 10; } while (v);
++    pcps4_put( l, b + i );
++}
++
++static void pcps4_flush( int fd, struct pcps4_line *l )
++{
++    if (l->len) pcps4_sys3( 4 /* SYS_write */, fd, (long)l->text, l->len );
++    l->len = 0;
++}
++
++static struct { ULONG64 start, end; int exec; } pcps4_regions[512];
++static int pcps4_nregions;
++
++static int pcps4_region( ULONG64 v, ULONG64 *end )
++{
++    void *s, *e;
++    int32_t prot;
++    int i;
++
++    for (i = 0; i < pcps4_nregions; i++)
++        if (v >= pcps4_regions[i].start && v < pcps4_regions[i].end)
++        {
++            if (end) *end = pcps4_regions[i].end;
++            return pcps4_regions[i].exec;
++        }
++    if (sceKernelQueryMemoryProtection( (void *)v, &s, &e, &prot )) return -1;
++    if (v < (ULONG64)s || v >= (ULONG64)e) return -1;
++    if (pcps4_nregions < 512)
++    {
++        pcps4_regions[pcps4_nregions].start = (ULONG64)s;
++        pcps4_regions[pcps4_nregions].end = (ULONG64)e;
++        pcps4_regions[pcps4_nregions].exec = (prot & 4) != 0;
++        pcps4_nregions++;
++    }
++    if (end) *end = (ULONG64)e;
++    return (prot & 4) != 0;
++}
++
++/* the code addresses between sp and top (at most 32 KiB, never past sp's mapping) */
++static void pcps4_scan( int fd, struct pcps4_line *l, const char *what, ULONG64 sp, ULONG64 top )
++{
++    ULONG64 end, *p;
++    int n = 0;
++
++    sp &= ~7ull;
++    if (pcps4_region( sp, &end ) < 0) return;
++    if (!top || top > end) top = end;
++    if (top > sp + 0x8000) top = sp + 0x8000;
++    pcps4_put( l, "   " );
++    pcps4_put( l, what );
++    pcps4_put( l, ":" );
++    for (p = (ULONG64 *)sp; (ULONG64)p < top && n < 48; p++)
++    {
++        ULONG64 v = *p;
++        if (v < 0x10000 || v >= 0x800000000000ull) continue;
++        if (pcps4_region( v, NULL ) != 1) continue;
++        pcps4_put( l, " " );
++        pcps4_hex( l, v );
++        n++;
++        if (l->len > (int)sizeof(l->text) - 64) pcps4_flush( fd, l );
++    }
++    pcps4_put( l, "\n" );
++    pcps4_flush( fd, l );
++}
++
++static void pcps4_dump_modules( int fd, struct pcps4_line *l )
++{
++    uint32_t handles[256];
++    size_t count = 0, i;
++    int n = 0;
++
++    /* the PE modules, from the loader's list (read without its lock: the process is stuck) */
++    if (pcps4_main_teb && pcps4_main_teb->Peb && pcps4_main_teb->Peb->LdrData)
++    {
++        LIST_ENTRY *head = &pcps4_main_teb->Peb->LdrData->InLoadOrderModuleList, *e;
++
++        for (e = head->Flink; e && e != head && n < 400; e = e->Flink, n++)
++        {
++            LDR_DATA_TABLE_ENTRY *mod = CONTAINING_RECORD( e, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks );
++            char name[128];
++            int j, len = mod->BaseDllName.Length / sizeof(WCHAR);
++
++            for (j = 0; j < len && j < 127; j++) name[j] = mod->BaseDllName.Buffer[j] < 0x80 ? mod->BaseDllName.Buffer[j] : '?';
++            name[j] = 0;
++            pcps4_put( l, "pe " );
++            pcps4_hex( l, (ULONG64)mod->DllBase );
++            pcps4_put( l, " " );
++            pcps4_hex( l, (ULONG64)mod->SizeOfImage );
++            pcps4_put( l, " " );
++            pcps4_put( l, name );
++            pcps4_put( l, "\n" );
++            pcps4_flush( fd, l );
++        }
++    }
++    /* the PS4 modules (the .prx files) and their segments */
++    if (!sceKernelGetModuleList( handles, 256, &count ))
++        for (i = 0; i < count && i < 256; i++)
++        {
++            struct { size_t size; char name[256]; struct { void *address; uint32_t size; int32_t prot; } seg[4];
++                     uint32_t count; uint8_t fingerprint[20]; } info;
++            uint32_t s;
++
++            memset( &info, 0, sizeof(info) );
++            info.size = sizeof(info);
++            if (sceKernelGetModuleInfo( handles[i], &info )) continue;
++            info.name[255] = 0;
++            for (s = 0; s < info.count && s < 4; s++)
++            {
++                pcps4_put( l, "prx " );
++                pcps4_hex( l, (ULONG64)info.seg[s].address );
++                pcps4_put( l, " " );
++                pcps4_hex( l, info.seg[s].size );
++                pcps4_put( l, " " );
++                pcps4_put( l, info.name );
++                pcps4_put( l, " prot " );
++                pcps4_dec( l, info.seg[s].prot );
++                pcps4_put( l, "\n" );
++                pcps4_flush( fd, l );
++            }
++        }
++}
++
++static void pcps4_dump_observations( int fd, struct pcps4_line *l, struct pcps4_observation *records )
++{
++    unsigned int i;
++    for (i = 0; i < PCPS4_OBSERVATIONS; i++)
++    {
++        const char *phase = __atomic_load_n( &records[i].phase, __ATOMIC_ACQUIRE );
++        if (!phase) continue;
++        pcps4_put( l, phase );
++        if (records == pcps4_handshakes)
++        {
++            pcps4_put( l, " req.unix_tid=" );
++            pcps4_hex( l, records[i].request_tid );
++            pcps4_put( l, records[i].kernel_tid < 0 ? " raw_failed" :
++                       records[i].kernel_tid == records[i].request_tid ? " match" : " mismatch" );
++        }
++        else
++        {
++            pcps4_put( l, " SIGUSR1 rip=" );
++            pcps4_hex( l, records[i].rip );
++            pcps4_put( l, " rsp=" );
++            pcps4_hex( l, records[i].rsp );
++        }
++        pcps4_put( l, " raw_thr_self=" );
++        pcps4_hex( l, records[i].kernel_tid );
++        pcps4_put( l, "\n" );
++        pcps4_flush( fd, l );
++    }
++}
++
++static int pcps4_can_sample;
++
++static int pcps4_dump_threads( const char *reason )
++{
++    static const struct { long sec, nsec; } tick = { 0, 1000000 };
++    struct pcps4_line l;
++    int fd, i, waited;
++
++    /* FreeBSD kernel flags for WRONLY | APPEND | CREAT. */
++    fd = pcps4_sys3( 5, (long)"/data/pcps4/hang.log", 0x209, 0666 );
++    if (fd == -1) return 0;
++    l.len = 0;
++    pcps4_put( &l, "==== " );
++    pcps4_put( &l, reason );
++    pcps4_put( &l, pcps4_raw_sig == 1 ? " (kernel sigaction)\n" : " (thread library sigaction)\n" );
++    pcps4_flush( fd, &l );
++    pcps4_dump_observations( fd, &l, pcps4_handshakes );
++    pcps4_dump_observations( fd, &l, pcps4_suspends );
++    pcps4_nregions = 0;
++    for (i = 0; i < PCPS4_MAX_THREADS; i++)
++    {
++        long tid = __atomic_load_n( &pcps4_threads[i].tid, __ATOMIC_ACQUIRE );
++        struct thread_data *data = pcps4_threads[i].data;
++        ULONG64 rip, rsp;
++
++        if (!pcps4_can_sample) break;
++        if (tid <= 0 || !data) continue;
++        __atomic_store_n( &pcps4_dump_done, 0, __ATOMIC_RELEASE );
++        if (pcps4_sys3( 433 /* SYS_thr_kill */, tid, SIGXCPU, 0 ) == -1) continue;  /* ended */
++        for (waited = 0; waited < 200 && !__atomic_load_n( &pcps4_dump_done, __ATOMIC_ACQUIRE ); waited++)
++            pcps4_sys3( 240 /* SYS_nanosleep */, (long)&tick, 0, 0 );
++        pcps4_put( &l, "-- thread " );
++        pcps4_hex( &l, data->tid );
++        pcps4_put( &l, " (kernel " );
++        pcps4_dec( &l, tid );
++        pcps4_put( &l, ")" );
++        if (!__atomic_load_n( &pcps4_dump_done, __ATOMIC_ACQUIRE ))
++        {
++            /* the signal is held back or the thread can't run: still say where its last call came from */
++            pcps4_put( &l, ": no answer" );
++            rip = rsp = 0;
++        }
++        else
++        {
++            rip = pcps4_dump_rip;
++            rsp = pcps4_dump_rsp;
++            pcps4_put( &l, ": rip " );
++            pcps4_hex( &l, rip );
++            pcps4_put( &l, " rsp " );
++            pcps4_hex( &l, rsp );
++        }
++        if (data->teb && get_syscall_frame( data ) && (!rsp || is_inside_syscall( data, rsp )))
++        {
++            struct syscall_frame *frame = get_syscall_frame( data );
++            pcps4_put( &l, rsp ? ", in a system call from PE rip " : ", last system call from PE rip " );
++            pcps4_hex( &l, frame->rip );
++            pcps4_put( &l, " rsp " );
++            pcps4_hex( &l, frame->rsp );
++            pcps4_put( &l, "\n" );
++            pcps4_flush( fd, &l );
++            if (rsp) pcps4_scan( fd, &l, "unix stack", rsp, (ULONG64)frame );
++            pcps4_scan( fd, &l, "pe stack", frame->rsp, (ULONG64)data->teb->Tib.StackBase );
++        }
++        else
++        {
++            pcps4_put( &l, "\n" );
++            pcps4_flush( fd, &l );
++            if (rsp) pcps4_scan( fd, &l, "stack", rsp, data->teb ? (ULONG64)data->teb->Tib.StackBase : 0 );
++        }
++    }
++    pcps4_dump_modules( fd, &l );
++    pcps4_sys3( 6 /* SYS_close */, fd, 0, 0 );
++    return 1;
++}
++
++extern uint64_t sceKernelGetProcessTime( void );
++extern int32_t sceKernelUsleep( uint32_t );
++
++static void *pcps4_hang_watch( void *arg )
++{
++    int seconds = (int)(long)arg;
++    uint64_t deadline = seconds > 0 ? sceKernelGetProcessTime() + (uint64_t)seconds * 1000000 : 0;
++    sigset_t set;
++
++    sigfillset( &set );
++    pthread_sigmask( SIG_BLOCK, &set, NULL );
++    for (;;)
++    {
++        sceKernelUsleep( 1000000 );
++        if (deadline && sceKernelGetProcessTime() >= deadline && pcps4_dump_threads( "timed" ))
++            deadline = 0;
++        if (pcps4_sys3( 10 /* SYS_unlink */, (long)"/data/pcps4_hangdump", 0, 0 ) != -1)
++            pcps4_dump_threads( "requested" );
++    }
++    return NULL;
++}
++
++static void pcps4_hang_init( TEB *teb )
++{
++    struct sigaction sa;
++    pthread_t thread;
++
++    pcps4_main_teb = teb;
++    memset( &sa, 0, sizeof(sa) );
++    sa.sa_sigaction = pcps4_dump_handler;
++    sa.sa_flags = SA_SIGINFO | SA_RESTART | SA_ONSTACK;
++    sigfillset( &sa.sa_mask );
++    pcps4_can_sample = pcps4_sys3( 416 /* SYS_sigaction */, SIGXCPU, (long)&sa, 0 ) != -1 ||
++                       sigaction( SIGXCPU, &sa, NULL ) != -1;
++    pcps4_hang_register( get_thread_data() );
++    if (!pthread_create( &thread, NULL, pcps4_hang_watch, (void *)(long)pcps4_env_int( "PCPS4_HANG_DUMP", 0 ) ))
++        pthread_detach( thread );
++}
++#endif /* __ORBIS__ */
 diff --git a/dlls/ntdll/unix/signal_x86_64.c.bak b/dlls/ntdll/unix/signal_x86_64.c.bak
 new file mode 100644
 index 0000000..39868df
@@ -8315,7 +8842,7 @@ index 0127a05..a8f8a12 100644
 +#endif
 +}
 diff --git a/dlls/ntdll/unix/system.c b/dlls/ntdll/unix/system.c
-index 5e30f0e..138fcba 100644
+index 5e30f0e..441ac17 100644
 --- a/dlls/ntdll/unix/system.c
 +++ b/dlls/ntdll/unix/system.c
 @@ -1612,10 +1612,39 @@ end:
@@ -8360,7 +8887,51 @@ index 5e30f0e..138fcba 100644
  }
  #endif
  
-@@ -1735,6 +1764,28 @@ static void get_random( void *buf, ULONG len )
+@@ -1714,8 +1743,34 @@ static void read_dev_urandom( void *buf, ULONG len )
+     else WARN( "can't open /dev/urandom\n" );
+ }
+ 
++#ifdef __ORBIS__
++/* The console C library's getrandom() is a stub that fails with FreeBSD's ENOSYS (78), which is not the
++ * header's Linux ENOSYS (38) - so the check below never matched, /dev/urandom was never read and the buffer
++ * came back unwritten: every key Windows programs made (TLS, GUIDs, Java and .NET SecureRandom) used
++ * whatever was in memory. Read the kernel's generator directly. Named through an asm label because
++ * orbis-compat's <sys/sysctl.h> replaces sysctlbyname with an inline stub that always fails. */
++/* ps4-local-src/ps4_entropy.c: kern.arandom through libkernel, compiled WITHOUT <sys/sysctl.h> - this file
++ * includes it, and its inline sysctlbyname stub would capture the call and always fail. */
++extern int ps4_getentropy( void *buffer, size_t length );
++static BOOL ps4_arandom( void *buf, ULONG len )
++{
++    unsigned char *p = buf;
++    while (len)
++    {
++        ULONG n = len > 256 ? 256 : len;
++        if (ps4_getentropy( p, n )) return FALSE;
++        p += n;
++        len -= n;
++    }
++    return TRUE;
++}
++#endif
++
+ static void get_random( void *buf, ULONG len )
+ {
++#ifdef __ORBIS__
++    if (ps4_arandom( buf, len )) return;
++#endif
+ #ifdef HAVE_GETRANDOM
+     int ret;
+     do
+@@ -1724,7 +1779,7 @@ static void get_random( void *buf, ULONG len )
+     }
+     while (ret == -1 && errno == EINTR);
+ 
+-    if (ret == -1 && errno == ENOSYS) read_dev_urandom( buf, len );
++    if (ret == -1 && (errno == ENOSYS || errno == 78 /* FreeBSD ENOSYS */)) read_dev_urandom( buf, len );
+ #else
+     read_dev_urandom( buf, len );
+ #endif
+@@ -1735,6 +1790,28 @@ static void get_random( void *buf, ULONG len )
   *
   * Init a couple of places with CPU related information.
   */
@@ -8389,7 +8960,7 @@ index 5e30f0e..138fcba 100644
  void init_cpu_info(void)
  {
      long num;
-@@ -1746,6 +1797,9 @@ void init_cpu_info(void)
+@@ -1746,6 +1823,9 @@ void init_cpu_info(void)
          num = 1;
          WARN("Failed to detect the number of processors.\n");
      }
@@ -8399,7 +8970,7 @@ index 5e30f0e..138fcba 100644
  #elif defined(CTL_HW) && defined(HW_NCPU)
      int mib[2];
      size_t len = sizeof(num);
-@@ -2558,6 +2612,11 @@ static NTSTATUS get_firmware_info( SYSTEM_FIRMWARE_TABLE_INFORMATION *sfti, ULON
+@@ -2558,6 +2638,11 @@ static NTSTATUS get_firmware_info( SYSTEM_FIRMWARE_TABLE_INFORMATION *sfti, ULON
      }
  }
  
@@ -8411,7 +8982,7 @@ index 5e30f0e..138fcba 100644
  static void get_performance_info( SYSTEM_PERFORMANCE_INFORMATION *info )
  {
      unsigned long long totalram = 0, freeram = 0, totalswap = 0, freeswap = 0;
-@@ -2719,6 +2778,23 @@ static void get_performance_info( SYSTEM_PERFORMANCE_INFORMATION *info )
+@@ -2719,6 +2804,23 @@ static void get_performance_info( SYSTEM_PERFORMANCE_INFORMATION *info )
      }
  #endif
  
@@ -8435,7 +9006,7 @@ index 5e30f0e..138fcba 100644
      /* Titan Quest refuses to run if TotalPageFile <= TotalPhys */
      if (!totalswap) totalswap = page_size;
  
-@@ -3354,6 +3430,30 @@ C_ASSERT( sizeof(struct process_info) <= sizeof(SYSTEM_PROCESS_INFORMATION) );
+@@ -3354,6 +3456,30 @@ C_ASSERT( sizeof(struct process_info) <= sizeof(SYSTEM_PROCESS_INFORMATION) );
      return ret;
  }
  
@@ -8466,7 +9037,7 @@ index 5e30f0e..138fcba 100644
  /******************************************************************************
   *              NtQuerySystemInformation  (NTDLL.@)
   */
-@@ -3375,6 +3475,9 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
+@@ -3375,6 +3501,9 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
          SYSTEM_BASIC_INFORMATION sbi;
  
          virtual_get_system_info( &sbi, FALSE );
@@ -8476,7 +9047,7 @@ index 5e30f0e..138fcba 100644
          len = sizeof(sbi);
          if (size == len)
          {
-@@ -3514,6 +3617,31 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
+@@ -3514,6 +3643,31 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
                  fclose(cpuinfo);
              }
          }
@@ -8508,7 +9079,7 @@ index 5e30f0e..138fcba 100644
  #elif defined(__FreeBSD__) || defined (__FreeBSD_kernel__)
          {
              static int clockrate_name[] = { CTL_KERN, KERN_CLOCKRATE };
-@@ -3807,6 +3935,9 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
+@@ -3807,6 +3961,9 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
          SYSTEM_BASIC_INFORMATION sbi;
  
          virtual_get_system_info( &sbi, is_wow64() );
@@ -50582,7 +51153,7 @@ index 81b45da..25f8aab 100644
  {
      struct async *async;
 diff --git a/server/change.c b/server/change.c
-index 37fa946..fdc2188 100644
+index 37fa946..1ec58ec 100644
 --- a/server/change.c
 +++ b/server/change.c
 @@ -71,6 +71,10 @@ static void free_inode( struct inode *inode );
@@ -50612,7 +51183,46 @@ index 37fa946..fdc2188 100644
  static struct fd *dir_get_fd( struct object *obj );
  static struct security_descriptor *dir_get_sd( struct object *obj );
  static int dir_set_sd( struct object *obj, const struct security_descriptor *sd,
-@@ -418,6 +429,10 @@ static void dir_destroy( struct object *obj )
+@@ -244,6 +255,14 @@ static void dnotify_adjust_changes( struct dir *dir )
+ #endif
+ }
+ 
++/* On Orbis our libc forwards how directly to libkernel's pthread_sigmask.
++ * Use the native mask operations even when the build headers use Linux values. */
++#ifdef __ORBIS__
++enum { change_sig_block = 1, change_sig_unblock = 2 };
++#else
++enum { change_sig_block = SIG_BLOCK, change_sig_unblock = SIG_UNBLOCK };
++#endif
++
+ /* insert change in the global list */
+ static inline void insert_change( struct dir *dir )
+ {
+@@ -251,9 +270,9 @@ static inline void insert_change( struct dir *dir )
+ 
+     sigemptyset( &sigset );
+     sigaddset( &sigset, SIGIO );
+-    sigprocmask( SIG_BLOCK, &sigset, NULL );
++    sigprocmask( change_sig_block, &sigset, NULL );
+     list_add_head( &change_list, &dir->entry );
+-    sigprocmask( SIG_UNBLOCK, &sigset, NULL );
++    sigprocmask( change_sig_unblock, &sigset, NULL );
+ }
+ 
+ /* remove change from the global list */
+@@ -263,9 +282,9 @@ static inline void remove_change( struct dir *dir )
+ 
+     sigemptyset( &sigset );
+     sigaddset( &sigset, SIGIO );
+-    sigprocmask( SIG_BLOCK, &sigset, NULL );
++    sigprocmask( change_sig_block, &sigset, NULL );
+     list_remove( &dir->entry );
+-    sigprocmask( SIG_UNBLOCK, &sigset, NULL );
++    sigprocmask( change_sig_unblock, &sigset, NULL );
+ }
+ 
+ static void dir_dump( struct object *obj, int verbose )
+@@ -418,6 +437,10 @@ static void dir_destroy( struct object *obj )
      if (dir->filter)
          remove_change( dir );
  
@@ -50623,7 +51233,7 @@ index 37fa946..fdc2188 100644
      if (dir->inode)
      {
          list_remove( &dir->in_entry );
-@@ -1103,10 +1118,273 @@ static int init_inotify( void )
+@@ -1103,10 +1126,273 @@ static int init_inotify( void )
      return 0;
  }
  
@@ -50897,7 +51507,7 @@ index 37fa946..fdc2188 100644
  
  static void free_inode( struct inode *inode )
  {
-@@ -1138,6 +1416,9 @@ struct object *create_dir_obj( struct fd *fd, unsigned int access, mode_t mode )
+@@ -1138,6 +1424,9 @@ struct object *create_dir_obj( struct fd *fd, unsigned int access, mode_t mode )
      dir->mode = mode;
      dir->uid  = ~(uid_t)0;
      dir->client_process = NULL;
@@ -52067,13 +52677,15 @@ index 1933b2f..2a3e31f 100644
          src_access = entry->access;
      else  /* pseudo-handle, give it full access */
 diff --git a/server/main.c b/server/main.c
-index 46419a0..eef5b07 100644
+index 46419a0..520b31c 100644
 --- a/server/main.c
 +++ b/server/main.c
-@@ -20,12 +20,28 @@
+@@ -19,6 +19,22 @@
+  */
  
  #include "config.h"
- 
++#include "pcps4_srv_diag.h"
++
 +/* PS4 bring-up probes write to /data/pcps4_srv.log.  They sit in hot paths
 + * (every path lookup and descriptor transfer), so they are off unless the
 + * file /data/pcps4_probes exists. */
@@ -52088,10 +52700,10 @@ index 46419a0..eef5b07 100644
 +    return on ? fopen( "/data/pcps4_srv.log", "a" ) : NULL;
 +}
 +#endif
-+
+ 
  #include <assert.h>
  #include <ctype.h>
- #include <fcntl.h>
+@@ -26,6 +42,7 @@
  #include <signal.h>
  #include <stdio.h>
  #include <stdlib.h>
@@ -52099,7 +52711,7 @@ index 46419a0..eef5b07 100644
  #include <sys/time.h>
  #include <unistd.h>
  #ifdef HAVE_SYS_RESOURCE_H
-@@ -241,6 +257,67 @@ static void init_limits(void)
+@@ -241,6 +258,80 @@ static void init_limits(void)
  #endif
  }
  
@@ -52126,6 +52738,7 @@ index 46419a0..eef5b07 100644
 +{
 +    pcps4_raise_self( 600 );
 +    { FILE*_lf=ps4_probe_open(); if(_lf){fprintf(_lf,"srvthread: entering main_loop\n");fclose(_lf);} }
++    WS_DIAG( 1, "ws startup main_loop\n" );
 +    main_loop();
 +    return NULL;
 +}
@@ -52136,18 +52749,30 @@ index 46419a0..eef5b07 100644
 +    pthread_attr_t attr;
 +    pthread_t thread;
 +
++    {
++        FILE *file = fopen( "/data/pcps4_ws_diag.log", "w" );
++        if (file) fclose( file );
++    }
++    WS_DIAG( 1, "ws startup sock_init\n" );
 +    sock_init();
++    WS_DIAG( 1, "ws startup open_master_socket\n" );
 +    open_master_socket();
++    WS_DIAG( 1, "ws startup set_current_time\n" );
 +    set_current_time();
++    WS_DIAG( 1, "ws startup init_memory\n" );
 +    init_memory();
++    WS_DIAG( 1, "ws startup init_directories\n" );
 +    init_directories( load_intl_file() );
++    WS_DIAG( 1, "ws startup init_threading\n" );
 +    init_threading();
++    WS_DIAG( 1, "ws startup init_registry\n" );
 +    init_registry();
 +
++    WS_DIAG( 1, "ws startup pthread_attr_init\n" );
 +    pthread_attr_init( &attr );
 +    pthread_attr_setstacksize( &attr, 1024 * 1024 );
 +    pthread_attr_setdetachstate( &attr, PTHREAD_CREATE_DETACHED );
-+    { int pcr=pthread_create( &thread, &attr, inprocess_server_thread, NULL ); fprintf(stderr,"pcps4: server pthread_create=%d\n",pcr); FILE*_lf=ps4_probe_open(); if(_lf){fprintf(_lf,"pthread_create=%d\n",pcr);fclose(_lf);} inprocess_started = !pcr; }
++    { int pcr=pthread_create( &thread, &attr, inprocess_server_thread, NULL ); WS_DIAG( 1, "ws startup pthread_create=%d\n", pcr ); fprintf(stderr,"pcps4: server pthread_create=%d\n",pcr); FILE*_lf=ps4_probe_open(); if(_lf){fprintf(_lf,"pthread_create=%d\n",pcr);fclose(_lf);} inprocess_started = !pcr; }
 +    pthread_attr_destroy( &attr );
 +}
 +
@@ -54017,13 +54642,15 @@ index c8f7764..bdcbb2c 100644
          reply->current = sync->count;
          reply->max = sync->max;
 diff --git a/server/thread.c b/server/thread.c
-index bdf48c4..dc84b6a 100644
+index bdf48c4..4f4ed8d 100644
 --- a/server/thread.c
 +++ b/server/thread.c
-@@ -20,12 +20,34 @@
+@@ -19,6 +19,22 @@
+  */
  
  #include "config.h"
- 
++#include "pcps4_srv_diag.h"
++
 +/* PS4 bring-up probes write to /data/pcps4_srv.log.  They sit in hot paths
 + * (every path lookup and descriptor transfer), so they are off unless the
 + * file /data/pcps4_probes exists. */
@@ -54038,10 +54665,10 @@ index bdf48c4..dc84b6a 100644
 +    return on ? fopen( "/data/pcps4_srv.log", "a" ) : NULL;
 +}
 +#endif
-+
+ 
  #include <assert.h>
  #include <errno.h>
- #include <fcntl.h>
+@@ -26,6 +42,13 @@
  #include <signal.h>
  #include <stdarg.h>
  #include <stdio.h>
@@ -54055,7 +54682,7 @@ index bdf48c4..dc84b6a 100644
  #include <stdlib.h>
  #include <string.h>
  #include <sys/types.h>
-@@ -74,6 +96,7 @@ struct thread_wait
+@@ -74,6 +97,7 @@ struct thread_wait
      client_ptr_t            key;        /* wait key for keyed events */
      client_ptr_t            cookie;     /* magic cookie to return to client */
      abstime_t               when;
@@ -54063,7 +54690,7 @@ index bdf48c4..dc84b6a 100644
      struct timeout_user    *user;
      int                     status;     /* status to return (unless STATUS_PENDING) */
      struct wait_queue_entry queues[1];
-@@ -329,6 +352,78 @@ static void apply_thread_priority( struct thread *thread )
+@@ -329,6 +353,78 @@ static void apply_thread_priority( struct thread *thread )
      mach_port_deallocate( mach_task_self(), thread_port );
  }
  
@@ -54142,7 +54769,7 @@ index bdf48c4..dc84b6a 100644
  #else
  
  void init_threading(void)
-@@ -365,6 +460,9 @@ static inline void init_thread_structure( struct thread *thread )
+@@ -365,6 +461,9 @@ static inline void init_thread_structure( struct thread *thread )
      thread->reply_fd        = NULL;
      thread->wait_fd         = NULL;
      thread->state           = RUNNING;
@@ -54152,7 +54779,7 @@ index bdf48c4..dc84b6a 100644
      thread->exit_code       = 0;
      thread->priority        = 0;
      thread->base_priority   = 0;
-@@ -399,6 +497,16 @@ static inline int is_thread_suspended( struct thread *thread )
+@@ -399,6 +498,16 @@ static inline int is_thread_suspended( struct thread *thread )
      return !thread->bypass_proc_suspend && thread->process->suspend;
  }
  
@@ -54169,7 +54796,7 @@ index bdf48c4..dc84b6a 100644
  /* check if address looks valid for a client-side data structure (TEB etc.) */
  static inline int is_valid_address( client_ptr_t addr )
  {
-@@ -471,7 +579,10 @@ struct thread *create_thread( int fd, struct process *process, const struct secu
+@@ -471,7 +580,10 @@ struct thread *create_thread( int fd, struct process *process, const struct secu
              close( request_pipe[1] );
              return NULL;
          }
@@ -54181,7 +54808,7 @@ index bdf48c4..dc84b6a 100644
          fd = request_pipe[0];
      }
  
-@@ -1054,6 +1165,112 @@ static unsigned int end_wait( struct thread *thread, unsigned int status )
+@@ -1054,6 +1166,112 @@ static unsigned int end_wait( struct thread *thread, unsigned int status )
  }
  
  /* build the thread wait structure */
@@ -54294,7 +54921,7 @@ index bdf48c4..dc84b6a 100644
  static int wait_on( const union select_op *select_op, unsigned int count, struct object *objects[],
                      int flags, abstime_t when )
  {
-@@ -1070,8 +1287,10 @@ static int wait_on( const union select_op *select_op, unsigned int count, struct
+@@ -1070,8 +1288,10 @@ static int wait_on( const union select_op *select_op, unsigned int count, struct
      wait->cookie  = 0;
      wait->user    = NULL;
      wait->when = when;
@@ -54305,7 +54932,7 @@ index bdf48c4..dc84b6a 100644
  
      for (i = 0, entry = wait->queues; i < count; i++, entry++)
      {
-@@ -1546,21 +1765,30 @@ int thread_add_inflight_fd( struct thread *thread, int client, int server )
+@@ -1546,21 +1766,30 @@ int thread_add_inflight_fd( struct thread *thread, int client, int server )
  int thread_get_inflight_fd( struct thread *thread, int client )
  {
      int i, ret;
@@ -54336,7 +54963,7 @@ index bdf48c4..dc84b6a 100644
      return -1;
  }
  
-@@ -1642,12 +1870,25 @@ DECL_HANDLER(new_thread)
+@@ -1642,12 +1871,25 @@ DECL_HANDLER(new_thread)
              goto done;
          }
      }
@@ -54362,7 +54989,7 @@ index bdf48c4..dc84b6a 100644
      else if (!(get_handle_access( current->process, req->process ) & PROCESS_CREATE_THREAD))
      {
          close( request_fd );
-@@ -1662,7 +1903,11 @@ DECL_HANDLER(new_thread)
+@@ -1662,7 +1904,11 @@ DECL_HANDLER(new_thread)
      }
      if (params.root) release_object( params.root );  /* unused */
  
@@ -54375,7 +55002,7 @@ index bdf48c4..dc84b6a 100644
      {
          thread->system_regs = current->system_regs;
          if (req->flags & THREAD_CREATE_FLAGS_CREATE_SUSPENDED) thread->suspend++;
-@@ -1685,43 +1930,81 @@ done:
+@@ -1685,43 +1931,81 @@ done:
  
  static int init_thread( struct thread *thread, int reply_fd, int wait_fd )
  {
@@ -54459,7 +55086,7 @@ index bdf48c4..dc84b6a 100644
  
      current->unix_pid = process->unix_pid = req->unix_pid;
      current->unix_tid = req->unix_tid;
-@@ -1730,24 +2013,34 @@ DECL_HANDLER(init_first_thread)
+@@ -1730,24 +2014,34 @@ DECL_HANDLER(init_first_thread)
          process->affinity = current->affinity = get_thread_affinity( current );
      else
          set_thread_affinity( current, current->affinity );
@@ -54495,7 +55122,15 @@ index bdf48c4..dc84b6a 100644
  }
  
  /* initialize a new thread */
-@@ -1986,6 +2279,16 @@ DECL_HANDLER(select)
+@@ -1957,6 +2251,7 @@ DECL_HANDLER(select)
+         ctx->status = STATUS_SUCCESS;
+         ctx->cooperative = 0;
+         current->suspend_cookie = req->cookie;
++        WS_DIAG( 32, "ws context handshake target=%04x context=%p\n", current->id, (void *)ctx );
+         signal_sync( ctx->sync );
+     }
+ 
+@@ -1986,6 +2281,16 @@ DECL_HANDLER(select)
          release_object( apc );
      }
  
@@ -54512,6 +55147,33 @@ index bdf48c4..dc84b6a 100644
      reply->signaled = select_on( &select_op, op_size, req->cookie, req->flags, req->timeout );
  
      if (get_error() == STATUS_USER_APC && get_reply_max_size() >= sizeof(union apc_call))
+@@ -2179,6 +2484,8 @@ DECL_HANDLER(get_thread_context)
+     struct thread *thread;
+     struct context_data *context;
+ 
++    WS_DIAG( 32, "ws get_thread_context caller=%04x handle=%x retry=%x flags=%x\n",
++             current->id, req->handle, req->context, req->flags );
+     if (get_reply_max_size() < 2 * sizeof(struct context_data))
+     {
+         set_error( STATUS_INVALID_PARAMETER );
+@@ -2204,6 +2511,8 @@ DECL_HANDLER(get_thread_context)
+         else
+         {
+             reply->self = (thread == current);
++            WS_DIAG( 32, "ws context target caller=%04x target=%04x unix_tid=%d\n",
++                     current->id, thread->id, thread->unix_tid );
+             if (thread != current) stop_thread( thread );
+             if (thread->context)
+             {
+@@ -2259,6 +2568,8 @@ DECL_HANDLER(get_thread_context)
+             reply->handle = alloc_handle( current->process, thread_context, SYNCHRONIZE, 0 );
+     }
+ 
++    WS_DIAG( 32, "ws context reply caller=%04x context=%p status=%08x handle=%x\n",
++             current->id, (void *)thread_context, get_error(), reply->handle );
+     release_object( thread_context );
+ }
+ 
 diff --git a/server/thread.h b/server/thread.h
 index 96c643c..4904aac 100644
 --- a/server/thread.h
@@ -54567,3 +55229,526 @@ index bb39b55..0be0e94 100644
          if ((fd = open_fd( NULL, path, nt_name, O_RDONLY, &mode, FILE_READ_DATA,
                             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                             FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT ))) break;
+diff --git a/dlls/dnsapi/libresolv.c b/dlls/dnsapi/libresolv.c
+index 53c7736..d3171fe 100644
+--- a/dlls/dnsapi/libresolv.c
++++ b/dlls/dnsapi/libresolv.c
+@@ -24,7 +24,11 @@
+ 
+ #include "config.h"
+ 
+-#ifdef HAVE_RESOLV
++#ifdef __ORBIS__
++/* PCPS4: no libresolv on the PS4; dnsapi's Unix half from the console's network settings
++ * (ps4.c, ported from WinePS4) */
++#include "ps4.c"
++#elif defined(HAVE_RESOLV)
+ #include <stdarg.h>
+ #include <string.h>
+ #include <stdio.h>
+diff --git a/dlls/nsiproxy.sys/ip.c b/dlls/nsiproxy.sys/ip.c
+index 6c4d580..d978e66 100644
+--- a/dlls/nsiproxy.sys/ip.c
++++ b/dlls/nsiproxy.sys/ip.c
+@@ -23,6 +23,12 @@
+ #endif
+ 
+ #include "config.h"
++
++#ifdef __ORBIS__
++/* PCPS4: orbis-compat's <sys/sysctl.h> is a stub without FreeBSD's network MIB names or route
++ * structures; the IPv4 route table comes from ps4_ifaddrs.c (see ipv4_forward_enumerate_all) */
++#undef HAVE_SYS_SYSCTL_H
++#endif
+ #include <stdarg.h>
+ #include <sys/types.h>
+ #include <sys/socket.h>
+@@ -164,6 +170,17 @@ struct ip6stat {
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(nsi);
+ 
++#ifdef __ORBIS__
++/* WinePS4: the routes from FreeBSD's routing sysctl, or from the interfaces and the PS4's gateway
++ * (port/ps4_ifaddrs.c) */
++struct ps4_route
++{
++    unsigned int prefix, next_hop;  /* network byte order */
++    unsigned int prefix_len, if_index, gateway;
++};
++extern int ps4_ipv4_routes( struct ps4_route *routes, int max );
++#endif
++
+ static inline UINT nsi_popcount( UINT m )
+ {
+ #ifdef HAVE___BUILTIN_POPCOUNT
+@@ -1583,7 +1600,7 @@ static NTSTATUS ipv4_forward_enumerate_all( void *key_data, UINT key_size, void
+         }
+         fclose( fp );
+     }
+-#elif defined(HAVE_SYS_SYSCTL_H) && defined(NET_RT_DUMP)
++#elif defined(HAVE_SYS_SYSCTL_H) && defined(NET_RT_DUMP) && !defined(__ORBIS__)
+     {
+         int mib[6] = { CTL_NET, PF_ROUTE, 0, PF_INET, NET_RT_DUMP, 0 };
+         size_t needed;
+@@ -1697,6 +1714,32 @@ static NTSTATUS ipv4_forward_enumerate_all( void *key_data, UINT key_size, void
+         }
+         free( buf );
+     }
++#elif defined(__ORBIS__)
++    {
++        struct ps4_route routes[64];
++        int i, n = ps4_ipv4_routes( routes, ARRAY_SIZE(routes) );
++
++        for (i = 0; i < n; i++)
++        {
++            entry.if_index = routes[i].if_index;
++            if (!convert_index_to_luid( entry.if_index, &entry.luid )) continue;
++            entry.prefix.s_addr = routes[i].prefix;
++            entry.prefix_len = routes[i].prefix_len;
++            entry.next_hop.s_addr = routes[i].next_hop;
++            entry.metric = 0;
++            entry.protocol = routes[i].gateway ? MIB_IPPROTO_NETMGMT : MIB_IPPROTO_LOCAL;
++            entry.loopback = entry.protocol == MIB_IPPROTO_LOCAL && entry.prefix_len == 32;
++            if (num < *count)
++            {
++                ipv4_forward_fill_entry( &entry, key_data, rw_data, dynamic_data, static_data );
++                key_data = (BYTE *)key_data + key_size;
++                rw_data = (BYTE *)rw_data + rw_size;
++                dynamic_data = (BYTE *)dynamic_data + dynamic_size;
++                static_data = (BYTE *)static_data + static_size;
++            }
++            num++;
++        }
++    }
+ #else
+     FIXME( "not implemented\n" );
+     return STATUS_NOT_IMPLEMENTED;
+diff --git a/dlls/nsiproxy.sys/ndis.c b/dlls/nsiproxy.sys/ndis.c
+index 5dde172..e740929 100644
+--- a/dlls/nsiproxy.sys/ndis.c
++++ b/dlls/nsiproxy.sys/ndis.c
+@@ -88,6 +88,19 @@
+ 
+ #include "unix_private.h"
+ 
++#ifdef __ORBIS__
++/* WinePS4: the PS4's kernel is FreeBSD's: its interface ioctls by its numbers (the C library's
++ * headers have Linux's; its struct ifreq has the flags and the MTU where FreeBSD's has them), made
++ * with the raw system call, and the link level from SIOCGIFCONF (port/ps4_ifaddrs.c) */
++#undef SIOCGIFFLAGS
++#define SIOCGIFFLAGS 0xc0206911ul
++#undef SIOCGIFMTU
++#define SIOCGIFMTU 0xc0206933ul
++extern int ps4_ioctl( int fd, unsigned long request, void *arg );
++extern int ps4_if_link_info( const char *name, unsigned char *type, unsigned char *addr, unsigned int *len );
++#define ioctl( fd, request, arg ) ps4_ioctl( fd, request, arg )
++#endif
++
+ WINE_DEFAULT_DEBUG_CHANNEL(nsi);
+ 
+ struct if_entry
+@@ -125,7 +138,32 @@ static struct if_entry *find_entry_from_luid( const NET_LUID *luid )
+     return NULL;
+ }
+ 
+-#if defined (SIOCGIFHWADDR) && defined (HAVE_STRUCT_IFREQ_IFR_HWADDR)
++#ifdef __ORBIS__
++
++static NTSTATUS if_get_physical( const char *name, UINT *type, IF_PHYSICAL_ADDRESS *phys_addr )
++{
++    unsigned char sdl_type = 0, addr[16];
++    unsigned int len = 0;
++
++    *type = MIB_IF_TYPE_OTHER;
++    memset( phys_addr, 0, sizeof(*phys_addr) );
++    if (!ps4_if_link_info( name, &sdl_type, addr, &len )) return STATUS_DEVICE_DATA_ERROR;
++    switch (sdl_type)  /* FreeBSD's IFT_* */
++    {
++    case 0x06: *type = MIB_IF_TYPE_ETHERNET; break;
++    case 0x17: *type = MIB_IF_TYPE_PPP; break;
++    case 0x18: *type = MIB_IF_TYPE_LOOPBACK; break;
++    case 0x47: *type = IF_TYPE_IEEE80211; break;
++    }
++    if (len <= sizeof(phys_addr->Address))
++    {
++        phys_addr->Length = len;
++        memcpy( phys_addr->Address, addr, len );
++    }
++    return STATUS_SUCCESS;
++}
++
++#elif defined (SIOCGIFHWADDR) && defined (HAVE_STRUCT_IFREQ_IFR_HWADDR)
+ static NTSTATUS if_get_physical( const char *name, UINT *type, IF_PHYSICAL_ADDRESS *phys_addr )
+ {
+     int fd, size, i;
+@@ -382,6 +420,9 @@ static void ifinfo_fill_dynamic( struct if_entry *entry, struct nsi_ndis_ifinfo_
+ 
+     if (!ioctl( fd, SIOCGIFMTU, &req )) data->mtu = req.ifr_mtu;
+     else data->mtu = 0;
++#ifdef __ORBIS__
++    data->rcv_speed = data->xmit_speed = 1000000000;  /* (no counters here; programs look for 1 Mbit/s at least) */
++#endif
+ 
+     close( fd );
+ 
+diff --git a/server/ptrace.c b/server/ptrace.c
+index 2e6d93b..523c1fc 100644
+--- a/server/ptrace.c
++++ b/server/ptrace.c
+@@ -19,6 +19,7 @@
+  */
+ 
+ #include "config.h"
++#include "pcps4_srv_diag.h"
+ 
+ #include <assert.h>
+ #include <errno.h>
+@@ -224,6 +225,25 @@ static inline int tkill( int tgid, int pid, int sig )
+     int ret = syscall( __NR_tgkill, tgid, pid, sig );
+     if (ret < 0 && errno == ENOSYS) ret = syscall( __NR_tkill, pid, sig );
+     return ret;
++#elif defined(__ORBIS__)
++    /* PS4: one thread, by its kernel id (thr_self), with the kernel's thr_kill. Without this tkill said
++     * ENOSYS and send_thread_signal fell back to kill() of the process, which the kernel hands to any
++     * thread: SuspendThread's SIGUSR1 reached the wrong one and GetThreadContext waited forever (Unity's
++     * and .NET's garbage collectors froze at their first collection). */
++    long ret;
++    unsigned char failed;
++
++    (void)tgid;
++    __asm__ volatile( "syscall\n\tsetc %1"
++                      : "=a" (ret), "=qm" (failed)
++                      : "a" (433L /* SYS_thr_kill */), "D" ((long)pid), "S" ((long)sig)
++                      : "rcx", "r8", "r9", "r10", "r11", "memory", "cc" );
++    if (failed)
++    {
++        errno = (int)ret;
++        return -1;
++    }
++    return 0;
+ #elif (defined(__FreeBSD__) || defined (__FreeBSD_kernel__)) && defined(HAVE_THR_KILL2)
+     return thr_kill2( tgid, pid, sig );
+ #else
+@@ -257,8 +277,25 @@ int send_thread_signal( struct thread *thread, int sig )
+     if (thread->unix_tid != -1)
+     {
+         ret = tkill( thread->unix_pid, thread->unix_tid, sig );
++#ifdef __ORBIS__
++        /* A process-directed signal may suspend an unrelated thread. */
++        if (ret < 0)
++            WS_DIAG( 16, "ws signal failed tid=%04x unix_tid=%d sig=%d errno=%d\n",
++                     thread->id, thread->unix_tid, sig, errno );
++        else
++            WS_DIAG( 32, "ws signal sent tid=%04x unix_tid=%d sig=%d\n",
++                     thread->id, thread->unix_tid, sig );
++#else
+         if (ret == -1 && errno == ENOSYS) ret = kill( thread->unix_pid, sig );
++#endif
+     }
++#ifdef __ORBIS__
++    else
++    {
++        WS_DIAG( 8, "ws signal missing_tid tid=%04x sig=%d\n", thread->id, sig );
++        return 0;
++    }
++#endif
+     if (ret == -1 && errno == ESRCH) /* thread got killed */
+     {
+         thread->unix_pid = -1;
+diff --git a/server/pcps4_srv_diag.h b/server/pcps4_srv_diag.h
+new file mode 100644
+index 0000000..869941f
+--- /dev/null
++++ b/server/pcps4_srv_diag.h
+@@ -0,0 +1,21 @@
++/* Startup runs once before request dispatch. Other sites run on the server thread. */
++#ifdef __ORBIS__
++#include <stdio.h>
++#include <errno.h>
++#define WS_DIAG(limit, ...) do {                            \
++    static unsigned int count;                              \
++    if (count < (limit)) {                                  \
++        int saved_errno = errno;                            \
++        FILE *file;                                         \
++        ++count;                                            \
++        file = fopen( "/data/pcps4_ws_diag.log", "a" );      \
++        if (file) {                                         \
++            fprintf( file, __VA_ARGS__ );                   \
++            fclose( file );                                 \
++        }                                                   \
++        errno = saved_errno;                                \
++    }                                                       \
++} while (0)
++#else
++#define WS_DIAG(limit, ...) do {} while (0)
++#endif
+diff --git a/dlls/dnsapi/ps4.c b/dlls/dnsapi/ps4.c
+new file mode 100644
+index 0000000..377e58c
+--- /dev/null
++++ b/dlls/dnsapi/ps4.c
+@@ -0,0 +1,264 @@
++/*
++ * Copyright 2026 WinePS4
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ */
++
++/*
++ * dnsapi's Unix half on the PS4 (WinePS4), in place of libresolv.c: the PS4 has no libresolv and
++ * no resolv.conf. The DNS servers are the PS4's network settings (port/ps4_ifaddrs.c); without
++ * them DnsQueryConfig failed, and with it GetAdaptersAddresses as a whole (iphlpapi's
++ * dns_info_alloc). Queries for addresses (A) go through getaddrinfo, which is the PS4's resolver
++ * (ps4-kit), and come back as the DNS message dnsapi reads; other types are not found.
++ */
++
++#if 0
++#pragma makedep unix
++#endif
++
++#include "config.h"
++
++#include <stdarg.h>
++#include <string.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <sys/types.h>
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <netdb.h>
++
++#include "ntstatus.h"
++#define WIN32_NO_STATUS
++#include "windef.h"
++#include "winternl.h"
++#include "winbase.h"
++#include "windns.h"
++#define USE_WS_PREFIX
++#include "ws2def.h"
++#include "ws2ipdef.h"
++
++#include "wine/debug.h"
++#include "dnsapi.h"
++
++WINE_DEFAULT_DEBUG_CHANNEL(dnsapi);
++
++extern int ps4_dns_servers( unsigned int *servers, int max );  /* port/ps4_ifaddrs.c */
++
++static unsigned int set_servers[4], set_count;  /* DnsQuery's own servers (only kept) */
++
++static NTSTATUS resolv_get_searchlist( void *args )
++{
++    const struct get_searchlist_params *params = args;
++    const DWORD needed = sizeof(WCHAR);  /* (none: the terminator alone) */
++
++    if (!params->list || *params->len < needed)
++    {
++        *params->len = needed;
++        return !params->list ? ERROR_SUCCESS : ERROR_MORE_DATA;
++    }
++    *params->len = needed;
++    params->list[0] = 0;
++    return ERROR_SUCCESS;
++}
++
++static NTSTATUS resolv_get_serverlist( void *args )
++{
++    const struct get_serverlist_params *params = args;
++    DNS_ADDR_ARRAY *addrs = params->addrs;
++    unsigned int servers[4];
++    DWORD needed, i;
++    int count;
++
++    if (params->family == WS_AF_INET6) return DNS_ERROR_NO_DNS_SERVERS;  /* (IPv4 ones only) */
++    if (!(count = ps4_dns_servers( servers, ARRAY_SIZE(servers) ))) return DNS_ERROR_NO_DNS_SERVERS;
++
++    needed = FIELD_OFFSET(DNS_ADDR_ARRAY, AddrArray[count]);
++    if (!addrs || *params->len < needed)
++    {
++        *params->len = needed;
++        return !addrs ? ERROR_SUCCESS : ERROR_MORE_DATA;
++    }
++    *params->len = needed;
++    memset( addrs, 0, needed );
++    addrs->AddrCount = addrs->MaxCount = count;
++    for (i = 0; i < count; i++)
++    {
++        SOCKADDR_IN *sa = (SOCKADDR_IN *)addrs->AddrArray[i].MaxSa;
++        sa->sin_family = WS_AF_INET;
++        sa->sin_addr.WS_s_addr = servers[i];
++        addrs->AddrArray[i].Data.DnsAddrUserDword[0] = sizeof(*sa);
++    }
++    return ERROR_SUCCESS;
++}
++
++static NTSTATUS resolv_set_serverlist( void *args )
++{
++    const IP4_ARRAY *addrs = args;
++    DWORD i;
++
++    set_count = 0;
++    if (!addrs) return ERROR_SUCCESS;
++    for (i = 0; i < addrs->AddrCount && set_count < ARRAY_SIZE(set_servers); i++)
++        set_servers[set_count++] = addrs->AddrArray[i];
++    return ERROR_SUCCESS;
++}
++
++/* a DNS answer message for name: the header, the question, and an A record for each address */
++static int dns_message( const char *name, WORD type, const unsigned int *addrs, int count, int rcode,
++                        unsigned char *buf, DWORD size )
++{
++    const char *label = name;
++    unsigned char *p = buf, *end = buf + size;
++    int i;
++
++    if (size < 12) return -1;
++    memset( p, 0, 12 );
++    p[2] = 0x81;                 /* a response, recursion desired */
++    p[3] = 0x80 | rcode;         /* recursion available */
++    p[5] = 1;                    /* one question */
++    p[7] = count;                /* the answers */
++    p += 12;
++    while (*label)               /* the name, label by label */
++    {
++        const char *dot = strchr( label, '.' );
++        const size_t len = dot ? (size_t)(dot - label) : strlen( label );
++
++        if (!len || len > 63 || p + 1 + len >= end) return -1;
++        *p++ = len;
++        memcpy( p, label, len );
++        p += len;
++        label += len + (dot ? 1 : 0);
++    }
++    if (p + 5 > end) return -1;
++    *p++ = 0;
++    *p++ = type >> 8; *p++ = type;
++    *p++ = 0; *p++ = 1;          /* class IN */
++    for (i = 0; i < count; i++)
++    {
++        if (p + 16 > end) return -1;
++        *p++ = 0xc0; *p++ = 12;  /* the question's name */
++        *p++ = 0; *p++ = 1;      /* A */
++        *p++ = 0; *p++ = 1;      /* IN */
++        *p++ = 0; *p++ = 0; *p++ = 0x01; *p++ = 0x2c;  /* five minutes */
++        *p++ = 0; *p++ = 4;
++        memcpy( p, &addrs[i], 4 );
++        p += 4;
++    }
++    return p - buf;
++}
++
++static NTSTATUS resolv_query( void *args )
++{
++    const struct query_params *params = args;
++    struct addrinfo hints, *res = NULL, *ai;
++    unsigned int addrs[16];
++    int count = 0, len;
++
++    if (params->type == DNS_TYPE_A)
++    {
++        memset( &hints, 0, sizeof(hints) );
++        hints.ai_family = AF_INET;
++        hints.ai_socktype = SOCK_STREAM;
++        if (!getaddrinfo( params->name, NULL, &hints, &res ))
++        {
++            for (ai = res; ai && count < ARRAY_SIZE(addrs); ai = ai->ai_next)
++                if (ai->ai_family == AF_INET)
++                    addrs[count++] = ((struct sockaddr_in *)ai->ai_addr)->sin_addr.s_addr;
++            freeaddrinfo( res );
++        }
++    }
++    else FIXME( "type %u for %s: only addresses (A)\n", params->type, debugstr_a(params->name) );
++    len = dns_message( params->name, params->type, addrs, count, count ? 0 : 3 /* NXDOMAIN */, params->buf,
++                       *params->len );
++    if (len < 0) return DNS_ERROR_RCODE_FORMAT_ERROR;
++    *params->len = len;
++    return ERROR_SUCCESS;
++}
++
++const unixlib_entry_t __wine_unix_call_funcs[] =
++{
++    resolv_get_searchlist,
++    resolv_get_serverlist,
++    resolv_set_serverlist,
++    resolv_query,
++};
++
++C_ASSERT( ARRAYSIZE(__wine_unix_call_funcs) == unix_funcs_count );
++
++#ifdef _WIN64
++
++typedef ULONG PTR32;
++
++static NTSTATUS wow64_resolv_get_searchlist( void *args )
++{
++    struct
++    {
++        PTR32  list;
++        PTR32  len;
++    } const *params32 = args;
++
++    struct get_searchlist_params params =
++    {
++        ULongToPtr(params32->list),
++        ULongToPtr(params32->len)
++    };
++
++    return resolv_get_searchlist( &params );
++}
++
++static NTSTATUS wow64_resolv_get_serverlist( void *args )
++{
++    struct
++    {
++        USHORT family;
++        PTR32  addrs;
++        PTR32  len;
++    } const *params32 = args;
++
++    struct get_serverlist_params params =
++    {
++        params32->family,
++        ULongToPtr(params32->addrs),
++        ULongToPtr(params32->len)
++    };
++
++    return resolv_get_serverlist( &params );
++}
++
++static NTSTATUS wow64_resolv_query( void *args )
++{
++    struct
++    {
++        PTR32  name;
++        WORD   type;
++        DWORD  options;
++        PTR32  buf;
++        PTR32  len;
++    } const *params32 = args;
++
++    struct query_params params =
++    {
++        ULongToPtr(params32->name),
++        params32->type,
++        params32->options,
++        ULongToPtr(params32->buf),
++        ULongToPtr(params32->len)
++    };
++
++    return resolv_query( &params );
++}
++
++const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
++{
++    wow64_resolv_get_searchlist,
++    wow64_resolv_get_serverlist,
++    resolv_set_serverlist,
++    wow64_resolv_query,
++};
++
++C_ASSERT( ARRAYSIZE(__wine_unix_call_wow64_funcs) == unix_funcs_count );
++
++#endif  /* _WIN64 */

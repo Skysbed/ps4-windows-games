@@ -8,12 +8,14 @@ CCW="clang --target=x86_64-pc-freebsd12-elf -isysroot $TC -isystem $COMPAT/inclu
 $CCW '-DRTLD_SELF=((void*)-3)' -I$P/wine/ps5 -I$P/src -c $L/pw_wine_dl.c -o $ND/pw_wine_dl.o 2>/tmp/dl.err || { head -8 /tmp/dl.err; exit 1; }
 $CCW -c $L/ps4_pipe_fallback.c -o $ND/ps4_pipe_fallback.o 2>/tmp/pf.err || { head -8 /tmp/pf.err; exit 1; }
 $CCW -c $L/ps4_pad_input.c -o $ND/ps4_pad_input.o 2>/tmp/pi.err || { head -8 /tmp/pi.err; exit 1; }
+$CCW -c "$L/ps4_sigmask.c" -o "$ND/ps4_sigmask.o" || exit 1
+$CCW -c "$L/ps4_entropy.c" -o "$ND/ps4_entropy.o" || exit 1
 $CCW -c $L/ps4_preload.c -o $ND/ps4_preload.o 2>/tmp/pp.err || { head -8 /tmp/pp.err; exit 1; }
 $CCW -I$P/wine/ps5 -c $ND/ntdll_desc.c -o $ND/ntdll_desc_loc.o 2>/tmp/nd.err || { head -8 /tmp/nd.err; exit 1; }
 llvm-objcopy --localize-symbol=module_start --localize-symbol=module_stop $ND/ntdll_desc_loc.o
-WRAPS=$(grep -oE "__wrap_[a-z_]+" "$P/wine/ps5/pw_wine_cwd_libc.c" | sed "s/__wrap_//" | sort -u); WF="-Wl,--wrap=pw_compat_pipe -Wl,--wrap=read -Wl,--wrap=pread"; for w in $WRAPS; do WF="$WF -Wl,--wrap=$w"; done
+WRAPS=$(grep -oE "__wrap_[a-z_]+" "$P/wine/ps5/pw_wine_cwd_libc.c" | sed "s/__wrap_//" | sort -u); WF="-Wl,--wrap=pthread_sigmask -Wl,--wrap=pw_compat_pipe -Wl,--wrap=read -Wl,--wrap=pread"; for w in $WRAPS; do WF="$WF -Wl,--wrap=$w"; done
 LD="-nostartfiles -nodefaultlibs -fuse-ld=lld -Wl,--script=$TC/link_ps4mod.x $CRTLIB -L$TC/lib -L$COMPAT/build -Wl,--start-group -lorbis-compat -lc -lkernel -lc++ -lc++abi -lunwind -Wl,--end-group -Wl,--warn-unresolved-symbols"
-NSUP="$WS/ps4_tls_shim.o $ND/pw_wine_prx.o $ND/pw_wine_dl.o $ND/pw_wine_dl_libc.o $WS/pw_wine_compat.o $WS/pw_wine_compat_libc.o $W/pw_wine_cwd.o $WS/pw_wine_cwd_libc.o $W/pw_wine_sink.o $W/pw_wine_heap.o $W/pw_wine_heap_libc.o $ND/pw_wine_dmem_core.o $ND/pw_wine_dmem_ps4.o $ND/ps4_pipe_fallback.o $ND/ps4_pad_input.o $ND/ps4_preload.o $ND/stubs_w.o $ND/ntdll_desc_loc.o"
+NSUP="$WS/ps4_tls_shim.o $ND/pw_wine_prx.o $ND/pw_wine_dl.o $ND/pw_wine_dl_libc.o $WS/pw_wine_compat.o $WS/pw_wine_compat_libc.o $W/pw_wine_cwd.o $WS/pw_wine_cwd_libc.o $W/pw_wine_sink.o $W/pw_wine_heap.o $W/pw_wine_heap_libc.o $ND/pw_wine_dmem_core.o $ND/pw_wine_dmem_ps4.o $ND/ps4_pipe_fallback.o $ND/ps4_pad_input.o $ND/ps4_preload.o $ND/ps4_sigmask.o $ND/ps4_entropy.o $ND/stubs_w.o $ND/ntdll_desc_loc.o"
 for o in $NSUP; do [ -f $o ] || { echo "missing $o"; exit 1; }; done
 cd $B; rm -f dlls/ntdll/ntdll.so
 make -j$(nproc) dlls/ntdll/ntdll.so LDFLAGS="$NSUP $WF $LD" >/tmp/ntdll.make.log 2>&1 || { echo NTDLL FAIL; grep error /tmp/ntdll.make.log|head; exit 1; }

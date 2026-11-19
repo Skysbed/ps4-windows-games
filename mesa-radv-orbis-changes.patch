@@ -1,5 +1,5 @@
 diff --git a/src/amd/common/ac_orbis_drm.c b/src/amd/common/ac_orbis_drm.c
-index e4055c6..d26f1bf 100644
+index e4055c6..57c31ca 100644
 --- a/src/amd/common/ac_orbis_drm.c
 +++ b/src/amd/common/ac_orbis_drm.c
 @@ -1226,7 +1226,7 @@ static simple_mtx_t orbis_retire_lock = SIMPLE_MTX_INITIALIZER;
@@ -11,7 +11,7 @@ index e4055c6..d26f1bf 100644
  
  /* ⚠ FLATTENING, AND IT REPLACES A ONE-LEVEL PATCH THAT COULD ONLY EVER BE A DOWN PAYMENT.
   *
-@@ -1282,6 +1282,59 @@ orbis_emit_eop(uint32_t *dw, uint64_t va, uint32_t value, uint32_t sel)
+@@ -1282,6 +1282,62 @@ orbis_emit_eop(uint32_t *dw, uint64_t va, uint32_t value, uint32_t sel)
  }
  
  
@@ -37,8 +37,11 @@ index e4055c6..d26f1bf 100644
 +   if (!orbis_split.active || orbis_split.failed || orbis_part_word == NULL || dw == base)
 +      return NULL;
 +   const uint32_t value = ++orbis_split.counter;
++   /* Use the GFX7 drain and completion pair before recycling this staging slot. */
++   const uint32_t write32 = ORBIS_EOP_DST_SEL_MC | ORBIS_EOP_DATA_SEL_32BIT;
++   dw = orbis_emit_eop(dw, (uint64_t)(uintptr_t)orbis_drain_word, value - 1, write32);
 +   dw = orbis_emit_eop(dw, (uint64_t)(uintptr_t)orbis_part_word, value,
-+                       ORBIS_EOP_DST_SEL_MC | (0u << ORBIS_EOP_INT_SEL_SHIFT) | ORBIS_EOP_DATA_SEL_32BIT);
++                       write32 | (ORBIS_EOP_INT_SEL << ORBIS_EOP_INT_SEL_SHIFT));
 +   dw = orbis_pad_ib(dw, base);
 +   void    *part_dcb[1] = {base};
 +   uint32_t part_bytes[1] = {(uint32_t)((dw - base) * 4)};
@@ -71,7 +74,7 @@ index e4055c6..d26f1bf 100644
  static uint32_t *
  orbis_copy_ib(uint32_t *dst, const uint32_t *dst_end, const uint32_t *src, uint32_t n, unsigned depth,
                unsigned *chains, const uint32_t *out_base, uint32_t marks, uint32_t *next_mark,
-@@ -1300,7 +1353,7 @@ orbis_copy_ib(uint32_t *dst, const uint32_t *dst_end, const uint32_t *src, uint3
+@@ -1300,7 +1356,7 @@ orbis_copy_ib(uint32_t *dst, const uint32_t *dst_end, const uint32_t *src, uint3
        if ((hdr & 0xC0000000u) != 0xC0000000u) {
           /* Not a type-3 header: stop parsing and pass the tail through untouched. */
           const uint32_t rest = n - i;
@@ -80,7 +83,7 @@ index e4055c6..d26f1bf 100644
              return NULL;
           memcpy(dst, src + i, (size_t)rest * 4);
           return dst + rest;
-@@ -1366,7 +1419,7 @@ orbis_copy_ib(uint32_t *dst, const uint32_t *dst_end, const uint32_t *src, uint3
+@@ -1366,7 +1422,7 @@ orbis_copy_ib(uint32_t *dst, const uint32_t *dst_end, const uint32_t *src, uint3
           /* A packet that claims more than the IB holds. Copy what is there and stop; the alternative is reading
            * past the buffer to describe it. */
           const uint32_t rest = n - i;
@@ -89,7 +92,7 @@ index e4055c6..d26f1bf 100644
              return NULL;
           memcpy(dst, src + i, (size_t)rest * 4);
           return dst + rest;
-@@ -1406,7 +1459,7 @@ orbis_copy_ib(uint32_t *dst, const uint32_t *dst_end, const uint32_t *src, uint3
+@@ -1406,7 +1462,7 @@ orbis_copy_ib(uint32_t *dst, const uint32_t *dst_end, const uint32_t *src, uint3
           }
        }
  
@@ -98,7 +101,7 @@ index e4055c6..d26f1bf 100644
           return NULL;
  
        /* ⚠ THE MARKER GOES AT A PACKET BOUNDARY, WHICH IS WHY IT LIVES HERE. This walk is the only place that
-@@ -1496,8 +1549,8 @@ orbis_build_flat(uint32_t *cb, uint32_t cb_dwords, void **dcb, uint32_t *dcb_byt
+@@ -1496,8 +1552,8 @@ orbis_build_flat(uint32_t *cb, uint32_t cb_dwords, void **dcb, uint32_t *dcb_byt
           /* The produced size is what sizes this buffer, so it is printed: "does not fit" without a number is a
            * refusal nobody can act on. `before - cb` is what fitted; the chunk's own size is a floor on the rest. */
           mesa_loge("orbis-drm: submission does not fit the %u dword staging buffer - chunk %u of %u, %u dwords "
@@ -109,7 +112,7 @@ index e4055c6..d26f1bf 100644
           return NULL;
        }
     }
-@@ -1505,6 +1558,14 @@ orbis_build_flat(uint32_t *cb, uint32_t cb_dwords, void **dcb, uint32_t *dcb_byt
+@@ -1505,6 +1561,14 @@ orbis_build_flat(uint32_t *cb, uint32_t cb_dwords, void **dcb, uint32_t *dcb_byt
     if (orbis_trace())
        mesa_logi("orbis-drm: submit #%" PRIu64 ": flattened %u chunk(s) and %u chain(s) into %u dwords", seq,
                  n_dcb, chains, (unsigned)(dw - cb));
@@ -124,7 +127,7 @@ index e4055c6..d26f1bf 100644
     return dw;
  }
  
-@@ -3010,6 +3071,18 @@ ac_orbis_note(const char *msg)
+@@ -3010,6 +3074,18 @@ ac_orbis_note(const char *msg)
  void
  ac_orbis_api_account(unsigned slot, uint64_t ns)
  {
@@ -143,7 +146,7 @@ index e4055c6..d26f1bf 100644
     if (slot < ORBIS_API_SLOTS) {
        p_atomic_add(&orbis_api_slot_ns[slot], ns);
        p_atomic_inc(&orbis_api_slot_calls[slot]);
-@@ -4624,6 +4697,10 @@ orbis_read_hw_registers(void)
+@@ -4624,6 +4700,10 @@ orbis_read_hw_registers(void)
        { "SPI_CONFIG_CNTL_1",       0x913c, 0xffffffff, 0x00000004, "cik_gpu_init: VTX_DONE_DELAY(4)" },
        { "CP_MEQ_THRESHOLDS",       0x8764, 0xffffffff, 0x00006030, "cik_gpu_init: MEQ1_START(0x30)|MEQ2_START(0x60)" },
        { "GC_USER_RB_BACKEND_DISABLE",0x9b7c,0x00ff0000, 0x00fc0000, "spectre_golden_registers" },
@@ -154,7 +157,7 @@ index e4055c6..d26f1bf 100644
        { "TCP_CHAN_STEER_LO",       0xac0c, 0xffffffff, 0x54763210, "spectre_golden_registers" },
        { "TCP_CHAN_STEER_HI",       0xac10, 0,          0,          "not in the Kaveri tables - read to be known" },
  
-@@ -5389,6 +5466,8 @@ orbis_arena_setup_once(void)
+@@ -5389,6 +5469,8 @@ orbis_arena_setup_once(void)
     orbis_retired_word = (volatile uint32_t *)(uintptr_t)(orbis_arena_private + 192);
     *orbis_retired_word = 0;
     orbis_drain_word = (volatile uint32_t *)(uintptr_t)(orbis_arena_private + 224);
@@ -163,7 +166,7 @@ index e4055c6..d26f1bf 100644
     *orbis_drain_word = 0;
  
  
-@@ -5988,6 +6067,12 @@ ac_drm_device_initialize(int fd, bool is_virtio, uint32_t *major_version, uint32
+@@ -5988,6 +6070,12 @@ ac_drm_device_initialize(int fd, bool is_virtio, uint32_t *major_version, uint32
        orbis_watchdog_start();
     }
  
@@ -176,7 +179,7 @@ index e4055c6..d26f1bf 100644
     mesa_logi("orbis-drm: device up, reporting amdgpu interface %u.%u, memory backed by %s",
               dev->major_version, dev->minor_version, ORBIS_BACKING);
     return 0;
-@@ -6085,6 +6170,24 @@ ac_drm_device_deinitialize(ac_drm_device *dev)
+@@ -6085,6 +6173,24 @@ ac_drm_device_deinitialize(ac_drm_device *dev)
  
  /* ---------------------------------------------------------------- device queries */
  
@@ -201,7 +204,7 @@ index e4055c6..d26f1bf 100644
  /* ---------------------------------------------------------------- AMDGPU_INFO_DEV_INFO
   *
   * The 39 fields ac_gpu_info.c reads off drm_amdgpu_info_device. Regenerate the list with
-@@ -6155,7 +6258,7 @@ orbis_query_dev_info(struct drm_amdgpu_info_device *d)
+@@ -6155,7 +6261,7 @@ orbis_query_dev_info(struct drm_amdgpu_info_device *d)
  
     ORBIS_DRM_UNCITED("drm_amdgpu_info_device.device_id", "Liverpool's PCI id is in no oracle; "
                                                           "it reaches only radeon_info.pci_id");
@@ -210,7 +213,7 @@ index e4055c6..d26f1bf 100644
  
     /* --- shader array topology. ALL UNCITED, and gnmtune.h:732 says so in the fork's own words:
      * "the fork cannot cite Liverpool's CU/SIMD topology from any oracle in the stash".
-@@ -6208,7 +6311,7 @@ orbis_query_dev_info(struct drm_amdgpu_info_device *d)
+@@ -6208,7 +6314,7 @@ orbis_query_dev_info(struct drm_amdgpu_info_device *d)
      * contradiction it sits on: GB_ADDR_CONFIG's own NUM_SHADER_ENGINES field reads ONE. */
     {
        const char *const se = getenv("ORBIS_NUM_SE");
@@ -219,7 +222,7 @@ index e4055c6..d26f1bf 100644
        if (se != NULL)
           mesa_logi("orbis-drm: ORBIS_NUM_SE=%u - AN EXPERIMENT. This field is uncited, "
                     "GB_ADDR_CONFIG says one, and the GSVS ring needs exactly twice what it sizes.",
-@@ -6242,7 +6345,7 @@ orbis_query_dev_info(struct drm_amdgpu_info_device *d)
+@@ -6242,7 +6348,7 @@ orbis_query_dev_info(struct drm_amdgpu_info_device *d)
      * gnmprof.h:477 says "100 ticks = 1 us, cross-checked against fence-wait", i.e. 100 MHz. RADV turns
      * it into timestampPeriod = 1000000 / clock_crystal_freq = 10 ns. */
     d->gpu_counter_freq = 100000; /* KHz. MEASURED. */
@@ -228,7 +231,7 @@ index e4055c6..d26f1bf 100644
     ORBIS_DRM_UNCITED("drm_amdgpu_info_device.max_memory_clock", "GDDR5 clock not established here");
     d->max_memory_clock = 2750000;
  
-@@ -9865,7 +9968,19 @@ ac_drm_cs_submit_raw2(ac_drm_device *dev, uint32_t ctx_id, uint32_t bo_list_hand
+@@ -9865,7 +9971,19 @@ ac_drm_cs_submit_raw2(ac_drm_device *dev, uint32_t ctx_id, uint32_t bo_list_hand
         * padding; the builder refuses rather than overrunning the slot. */
        /* timed: the flatten is the one thing in this path nobody has measured */
        const uint64_t orbis_flat_t0 = os_time_get_nano();

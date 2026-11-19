@@ -1,0 +1,18 @@
+name=Steam
+info=Valve Steam Client
+color=000000
+exec=steam.exe
+arg=--no-browser
+arg=-no-dwrite
+arg=-no-shader-prefetch
+arg=-no-better-shader-disk-cache
+arg=-no-s Vulkan
+arg=-no-s D3D11
+arg=-no-s D3D12
+arg=-no-s DXVK
+arg=-no-s Proton
+arg=+force_steam_pipe %STEAM_PIPE%
+env=STEAM_PIPE=/data/pcps4/steam/steam.pipe
+env=STEAM_ROOT=/data/pcps4/steam
+env=STEAM_AUTH_TICKET=/data/pcps4/steam/auth_ticket
+env=WINEPREFIX=/data/wine

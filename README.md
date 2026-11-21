@@ -36,7 +36,7 @@ milestone, the kernel findings behind them, and the current blocker in detail.
 
 | Path | What it is |
 |---|---|
-| `wine-ps4-all-changes.patch` | The complete diff against upstream Wine that makes it build and run for PS4 (119 files; includes bring-up instrumentation) |
+| `wine-ps4-all-changes.patch` | The complete diff against upstream Wine that makes it build and run for PS4 (133 files; includes bring-up instrumentation) |
 | `mesa-radv-orbis-changes.patch` | Changes to the RADV ORBIS Mesa tree (base commit `1a59cc1`): splitting submissions larger than one console IB, video-out handover between swapchains, BGRA scan-out, copy-mode scan-out without overwriting queued frames, a bounded image acquire |
 | `build-ps4-module/` | Per-module build pipeline: linker script (16 KiB alignment), TLS stripping, PRX descriptor generation, packaging manifest, the RADV/`win32u`/`winevulkan` link shims, an import-tag verifier, the `scePad` XInput module, the controller-as-keyboard/mouse module, the kernel-pipe fallback, the GPU submit keepalive, the PS4 direct-memory backend, and the module build scripts |
 | `eboot-src/` | The bootstrap: runs the launcher, then loads `ntdll.prx` (from `/data/pcps4` if present) and calls `__wine_main`; returns to the launcher when a game exits |
@@ -45,6 +45,8 @@ milestone, the kernel findings behind them, and the current blocker in detail.
 | `wine-ps4-shims/` | Headers and shims for the gaps between Wine and OrbisOS/FreeBSD 9 |
 | `WINE_PS4_STATUS.md` | Build recipe + status; start here to understand the port |
 | `BUILD.md` | Step-by-step guide to build the whole thing from source |
+| `tests/` | On-console tests and benchmarks for the driver and platform code |
+| `CHANGES_2026-11-21.md` | Latest driver fixes, measurements and known problems |
 
 ## How it works
 

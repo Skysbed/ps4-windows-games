@@ -1,5 +1,5 @@
 diff --git a/src/amd/common/ac_orbis_drm.c b/src/amd/common/ac_orbis_drm.c
-index e4055c6..57c31ca 100644
+index e4055c6..df72342 100644
 --- a/src/amd/common/ac_orbis_drm.c
 +++ b/src/amd/common/ac_orbis_drm.c
 @@ -1226,7 +1226,7 @@ static simple_mtx_t orbis_retire_lock = SIMPLE_MTX_INITIALIZER;
@@ -11,7 +11,7 @@ index e4055c6..57c31ca 100644
  
  /* ⚠ FLATTENING, AND IT REPLACES A ONE-LEVEL PATCH THAT COULD ONLY EVER BE A DOWN PAYMENT.
   *
-@@ -1282,6 +1282,62 @@ orbis_emit_eop(uint32_t *dw, uint64_t va, uint32_t value, uint32_t sel)
+@@ -1282,6 +1282,59 @@ orbis_emit_eop(uint32_t *dw, uint64_t va, uint32_t value, uint32_t sel)
  }
  
  
@@ -37,11 +37,8 @@ index e4055c6..57c31ca 100644
 +   if (!orbis_split.active || orbis_split.failed || orbis_part_word == NULL || dw == base)
 +      return NULL;
 +   const uint32_t value = ++orbis_split.counter;
-+   /* Use the GFX7 drain and completion pair before recycling this staging slot. */
-+   const uint32_t write32 = ORBIS_EOP_DST_SEL_MC | ORBIS_EOP_DATA_SEL_32BIT;
-+   dw = orbis_emit_eop(dw, (uint64_t)(uintptr_t)orbis_drain_word, value - 1, write32);
 +   dw = orbis_emit_eop(dw, (uint64_t)(uintptr_t)orbis_part_word, value,
-+                       write32 | (ORBIS_EOP_INT_SEL << ORBIS_EOP_INT_SEL_SHIFT));
++                       ORBIS_EOP_DST_SEL_MC | (0u << ORBIS_EOP_INT_SEL_SHIFT) | ORBIS_EOP_DATA_SEL_32BIT);
 +   dw = orbis_pad_ib(dw, base);
 +   void    *part_dcb[1] = {base};
 +   uint32_t part_bytes[1] = {(uint32_t)((dw - base) * 4)};
@@ -74,7 +71,7 @@ index e4055c6..57c31ca 100644
  static uint32_t *
  orbis_copy_ib(uint32_t *dst, const uint32_t *dst_end, const uint32_t *src, uint32_t n, unsigned depth,
                unsigned *chains, const uint32_t *out_base, uint32_t marks, uint32_t *next_mark,
-@@ -1300,7 +1356,7 @@ orbis_copy_ib(uint32_t *dst, const uint32_t *dst_end, const uint32_t *src, uint3
+@@ -1300,7 +1353,7 @@ orbis_copy_ib(uint32_t *dst, const uint32_t *dst_end, const uint32_t *src, uint3
        if ((hdr & 0xC0000000u) != 0xC0000000u) {
           /* Not a type-3 header: stop parsing and pass the tail through untouched. */
           const uint32_t rest = n - i;
@@ -83,7 +80,7 @@ index e4055c6..57c31ca 100644
              return NULL;
           memcpy(dst, src + i, (size_t)rest * 4);
           return dst + rest;
-@@ -1366,7 +1422,7 @@ orbis_copy_ib(uint32_t *dst, const uint32_t *dst_end, const uint32_t *src, uint3
+@@ -1366,7 +1419,7 @@ orbis_copy_ib(uint32_t *dst, const uint32_t *dst_end, const uint32_t *src, uint3
           /* A packet that claims more than the IB holds. Copy what is there and stop; the alternative is reading
            * past the buffer to describe it. */
           const uint32_t rest = n - i;
@@ -92,7 +89,7 @@ index e4055c6..57c31ca 100644
              return NULL;
           memcpy(dst, src + i, (size_t)rest * 4);
           return dst + rest;
-@@ -1406,7 +1462,7 @@ orbis_copy_ib(uint32_t *dst, const uint32_t *dst_end, const uint32_t *src, uint3
+@@ -1406,7 +1459,7 @@ orbis_copy_ib(uint32_t *dst, const uint32_t *dst_end, const uint32_t *src, uint3
           }
        }
  
@@ -101,7 +98,7 @@ index e4055c6..57c31ca 100644
           return NULL;
  
        /* ⚠ THE MARKER GOES AT A PACKET BOUNDARY, WHICH IS WHY IT LIVES HERE. This walk is the only place that
-@@ -1496,8 +1552,8 @@ orbis_build_flat(uint32_t *cb, uint32_t cb_dwords, void **dcb, uint32_t *dcb_byt
+@@ -1496,8 +1549,8 @@ orbis_build_flat(uint32_t *cb, uint32_t cb_dwords, void **dcb, uint32_t *dcb_byt
           /* The produced size is what sizes this buffer, so it is printed: "does not fit" without a number is a
            * refusal nobody can act on. `before - cb` is what fitted; the chunk's own size is a floor on the rest. */
           mesa_loge("orbis-drm: submission does not fit the %u dword staging buffer - chunk %u of %u, %u dwords "
@@ -112,7 +109,7 @@ index e4055c6..57c31ca 100644
           return NULL;
        }
     }
-@@ -1505,6 +1561,14 @@ orbis_build_flat(uint32_t *cb, uint32_t cb_dwords, void **dcb, uint32_t *dcb_byt
+@@ -1505,6 +1558,14 @@ orbis_build_flat(uint32_t *cb, uint32_t cb_dwords, void **dcb, uint32_t *dcb_byt
     if (orbis_trace())
        mesa_logi("orbis-drm: submit #%" PRIu64 ": flattened %u chunk(s) and %u chain(s) into %u dwords", seq,
                  n_dcb, chains, (unsigned)(dw - cb));
@@ -127,7 +124,7 @@ index e4055c6..57c31ca 100644
     return dw;
  }
  
-@@ -3010,6 +3074,18 @@ ac_orbis_note(const char *msg)
+@@ -3010,12 +3071,25 @@ ac_orbis_note(const char *msg)
  void
  ac_orbis_api_account(unsigned slot, uint64_t ns)
  {
@@ -146,7 +143,14 @@ index e4055c6..57c31ca 100644
     if (slot < ORBIS_API_SLOTS) {
        p_atomic_add(&orbis_api_slot_ns[slot], ns);
        p_atomic_inc(&orbis_api_slot_calls[slot]);
-@@ -4624,6 +4700,10 @@ orbis_read_hw_registers(void)
+    }
+ }
+ 
++int orbis_diag_enabled;
+ uint64_t orbis_draws;
+ uint64_t orbis_desc_binds;
+ uint64_t orbis_record_ns;
+@@ -4624,6 +4698,10 @@ orbis_read_hw_registers(void)
        { "SPI_CONFIG_CNTL_1",       0x913c, 0xffffffff, 0x00000004, "cik_gpu_init: VTX_DONE_DELAY(4)" },
        { "CP_MEQ_THRESHOLDS",       0x8764, 0xffffffff, 0x00006030, "cik_gpu_init: MEQ1_START(0x30)|MEQ2_START(0x60)" },
        { "GC_USER_RB_BACKEND_DISABLE",0x9b7c,0x00ff0000, 0x00fc0000, "spectre_golden_registers" },
@@ -157,7 +161,7 @@ index e4055c6..57c31ca 100644
        { "TCP_CHAN_STEER_LO",       0xac0c, 0xffffffff, 0x54763210, "spectre_golden_registers" },
        { "TCP_CHAN_STEER_HI",       0xac10, 0,          0,          "not in the Kaveri tables - read to be known" },
  
-@@ -5389,6 +5469,8 @@ orbis_arena_setup_once(void)
+@@ -5389,6 +5467,8 @@ orbis_arena_setup_once(void)
     orbis_retired_word = (volatile uint32_t *)(uintptr_t)(orbis_arena_private + 192);
     *orbis_retired_word = 0;
     orbis_drain_word = (volatile uint32_t *)(uintptr_t)(orbis_arena_private + 224);
@@ -166,7 +170,15 @@ index e4055c6..57c31ca 100644
     *orbis_drain_word = 0;
  
  
-@@ -5988,6 +6070,12 @@ ac_drm_device_initialize(int fd, bool is_virtio, uint32_t *major_version, uint32
+@@ -5954,6 +6034,7 @@ ac_drm_device_initialize(int fd, bool is_virtio, uint32_t *major_version, uint32
+    }
+ #endif
+ 
++   orbis_diag_enabled = getenv("ORBIS_COUNT_API") != NULL;
+    dev->fd = fd;
+    dev->major_version = ORBIS_DRM_MAJOR;
+    dev->minor_version = ORBIS_DRM_MINOR;
+@@ -5988,6 +6069,12 @@ ac_drm_device_initialize(int fd, bool is_virtio, uint32_t *major_version, uint32
        orbis_watchdog_start();
     }
  
@@ -179,7 +191,7 @@ index e4055c6..57c31ca 100644
     mesa_logi("orbis-drm: device up, reporting amdgpu interface %u.%u, memory backed by %s",
               dev->major_version, dev->minor_version, ORBIS_BACKING);
     return 0;
-@@ -6085,6 +6173,24 @@ ac_drm_device_deinitialize(ac_drm_device *dev)
+@@ -6085,6 +6172,24 @@ ac_drm_device_deinitialize(ac_drm_device *dev)
  
  /* ---------------------------------------------------------------- device queries */
  
@@ -204,16 +216,20 @@ index e4055c6..57c31ca 100644
  /* ---------------------------------------------------------------- AMDGPU_INFO_DEV_INFO
   *
   * The 39 fields ac_gpu_info.c reads off drm_amdgpu_info_device. Regenerate the list with
-@@ -6155,7 +6261,7 @@ orbis_query_dev_info(struct drm_amdgpu_info_device *d)
+@@ -6155,7 +6260,11 @@ orbis_query_dev_info(struct drm_amdgpu_info_device *d)
  
     ORBIS_DRM_UNCITED("drm_amdgpu_info_device.device_id", "Liverpool's PCI id is in no oracle; "
                                                           "it reaches only radeon_info.pci_id");
 -   d->device_id = 0x9920;
 +   d->device_id = orbis_neo() ? 0x9924 : 0x9920;
++   if (getenv("ORBIS_DEVICE_ID")) {   /* Pro-mode bisect: 0x9920 = Liverpool description, 0x9924 = Gladius */
++      d->device_id = (uint32_t)strtoul(getenv("ORBIS_DEVICE_ID"), NULL, 0);
++      mesa_logi("orbis-drm: ORBIS_DEVICE_ID=0x%x - forced", d->device_id);
++   }
  
     /* --- shader array topology. ALL UNCITED, and gnmtune.h:732 says so in the fork's own words:
      * "the fork cannot cite Liverpool's CU/SIMD topology from any oracle in the stash".
-@@ -6208,7 +6314,7 @@ orbis_query_dev_info(struct drm_amdgpu_info_device *d)
+@@ -6208,7 +6317,7 @@ orbis_query_dev_info(struct drm_amdgpu_info_device *d)
      * contradiction it sits on: GB_ADDR_CONFIG's own NUM_SHADER_ENGINES field reads ONE. */
     {
        const char *const se = getenv("ORBIS_NUM_SE");
@@ -222,7 +238,7 @@ index e4055c6..57c31ca 100644
        if (se != NULL)
           mesa_logi("orbis-drm: ORBIS_NUM_SE=%u - AN EXPERIMENT. This field is uncited, "
                     "GB_ADDR_CONFIG says one, and the GSVS ring needs exactly twice what it sizes.",
-@@ -6242,7 +6348,7 @@ orbis_query_dev_info(struct drm_amdgpu_info_device *d)
+@@ -6242,7 +6351,7 @@ orbis_query_dev_info(struct drm_amdgpu_info_device *d)
      * gnmprof.h:477 says "100 ticks = 1 us, cross-checked against fence-wait", i.e. 100 MHz. RADV turns
      * it into timestampPeriod = 1000000 / clock_crystal_freq = 10 ns. */
     d->gpu_counter_freq = 100000; /* KHz. MEASURED. */
@@ -231,7 +247,204 @@ index e4055c6..57c31ca 100644
     ORBIS_DRM_UNCITED("drm_amdgpu_info_device.max_memory_clock", "GDDR5 clock not established here");
     d->max_memory_clock = 2750000;
  
-@@ -9865,7 +9971,19 @@ ac_drm_cs_submit_raw2(ac_drm_device *dev, uint32_t ctx_id, uint32_t bo_list_hand
+@@ -6918,8 +7027,10 @@ uintptr_t
+ ac_drm_device_get_cookie(ac_drm_device *dev)
+ {
+    /* A key, not a descriptor: radv_amdgpu_alloc_tracker_acquire() uses it to find the per-device allocation
+-    * tracker, so all it has to be is stable and unique per device. The device pointer is both. */
+-   return (uintptr_t)dev;
++    * tracker. PCPS4: this console has one GPU, but RADV opens a second handle for memory queries, so a per-handle
++    * key made every budget query read an empty tracker. One key per process keeps usage correct. */
++   (void)dev;
++   return (uintptr_t)&orbis_va_base;
+ }
+ 
+ /* ---------------------------------------------------------------- submission bookkeeping, real
+@@ -7104,6 +7215,101 @@ orbis_backing_free(struct orbis_bo *bo)
+  * for bandwidth, it was invalidating the CPUs' caches continuously.
+  *
+  * ORBIS_VRAM_GARLIC=0 turns it off, for comparing against every measurement taken before today. */
++/* PCPS4 memory placement report. Off unless ORBIS_MEM_STATS=1; costs one predicted branch per mapping. */
++static int64_t orbis_mem_garlic_live, orbis_mem_garlic_peak, orbis_mem_refused, orbis_mem_last;
++
++static void
++orbis_mem_report(int64_t garlic_delta, int64_t refused_delta)
++{
++   static int on = -1;
++   if (on < 0)
++      on = getenv("ORBIS_MEM_STATS") != NULL ? 1 : 0;
++   if (!on)
++      return;
++
++   const int64_t live = __atomic_add_fetch(&orbis_mem_garlic_live, garlic_delta, __ATOMIC_RELAXED);
++   const int64_t refused = __atomic_add_fetch(&orbis_mem_refused, refused_delta, __ATOMIC_RELAXED);
++   int64_t peak = __atomic_load_n(&orbis_mem_garlic_peak, __ATOMIC_RELAXED);
++   while (live > peak && !__atomic_compare_exchange_n(&orbis_mem_garlic_peak, &peak, live, true, __ATOMIC_RELAXED,
++                                                      __ATOMIC_RELAXED))
++      ;
++
++   const int64_t mark = live + refused;
++   const int64_t last = __atomic_load_n(&orbis_mem_last, __ATOMIC_RELAXED);
++   if (mark - last < 64 * 1024 * 1024 && last - mark < 64 * 1024 * 1024)
++      return;
++   __atomic_store_n(&orbis_mem_last, mark, __ATOMIC_RELAXED);
++
++   off_t at = 0;
++   size_t largest = 0;
++   /* The toolchain header types the two output pointers as integers; the kernel call takes pointers. */
++   sceKernelAvailableDirectMemorySize(0, sceKernelGetDirectMemorySize(), orbis_page_size(), (off_t)(uintptr_t)&at,
++                                      (size_t)(uintptr_t)&largest);
++   mesa_logi("orbis-mem: GARLIC live %lld MiB (peak %lld), VRAM refused GARLIC %lld MiB so far, arena on ONION %llu MiB, "
++             "largest free direct block %llu MiB",
++             (long long)(live >> 20), (long long)(__atomic_load_n(&orbis_mem_garlic_peak, __ATOMIC_RELAXED) >> 20),
++             (long long)(refused >> 20), (unsigned long long)((orbis_va_end - orbis_va_base) >> 20),
++             (unsigned long long)(largest >> 20));
++}
++
++/* PCPS4: GARLIC WITHOUT A SECOND COPY. The old path allocated new GARLIC pages over a range and kept the arena's ONION
++ * pages reserved underneath, so GPU memory cost twice its size. sceKernelMtypeprotect changes the type of the pages
++ * already mapped there.
++ *
++ * The CPU may still hold dirty cache lines for these pages from their last tenant. Once the range is write-combined the
++ * GPU writes around the CPU's cache, and a late eviction of such a line would overwrite the GPU's data, so the range is
++ * flushed first. */
++#define ORBIS_GARLIC_IN_PLACE ((off_t)-1)
++
++static bool
++orbis_garlic_in_place_on(void)
++{
++   static int on = -1;
++   if (on < 0) {
++      const char *const mode = getenv("ORBIS_GARLIC_MODE");
++      /* Default since memstress passed 144 rounds of ONION and GARLIC reuse. ORBIS_GARLIC_MODE=copy restores the old
++       * path, which keeps a reserved ONION page under every GARLIC page. */
++      on = mode == NULL || strcmp(mode, "copy") != 0;
++      mesa_logi("orbis-mem: GARLIC %s", on ? "in place - VRAM buffers change the type of their own pages"
++                                           : "copy path - every GARLIC page keeps an ONION page reserved");
++   }
++   return on != 0;
++}
++
++static bool
++orbis_garlic_try_in_place(struct orbis_bo *bo, uint64_t start, uint64_t bytes)
++{
++   const uint64_t t0 = os_time_get_nano();
++
++   __builtin_ia32_mfence();
++   for (uint64_t p = start & ~(uint64_t)63; p < start + bytes; p += 64)
++      __builtin_ia32_clflush((const void *)(uintptr_t)p);
++   __builtin_ia32_mfence();
++
++   const int32_t err = sceKernelMtypeprotect((const void *)(uintptr_t)start, (size_t)bytes, ORBIS_KERNEL_WC_GARLIC,
++                                             ORBIS_GRAPHICS_PROT);
++   if (err != 0) {
++      static unsigned said;
++      if (orbis_budget(&said, 4))
++         mesa_logw("orbis-mem: in-place GARLIC refused for %llu KiB -> 0x%08x - using the copy path",
++                   (unsigned long long)(bytes / 1024), (unsigned)err);
++      return false;
++   }
++
++   bo->garlic_phys = ORBIS_GARLIC_IN_PLACE;
++   bo->garlic_addr = start;
++   bo->garlic_bytes = bytes;
++   orbis_mem_report((int64_t)bytes, 0);
++
++   if (bytes >= 16 * 1024 * 1024) {
++      static unsigned said;
++      if (orbis_budget(&said, 6))
++         mesa_logi("orbis-mem: %llu MiB switched to GARLIC in place in %llu us", (unsigned long long)(bytes >> 20),
++                   (unsigned long long)((os_time_get_nano() - t0) / 1000));
++   }
++   return true;
++}
++
+ static bool orbis_vram_garlic_on(void)
+ {
+    static int on = -1;
+@@ -7129,6 +7335,9 @@ orbis_garlic_back(struct orbis_bo *bo, uint64_t start, uint64_t bytes)
+    if (bo->garlic_bytes != 0)
+       return false;
+ 
++   if (orbis_garlic_in_place_on() && orbis_garlic_try_in_place(bo, start, bytes))
++      return true;
++
+    off_t gphys = 0;
+    int32_t err = sceKernelAllocateDirectMemory(0, sceKernelGetDirectMemorySize(), bytes,
+                                                orbis_page_size(), ORBIS_KERNEL_WC_GARLIC, &gphys);
+@@ -7137,6 +7346,7 @@ orbis_garlic_back(struct orbis_bo *bo, uint64_t start, uint64_t bytes)
+       if (orbis_budget(&said, 4))
+          mesa_logw("orbis-drm: no GARLIC for %llu KiB -> 0x%08x - this BO stays on the coherent bus",
+                    (unsigned long long)(bytes / 1024), (unsigned)err);
++      orbis_mem_report(0, (int64_t)bytes);
+       return false;
+    }
+ 
+@@ -7155,6 +7365,7 @@ orbis_garlic_back(struct orbis_bo *bo, uint64_t start, uint64_t bytes)
+    bo->garlic_phys = gphys;
+    bo->garlic_addr = start;
+    bo->garlic_bytes = bytes;
++   orbis_mem_report((int64_t)bytes, 0);
+ 
+    static unsigned said;
+    if (orbis_budget(&said, 4))
+@@ -7185,6 +7396,19 @@ orbis_garlic_put_back(uint64_t garlic_addr, uint64_t garlic_bytes, off_t garlic_
+    if (garlic_bytes == 0)
+       return;
+ 
++   if (garlic_phys == ORBIS_GARLIC_IN_PLACE) {
++      /* Drain the write-combine buffers, then give the pages back their normal type and full rights. Callers that
++       * revoke access do so after this, exactly as they do after the copy path's MAP_FIXED. */
++      __builtin_ia32_sfence();
++      const int32_t type_err = sceKernelMtypeprotect((const void *)(uintptr_t)garlic_addr, (size_t)garlic_bytes,
++                                                     ORBIS_KERNEL_WB_ONION, ORBIS_GRAPHICS_PROT);
++      if (type_err != 0)
++         mesa_loge("orbis-mem: could not return 0x%" PRIx64 " (%llu KiB) to ONION -> 0x%08x", garlic_addr,
++                   (unsigned long long)(garlic_bytes / 1024), (unsigned)type_err);
++      orbis_mem_report(-(int64_t)garlic_bytes, 0);
++      return;
++   }
++
+    void *at = (void *)(uintptr_t)garlic_addr;
+    const off_t phys = (off_t)(orbis_arena_phys + (garlic_addr - orbis_arena_map_base));
+    const int32_t err = sceKernelMapDirectMemory(&at, garlic_bytes, ORBIS_GRAPHICS_PROT,
+@@ -7195,6 +7419,7 @@ orbis_garlic_put_back(uint64_t garlic_addr, uint64_t garlic_bytes, off_t garlic_
+                 garlic_addr, (unsigned)err);
+ 
+    sceKernelReleaseDirectMemory(garlic_phys, garlic_bytes);
++   orbis_mem_report(-(int64_t)garlic_bytes, 0);
+ }
+ 
+ /* Detach the chunk from the BO without touching the mapping. The caller owns it afterwards - either
+@@ -9313,6 +9538,18 @@ orbis_chunk_name(uint32_t id)
+    }
+ }
+ 
++/* PCPS4: the submit path reads about a dozen debug switches. Settings do not change while a game runs, so each call site
++ * reads its switch once instead of scanning the environment on every submission. */
++#define ORBIS_GETENV_ONCE(name) __extension__({                                  \
++   static const char *orbis_env_value;                                           \
++   static int orbis_env_read;                                                    \
++   if (!__atomic_load_n(&orbis_env_read, __ATOMIC_ACQUIRE)) {                    \
++      orbis_env_value = getenv(name);                                            \
++      __atomic_store_n(&orbis_env_read, 1, __ATOMIC_RELEASE);                    \
++   }                                                                             \
++   orbis_env_value;                                                              \
++})
++
+ int
+ ac_drm_cs_submit_raw2(ac_drm_device *dev, uint32_t ctx_id, uint32_t bo_list_handle, int num_chunks,
+                       struct drm_amdgpu_cs_chunk *chunks, uint64_t *seq_no)
+@@ -9770,7 +10007,7 @@ ac_drm_cs_submit_raw2(ac_drm_device *dev, uint32_t ctx_id, uint32_t bo_list_hand
+     * Per chunk rather than one flat entry, because that is what this arm has: the PS4 side concatenates the
+     * chunks into its own staging buffer, and here they are still RADV's. */
+    {
+-      const char *const dump = getenv("ORBIS_DUMP_SUBMIT");
++      const char *const dump = ORBIS_GETENV_ONCE("ORBIS_DUMP_SUBMIT");
+       const uint64_t    want = dump != NULL ? strtoull(dump, NULL, 10) : UINT64_MAX;
+       if (dump != NULL && (want == 0 || want == seq)) {
+          for (unsigned i = 0; i < n_dcb; i++) {
+@@ -9865,7 +10102,19 @@ ac_drm_cs_submit_raw2(ac_drm_device *dev, uint32_t ctx_id, uint32_t bo_list_hand
         * padding; the builder refuses rather than overrunning the slot. */
        /* timed: the flatten is the one thing in this path nobody has measured */
        const uint64_t orbis_flat_t0 = os_time_get_nano();
@@ -251,6 +464,433 @@ index e4055c6..57c31ca 100644
        orbis_api_time(ORBIS_ID_ARM_BUILD_FLAT, os_time_get_nano() - orbis_flat_t0);
        orbis_api_count(ORBIS_ID_ARM_BUILD_FLAT, 1);
        if (dw == NULL) {
+@@ -9913,7 +10162,7 @@ ac_drm_cs_submit_raw2(ac_drm_device *dev, uint32_t ctx_id, uint32_t bo_list_hand
+       {
+          static int init_state = -1;
+          if (init_state < 0) {
+-            const char *const e = getenv("ORBIS_INIT_HW_STATE");
++            const char *const e = ORBIS_GETENV_ONCE("ORBIS_INIT_HW_STATE");
+             init_state = (e != NULL && *e != '\0' && *e != '0');
+          }
+          if (init_state) {
+@@ -9959,7 +10208,7 @@ ac_drm_cs_submit_raw2(ac_drm_device *dev, uint32_t ctx_id, uint32_t bo_list_hand
+        *     ORBIS_TRUNCATE_BIG=<threshold>:<keep_dwords>
+        */
+       {
+-         const char *const big_trunc = getenv("ORBIS_TRUNCATE_BIG");
++         const char *const big_trunc = ORBIS_GETENV_ONCE("ORBIS_TRUNCATE_BIG");
+          static bool       big_done;
+ 
+          if (big_trunc != NULL && !big_done) {
+@@ -10006,7 +10255,7 @@ ac_drm_cs_submit_raw2(ac_drm_device *dev, uint32_t ctx_id, uint32_t bo_list_hand
+       }
+ 
+       {
+-         const char *const trunc = getenv("ORBIS_TRUNCATE");
++         const char *const trunc = ORBIS_GETENV_ONCE("ORBIS_TRUNCATE");
+          if (trunc != NULL) {
+             char    *colon = NULL;
+             const unsigned long long want_seq = strtoull(trunc, &colon, 10);
+@@ -10153,7 +10402,7 @@ ac_drm_cs_submit_raw2(ac_drm_device *dev, uint32_t ctx_id, uint32_t bo_list_hand
+       /* ⚠ THE LAST EIGHT DWORDS, ON DEMAND. `ORBIS_TAIL=<n>` prints them for every nth submission. When the CP
+        * dies just after our fence, the bytes that follow the fence are the evidence, and a hexdump of a whole
+        * 9000-dword frame is the wrong tool for eight dwords. */
+-      const char *const tail = getenv("ORBIS_TAIL");
++      const char *const tail = ORBIS_GETENV_ONCE("ORBIS_TAIL");
+       const uint64_t    every = tail != NULL ? strtoull(tail, NULL, 10) : 0;
+       if (every != 0 && (seq % every) == 0 && n >= 8)
+          mesa_logi("orbis-drm: submit #%" PRIu64 " tail (%u dw): %08x %08x %08x %08x %08x %08x %08x %08x", seq, n,
+@@ -10188,7 +10437,7 @@ ac_drm_cs_submit_raw2(ac_drm_device *dev, uint32_t ctx_id, uint32_t bo_list_hand
+     *
+     * SET_SH_REG only, and 32-bit pointers reconstructed the way the shader will: high half from the arena, low half
+     * from the register. Bounded to 8 reports, because if it fires at all it will fire every frame. */
+-   if (getenv("ORBIS_CHECK_DEAD_PTRS") != NULL) {
++   if (ORBIS_GETENV_ONCE("ORBIS_CHECK_DEAD_PTRS") != NULL) {
+       const uint32_t *const w = (const uint32_t *)dcb[0];
+       const uint32_t        n = dcb_bytes[0] / 4;
+       const uint64_t        hi = orbis_va_base & 0xffffffff00000000ull;
+@@ -10240,7 +10489,7 @@ ac_drm_cs_submit_raw2(ac_drm_device *dev, uint32_t ctx_id, uint32_t bo_list_hand
+    orbis_scan_scissors(seq, (const uint32_t *)dcb[0], dcb_bytes[0] / 4);
+ 
+    {
+-      const char *const big = getenv("ORBIS_DUMP_BIG");
++      const char *const big = ORBIS_GETENV_ONCE("ORBIS_DUMP_BIG");
+       static bool       done;
+       const unsigned    threshold = big != NULL ? (unsigned)strtoul(big, NULL, 10) : 0;
+       if (threshold > 0 && !done && dcb_bytes[0] / 4 > threshold) {
+@@ -10259,7 +10508,7 @@ ac_drm_cs_submit_raw2(ac_drm_device *dev, uint32_t ctx_id, uint32_t bo_list_hand
+        * ear - and the 3D scene is not drawn. In the steady state the driver sees one repeating 647-dword submission
+        * per frame, which for a Gothic frame is nothing, so the thing to read is that frame's packets. A single
+        * number cannot span it, and the sequence numbers shift between runs so a hand-picked pair is a guess. */
+-      const char *const dump = getenv("ORBIS_DUMP_SUBMIT");
++      const char *const dump = ORBIS_GETENV_ONCE("ORBIS_DUMP_SUBMIT");
+       char             *colon = NULL;
+       const uint64_t    want = dump != NULL ? strtoull(dump, &colon, 10) : UINT64_MAX;
+       const uint64_t    count =
+@@ -10303,7 +10552,7 @@ ac_drm_cs_submit_raw2(ac_drm_device *dev, uint32_t ctx_id, uint32_t bo_list_hand
+           * threshold of 6100 missed entirely, because that run stopped at 6062. Guessing the number is a
+           * coin toss per flash, and the thing being asked about is "after we wrote them", which
+           * orbis_roundtrip_base states exactly: it is zero until radv_emit_tess_factor_ring has run. */
+-         const char *const s = getenv("ORBIS_READ_REGS_AT");
++         const char *const s = ORBIS_GETENV_ONCE("ORBIS_READ_REGS_AT");
+          if (s != NULL && s[0] == 't') {
+             /* Wait for the fact rather than for a number: zero until radv_emit_tess_factor_ring has run. */
+             read_at = (orbis_roundtrip_base != 0) ? submits_seen : UINT_MAX;
+@@ -10341,7 +10590,7 @@ ac_drm_cs_submit_raw2(ac_drm_device *dev, uint32_t ctx_id, uint32_t bo_list_hand
+    const uint64_t t0 = os_time_get_nano();
+    const int32_t err = sceGnmSubmitCommandBuffers(n_dcb, dcb, dcb_bytes, NULL, NULL);
+    const uint64_t t1 = os_time_get_nano();
+-   if (getenv("ORBIS_WATCH_STRICT") != NULL && err == 0) {
++   if (ORBIS_GETENV_ONCE("ORBIS_WATCH_STRICT") != NULL && err == 0) {
+       /* Bounded, like every wait in this file: if the GPU does not get there, the check is skipped rather than the
+        * process hanging, and the wait itself says so. */
+       ac_orbis_wait_gpu_idle(2ull * 1000 * 1000 * 1000);
+@@ -10375,7 +10624,7 @@ ac_drm_cs_submit_raw2(ac_drm_device *dev, uint32_t ctx_id, uint32_t bo_list_hand
+     *
+     * ⚠ AND IT IS NOT A FIX EITHER WAY. Serialising is a diagnosis; the repair would be to make the fences correct,
+     * which is a different piece of work in a known place. */
+-   if (getenv("ORBIS_SERIALISE") != NULL && err == 0) {
++   if (ORBIS_GETENV_ONCE("ORBIS_SERIALISE") != NULL && err == 0) {
+       static unsigned said;
+       if (orbis_budget(&said, 1)) {
+          mesa_logi("orbis-drm: ORBIS_SERIALISE - waiting for GPU idle after EVERY submission. The frame rate will "
+diff --git a/src/amd/vulkan/radv_cmd_buffer.c b/src/amd/vulkan/radv_cmd_buffer.c
+index 924bd60..248da0a 100644
+--- a/src/amd/vulkan/radv_cmd_buffer.c
++++ b/src/amd/vulkan/radv_cmd_buffer.c
+@@ -7944,6 +7944,8 @@ radv_init_default_state(struct radv_cmd_buffer *cmd_buffer)
+ /* Per thread, because several may record at once and a shared stamp would interleave into nonsense.
+  * Recording does not nest on one thread, so a single slot is enough. */
+ static __thread uint64_t orbis_record_t0;
++/* PCPS4: per-draw diagnostics run only with ORBIS_COUNT_API=1. */
++extern int orbis_diag_enabled;
+ #endif
+ 
+ VKAPI_ATTR VkResult VKAPI_CALL
+@@ -7959,7 +7961,7 @@ radv_BeginCommandBuffer(VkCommandBuffer commandBuffer, const VkCommandBufferBegi
+     * which is a lower bound, it brackets how much of the frame's CPU is spent recording at all -
+     * and if the recording window is a small part of the frame, the CPU is going somewhere neither
+     * of them can see, which is itself the answer. */
+-   orbis_record_t0 = os_time_get_nano();
++   orbis_record_t0 = unlikely(orbis_diag_enabled) ? os_time_get_nano() : 0;
+ #endif
+ 
+    vk_command_buffer_begin(&cmd_buffer->vk, pBeginInfo);
+@@ -8444,7 +8446,7 @@ radv_CmdBindDescriptorSets2(VkCommandBuffer commandBuffer, const VkBindDescripto
+ #ifdef HAVE_ORBIS_PLATFORM
+    /* The old GNM backend reached 30 fps by writing descriptors straight into PM4 with none of this
+     * machinery, so how often the title rebinds is the first thing to know before blaming it. */
+-   {
++   if (unlikely(orbis_diag_enabled)) {
+       extern uint64_t orbis_desc_binds;
+       orbis_desc_binds += pBindDescriptorSetsInfo->descriptorSetCount;
+    }
+@@ -8459,6 +8461,7 @@ radv_CmdBindDescriptorSets2(VkCommandBuffer commandBuffer, const VkBindDescripto
+     * so a binding recorded before the reset and one recorded after it are byte-identical in PM4. Comparing
+     * the pool's generation at record time against its generation at submit time separates them exactly,
+     * with no heuristic and no false positives from ordinary reuse. */
++   if (unlikely(orbis_diag_enabled))
+    for (uint32_t i = 0; i < pBindDescriptorSetsInfo->descriptorSetCount; i++) {
+       VK_FROM_HANDLE(radv_descriptor_set, set, pBindDescriptorSetsInfo->pDescriptorSets[i]);
+       if (set == NULL || set->header.orbis_pool == NULL)
+@@ -10660,7 +10663,7 @@ radv_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pRe
+     *
+     * Dispatches are counted separately below, because a compute pass that writes a full-screen image
+     * costs the same as a draw that does and none of this title's post-processing is a draw. */
+-   {
++   if (unlikely(orbis_diag_enabled)) {
+       extern uint64_t orbis_gfx_passes, orbis_gfx_pass_pixels;
+       const VkRect2D *const a = &pRenderingInfo->renderArea;
+       orbis_gfx_passes++;
+@@ -14254,7 +14257,7 @@ radv_before_draw(struct radv_cmd_buffer *cmd_buffer, const struct radv_draw_info
+    /* Every draw path in this file funnels through here, so one increment covers all seventeen entry
+     * points. What it is for: the frame is CPU-bound now, and cost per draw is the number that says
+     * whether the CPU is going into RADV's per-draw work or into the title above it. */
+-   {
++   if (unlikely(orbis_diag_enabled)) {
+       extern uint64_t orbis_draws;
+       orbis_draws += drawCount;
+    }
+@@ -15491,7 +15494,7 @@ radv_CmdDispatchBase(VkCommandBuffer commandBuffer, uint32_t base_x, uint32_t ba
+ #ifdef HAVE_ORBIS_PLATFORM
+    /* Workgroups rather than threads: the local size lives in the shader and this path does not have it.
+     * A full-screen 8x8 compute pass over 1080p is 32400 groups, which is the scale to read this by. */
+-   {
++   if (unlikely(orbis_diag_enabled)) {
+       extern uint64_t orbis_dispatches, orbis_dispatch_groups;
+       orbis_dispatches++;
+       orbis_dispatch_groups += (uint64_t)x * y * z;
+diff --git a/src/amd/vulkan/radv_physical_device.c b/src/amd/vulkan/radv_physical_device.c
+index 9a7580d..eb70045 100644
+--- a/src/amd/vulkan/radv_physical_device.c
++++ b/src/amd/vulkan/radv_physical_device.c
+@@ -369,6 +369,12 @@ radv_device_get_cache_uuid(struct radv_physical_device *pdev, void *uuid)
+       _mesa_blake3_update(&ctx, &strict, sizeof(strict));
+    }
+ 
++#ifdef __ORBIS__
++   /* PCPS4 cache key: compiled shaders embed the high half of 32-bit pointers, and on the PS4 it comes from
++    * wherever the GPU arena landed. A shader cached under one arena must not be reused under another. */
++   _mesa_blake3_update(&ctx, &pdev->info.address32_hi, sizeof(pdev->info.address32_hi));
++#endif
++
+    _mesa_blake3_final(&ctx, blake3);
+ 
+    memcpy(uuid, blake3, VK_UUID_SIZE);
+@@ -487,7 +493,13 @@ radv_physical_device_init_mem_types(struct radv_physical_device *pdev)
+    pdev->heaps = 0;
+ 
+    if (!pdev->info.has_dedicated_vram) {
++#ifdef HAVE_ORBIS_PLATFORM
++      /* PCPS4 one pool: GTT and visible VRAM both describe the same GPU arena, so adding them reported twice the
++       * memory that exists. heaptest measured 1919 MiB reported for a 1024 MiB arena. */
++      const uint64_t total_size = MAX2(gtt_size, visible_vram_size);
++#else
+       const uint64_t total_size = gtt_size + visible_vram_size;
++#endif
+ 
+       if (pdev->drirc.performance.enable_unified_heap_on_apu) {
+          /* Some applications seem better when the driver exposes only one heap of VRAM on APUs. */
+@@ -3524,7 +3536,11 @@ radv_get_memory_budget_properties(VkPhysicalDevice physicalDevice,
+          uint64_t vram_vis_internal_usage = heap_info.allocated_vram_vis + heap_info.allocated_vram;
+          uint64_t gtt_internal_usage = heap_info.allocated_gtt;
+          uint64_t total_internal_usage = vram_vis_internal_usage + gtt_internal_usage;
++#ifdef HAVE_ORBIS_PLATFORM
++         uint64_t total_system_usage = MAX2(heap_info.vram_vis_usage, heap_info.gtt_usage); /* PCPS4 one pool */
++#else
+          uint64_t total_system_usage = heap_info.vram_vis_usage + heap_info.gtt_usage;
++#endif
+          uint64_t total_usage = MAX2(total_internal_usage, total_system_usage);
+ 
+          /* Compute the total free space that can be allocated for this process across all heaps. */
+@@ -3551,7 +3567,11 @@ radv_get_memory_budget_properties(VkPhysicalDevice physicalDevice,
+          /* Compute the total heap size, internal and system usage. */
+          uint64_t total_heap_size = vram_vis_heap_size + gtt_heap_size;
+          uint64_t total_internal_usage = vram_vis_internal_usage + gtt_internal_usage;
++#ifdef HAVE_ORBIS_PLATFORM
++         uint64_t total_system_usage = MAX2(heap_info.vram_vis_usage, heap_info.gtt_usage); /* PCPS4 one pool */
++#else
+          uint64_t total_system_usage = heap_info.vram_vis_usage + heap_info.gtt_usage;
++#endif
+ 
+          uint64_t total_usage = MAX2(total_internal_usage, total_system_usage);
+ 
+diff --git a/src/amd/vulkan/radv_queue.c b/src/amd/vulkan/radv_queue.c
+index 025c597..570fe4c 100644
+--- a/src/amd/vulkan/radv_queue.c
++++ b/src/amd/vulkan/radv_queue.c
+@@ -277,6 +277,21 @@ radv_set_ring_buffer(const struct radv_physical_device *pdev, struct radeon_wins
+    ac_build_buffer_descriptor(pdev->info.gfx_level, &ac_state, desc);
+ }
+ 
++/* The VGT hands out ring offsets beyond the size it is told: a first vertex was measured at +2 MiB in a ring
++ * declared as 576 KiB. The writers are swizzled and land there, inside the padded allocation. The readers are
++ * plain bounds-checked buffers, so with the declared size they read zeros, and every geometry shader received
++ * and produced zero positions: the GPU ran it, and rasterized nothing. A reader may see the whole allocation. */
++static uint32_t
++radv_orbis_ring_read_size(const struct radeon_winsys_bo *bo, uint32_t declared)
++{
++#ifdef HAVE_ORBIS_PLATFORM
++   (void)declared;
++   return (uint32_t)MIN2(bo->size, (uint64_t)UINT32_MAX);
++#else
++   return declared;
++#endif
++}
++
+ static void
+ radv_fill_shader_rings(struct radv_device *device, uint32_t *desc, struct radeon_winsys_bo *scratch_bo,
+                        uint32_t esgs_ring_size, struct radeon_winsys_bo *esgs_ring_bo, uint32_t gsvs_ring_size,
+@@ -309,7 +324,8 @@ radv_fill_shader_rings(struct radv_device *device, uint32_t *desc, struct radeon
+       /* GS entry for ES->GS ring */
+       /* stride 0, num records - size, elsize0,
+          index stride 0 */
+-      radv_set_ring_buffer(pdev, esgs_ring_bo, 0, esgs_ring_size, false, false, false, 0, 0, &desc[4]);
++      radv_set_ring_buffer(pdev, esgs_ring_bo, 0, radv_orbis_ring_read_size(esgs_ring_bo, esgs_ring_size), false, false,
++                           false, 0, 0, &desc[4]);
+    }
+ 
+    desc += 8;
+@@ -318,7 +334,8 @@ radv_fill_shader_rings(struct radv_device *device, uint32_t *desc, struct radeon
+       /* VS entry for GS->VS ring */
+       /* stride 0, num records - size, elsize0,
+          index stride 0 */
+-      radv_set_ring_buffer(pdev, gsvs_ring_bo, 0, gsvs_ring_size, false, false, false, 0, 0, &desc[0]);
++      radv_set_ring_buffer(pdev, gsvs_ring_bo, 0, radv_orbis_ring_read_size(gsvs_ring_bo, gsvs_ring_size), false, false,
++                           false, 0, 0, &desc[0]);
+ 
+       /* stride gsvs_itemsize, num records 64
+          elsize 4, index stride 16 */
+@@ -436,6 +453,23 @@ static uint32_t
+ radv_orbis_gs_ring_bytes(uint32_t size, bool is_esgs)
+ {
+ #ifdef HAVE_ORBIS_PLATFORM
++   /* MEASURED (gsring, 2026-11-21): this VGT uses a fixed window whatever VGT_*_RING_SIZE says. Up to 400,000
++    * triangles per draw and declared rings from 576 KiB to 63 MiB, every write on the base PS4's two shader
++    * engines lay below +4.00 MiB: one engine from +0, the other from +2 MiB, wrapping there. A 512 MiB buffer held
++    * data only in its first 3.81 MiB. The old padding existed because readers were bounded by the declared size
++    * and saw zeros; radv_orbis_ring_read_size() fixes that. 16 MiB is four times the measured window, which also
++    * leaves room for the Pro's four engines. ORBIS_GS_RING_MB=0 restores the padding below. */
++   static int fixed_mb = -1;
++
++   if (fixed_mb < 0) {
++      const char *const m = getenv("ORBIS_GS_RING_MB");
++      fixed_mb = (m != NULL && *m != '\0') ? MAX2(atoi(m), 0) : 16;
++      if (fixed_mb)
++         mesa_logi("radv/orbis: GS rings allocated at a fixed %d MiB (ORBIS_GS_RING_MB)", fixed_mb);
++   }
++   if (fixed_mb)
++      return (uint32_t)fixed_mb << 20;
++
+    /* ⚠ AND THE SLACK IS BOUNDED, BECAUSE THE FIRST VERSION OF IT WAS NOT AND COST A RUN.
+     *
+     * A bare multiplier here compounds with the size scale and lands on a value that is already
+@@ -518,6 +552,21 @@ radv_orbis_gs_ring_bytes(uint32_t size, bool is_esgs)
+ #endif
+ }
+ 
++#ifdef HAVE_ORBIS_PLATFORM
++/* A ring's request can grow while its padded allocation stays the same: 51 MB and 63 MB both pad to the
++ * 512 MiB cap. Allocating the second while the first is alive asked the arena for 1 GiB to hold what the
++ * existing buffer already covers, ran out of device VA, and lost the device. */
++static bool
++radv_orbis_ring_bo_fits(const struct radeon_winsys_bo *bo, uint32_t size, bool is_esgs)
++{
++   if (!bo || bo->size < radv_orbis_gs_ring_bytes(size, is_esgs))
++      return false;
++   mesa_logi("radv/orbis: %s ring grows to %u B inside its existing %" PRIu64 " B buffer - no new allocation",
++             is_esgs ? "ESGS" : "GSVS", size, (uint64_t)bo->size);
++   return true;
++}
++#endif
++
+ static void
+ radv_emit_gs_ring_sizes(struct radv_device *device, struct radv_cmd_stream *cs, struct radeon_winsys_bo *esgs_ring_bo,
+                         uint32_t esgs_ring_size, struct radeon_winsys_bo *gsvs_ring_bo, uint32_t gsvs_ring_size)
+@@ -1301,7 +1350,11 @@ radv_update_preamble_cs(struct radv_queue_state *queue, struct radv_device *devi
+       radv_rmv_log_command_buffer_bo_create(device, compute_scratch_bo, 0, 0, compute_scratch_size);
+    }
+ 
+-   if (needs->esgs_ring_size > queue->ring_info.esgs_ring_size) {
++   if (needs->esgs_ring_size > queue->ring_info.esgs_ring_size
++#ifdef HAVE_ORBIS_PLATFORM
++       && !radv_orbis_ring_bo_fits(queue->esgs_ring_bo, needs->esgs_ring_size, true)
++#endif
++   ) {
+       result = radv_bo_create(device, NULL, radv_orbis_gs_ring_bytes(needs->esgs_ring_size, true), 4096,
+                               RADEON_DOMAIN_VRAM, ring_bo_flags, RADV_BO_PRIORITY_SCRATCH, 0, true, &esgs_ring_bo);
+       if (result != VK_SUCCESS)
+@@ -1309,7 +1362,11 @@ radv_update_preamble_cs(struct radv_queue_state *queue, struct radv_device *devi
+       radv_rmv_log_command_buffer_bo_create(device, esgs_ring_bo, 0, 0, needs->esgs_ring_size);
+    }
+ 
+-   if (needs->gsvs_ring_size > queue->ring_info.gsvs_ring_size) {
++   if (needs->gsvs_ring_size > queue->ring_info.gsvs_ring_size
++#ifdef HAVE_ORBIS_PLATFORM
++       && !radv_orbis_ring_bo_fits(queue->gsvs_ring_bo, needs->gsvs_ring_size, false)
++#endif
++   ) {
+       result = radv_bo_create(device, NULL, radv_orbis_gs_ring_bytes(needs->gsvs_ring_size, false), 4096,
+                               RADEON_DOMAIN_VRAM, ring_bo_flags, RADV_BO_PRIORITY_SCRATCH, 0, true, &gsvs_ring_bo);
+       if (result != VK_SUCCESS)
+@@ -1509,6 +1566,11 @@ radv_update_preamble_cs(struct radv_queue_state *queue, struct radv_device *devi
+        esgs_ring_bo != queue->esgs_ring_bo || gsvs_ring_bo != queue->gsvs_ring_bo ||
+        tess_rings_bo != queue->tess_rings_bo || task_rings_bo != queue->task_rings_bo ||
+        mesh_scratch_ring_bo != queue->mesh_scratch_ring_bo || ge_rings_bo != queue->ge_rings_bo ||
++#ifdef HAVE_ORBIS_PLATFORM
++       /* the same buffer with a new size still needs descriptors that say so */
++       needs->esgs_ring_size != queue->ring_info.esgs_ring_size ||
++       needs->gsvs_ring_size != queue->ring_info.gsvs_ring_size ||
++#endif
+        add_sample_positions) {
+       const uint32_t size = 304;
+ 
+@@ -2178,6 +2240,75 @@ radv_get_shader_upload_sync_wait(struct radv_device *device, uint64_t shader_upl
+    };
+ }
+ 
++#ifdef HAVE_ORBIS_PLATFORM
++static void
++radv_orbis_scan_ring(const char *name, struct radeon_winsys_bo *bo)
++{
++   const volatile uint32_t *p = (const volatile uint32_t *)(uintptr_t)radv_buffer_get_va(bo);
++   const uint64_t dwords = bo->size / 4;
++   uint64_t nonzero = 0, first = UINT64_MAX, last = 0, pos_values = 0;
++   char line[900];
++   int len = 0, shown = 0;
++
++   for (uint64_t i = 0; i < dwords; i++) {
++      /* ring_scan_step: this memory is very slow for the CPU. Everything to 8 MiB, then 16 KiB of each MiB. */
++      if (i >= (8ull << 20) / 4 && (i & ((1ull << 18) - 1)) >= (16 << 10) / 4) {
++         i |= (1ull << 18) - 1;
++         continue;
++      }
++      const uint32_t v = p[i];
++      if (!v)
++         continue;
++      nonzero++;
++      if (first == UINT64_MAX)
++         first = i * 4;
++      last = i * 4;
++      if (v == 0xbf800000 || v == 0x40400000)
++         pos_values++;
++      if (shown < 40 && len < (int)sizeof(line) - 32) {
++         len += snprintf(line + len, sizeof(line) - len, " %" PRIx64 ":%08x", i * 4, v);
++         shown++;
++      }
++   }
++   line[len] = 0;
++   mesa_logi("radv/orbis: GS DUMP %s va 0x%" PRIx64 " size %" PRIu64 ": %" PRIu64 " nonzero dwords, first +0x%" PRIx64
++             ", last +0x%" PRIx64 ", %" PRIu64 " are -1.0 or 3.0;%s",
++             name, radv_buffer_get_va(bo), (uint64_t)bo->size, nonzero, first == UINT64_MAX ? 0 : first, last,
++             pos_values, line);
++}
++
++static void
++radv_orbis_dump_gs_rings(struct radv_queue *queue)
++{
++   static int enabled = -1, dumps;
++   struct radv_device *device = radv_queue_device(queue);
++
++   if (enabled < 0) {
++      const char *const e = getenv("ORBIS_GS_RING_DUMP");
++      enabled = e ? MAX2(atoi(e), 1) : 0;
++   }
++   if (!enabled || dumps >= enabled || !queue->state.gsvs_ring_bo)
++      return;
++   dumps++;
++   device->ws->ctx_wait_idle(queue->hw_ctx, AMD_IP_GFX, 0);
++   if (queue->state.descriptor_bo) {
++      const uint32_t *d = (const uint32_t *)radv_buffer_map(device->ws, queue->state.descriptor_bo);
++      if (d) {
++         mesa_logi("radv/orbis: GS DUMP descriptors ES %08x %08x %08x %08x  GS-from-ES %08x %08x %08x %08x  "
++                   "VS-from-GS %08x %08x %08x %08x  GS-to-VS %08x %08x %08x %08x",
++                   d[4], d[5], d[6], d[7], d[8], d[9], d[10], d[11], d[12], d[13], d[14], d[15], d[16], d[17], d[18],
++                   d[19]);
++         device->ws->buffer_unmap(device->ws, queue->state.descriptor_bo, false);
++      }
++   }
++   mesa_logi("radv/orbis: GS DUMP ring sizes: ESGS %u, GSVS %u", queue->state.ring_info.esgs_ring_size,
++             queue->state.ring_info.gsvs_ring_size);
++   if (queue->state.esgs_ring_bo)
++      radv_orbis_scan_ring("ESGS", queue->state.esgs_ring_bo);
++   radv_orbis_scan_ring("GSVS", queue->state.gsvs_ring_bo);
++}
++#endif
++
+ static VkResult
+ radv_queue_submit_normal(struct radv_queue *queue, struct vk_queue_submit *submission)
+ {
+@@ -2418,6 +2549,9 @@ radv_queue_submit_normal(struct radv_queue *queue, struct vk_queue_submit *submi
+       initial_preambles[1] = !use_ace ? NULL : queue->follower_state->initial_preamble_cs->b;
+    }
+ 
++#ifdef HAVE_ORBIS_PLATFORM
++   radv_orbis_dump_gs_rings(queue);
++#endif
+    queue->last_shader_upload_seq = MAX2(queue->last_shader_upload_seq, shader_upload_seq);
+ 
+    radv_dump_printf_data(device, stderr, true);
 diff --git a/src/vulkan/runtime/vk_drm_syncobj.c b/src/vulkan/runtime/vk_drm_syncobj.c
 index 41e34d9..f89e58a 100644
 --- a/src/vulkan/runtime/vk_drm_syncobj.c
@@ -282,7 +922,7 @@ index 41e34d9..f89e58a 100644
        return vk_drm_copy_sync_file_payloads(device, wait_count, waits,
                                              signal_count, signals);
 diff --git a/src/vulkan/wsi/wsi_common_headless.c b/src/vulkan/wsi/wsi_common_headless.c
-index 72da70e..4201810 100644
+index 72da70e..d91a0c2 100644
 --- a/src/vulkan/wsi/wsi_common_headless.c
 +++ b/src/vulkan/wsi/wsi_common_headless.c
 @@ -485,6 +485,34 @@ wsi_headless_swapchain_acquire_next_image(struct wsi_swapchain *wsi_chain,
@@ -320,7 +960,26 @@ index 72da70e..4201810 100644
        if (timespec_after(&current_time, &end_time)) {
  #ifdef HAVE_ORBIS_PLATFORM
           /* ⚠ THE FAILURE MODE OF REGISTERING THE SWAPCHAIN'S OWN IMAGES, said out loud rather than
-@@ -874,7 +902,22 @@ wsi_headless_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
+@@ -763,6 +791,18 @@ wsi_headless_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
+    assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR);
+ 
+    int num_images = pCreateInfo->minImageCount;
++#ifdef HAVE_ORBIS_PLATFORM
++   /* A DEEPER QUEUE FOR THE DISPLAY. Zero copy lets the display hold the image on screen and the one being
++    * flipped, and this WSI holds one being drawn plus one deferred, so a 4-image swapchain left room for ONE
++    * queued flip: every present waited for the last flip (Horizon: 11.7 ms of an 18.6 ms frame) and any frame
++    * slower than 16.7 ms fell toward 30 FPS. Six images let three flips queue so spikes are absorbed.
++    * ORBIS_SWAPCHAIN_IMAGES=<n> overrides (4 restores the old behaviour). */
++   {
++      const char *e = getenv("ORBIS_SWAPCHAIN_IMAGES");
++      const int want = e ? atoi(e) : 6;
++      if (want > num_images) num_images = want;
++   }
++#endif
+ 
+    size_t size = sizeof(*chain) + num_images * sizeof(chain->images[0]);
+    chain = vk_zalloc(pAllocator, size, 8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+@@ -874,7 +914,22 @@ wsi_headless_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
        void *addrs[8];
        uint32_t pitch_px = 0;
        bool direct = chain->base.image_count <= ARRAY_SIZE(addrs);

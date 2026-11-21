@@ -5,10 +5,14 @@ TC=~/openorbis-toolchain; COMPAT=~/src-ps4/orbis-compat; P=~/pcps4-work/prospero
 B=~/pcps4-work/.deps/wine/build-ps4; W=~/pcps4-work/wine-ps5-support; WS=~/pcps4-work/build-obj/ws
 CRTLIB=$COMPAT/build/crt/crtlib.o; cf=$TC/bin/linux/create-fself
 WRAPS=$(grep -oE "__wrap_[a-z_]+" "$P/wine/ps5/pw_wine_cwd_libc.c" | sed "s/__wrap_//" | sort -u); WF=""; for w in $WRAPS; do WF="$WF -Wl,--wrap=$w"; done
-LD="-nostartfiles -nodefaultlibs -fuse-ld=lld -Wl,--script=$TC/link_ps4mod.x $CRTLIB -L$TC/lib -L$COMPAT/build -Wl,--start-group -lorbis-compat -lc -lkernel -lc++ -lc++abi -lunwind -Wl,--end-group -Wl,--warn-unresolved-symbols"
-SSUP="$WS/ps4_tls_shim.o $W/pw_wine_heap.o $W/pw_wine_heap_libc.o $WS/pw_wine_compat.o $WS/pw_wine_compat_libc.o $WS/pw_wine_threads.o $WS/pw_wine_threads_libc.o $W/pw_wine_cwd.o $WS/pw_wine_cwd_libc.o $WS/wineserver_desc_loc.o"
-cd $B; rm -f server/fd.o server/request.o server/thread.o server/main.o
-make -j$(nproc) server/fd.o server/request.o server/thread.o server/main.o >/tmp/srv.make.log 2>&1 || { echo SRV FAIL; grep error /tmp/srv.make.log | head; exit 1; }
+LD="-nostartfiles -nodefaultlibs -fuse-ld=lld -Wl,--script=$TC/link_ps4mod.x $CRTLIB -L$TC/lib -L$COMPAT/build -Wl,--start-group -lorbis-compat -lc -lkernel -lSceNet -lc++ -lc++abi -lunwind -Wl,--end-group -Wl,--warn-unresolved-symbols"
+SSUP="$WS/ps4_tls_shim.o $W/pw_wine_heap.o $W/pw_wine_heap_libc.o $WS/pw_wine_compat.o $WS/pw_wine_compat_libc.o $WS/pw_wine_threads.o $WS/pw_wine_threads_libc.o $W/pw_wine_cwd.o $WS/pw_wine_cwd_libc_srv.o $WS/ps4_sock_nonblock.o $WS/wineserver_desc_loc.o"
+SRC=$(cd "$(dirname "$0")" && pwd)
+CCS="clang --target=x86_64-pc-freebsd12-elf -isysroot $TC -isystem $COMPAT/include -isystem $HOME/pcps4-work/wine-ps4-shims -isystem $TC/include -D__PROSPERO__ -D__ORBIS__ -D_BSD_SOURCE=1 -fPIC -funwind-tables -m64 -g -O2 -fno-stack-protector"
+$CCS -c "$SRC/ps4_sock_nonblock.c" -o $WS/ps4_sock_nonblock.o || exit 1
+$CCS -I$P/wine/ps5 -I$P/src '-DPW_CLOSE_TAG="srv"' -c "$SRC/pw_wine_cwd_libc_ps4.c" -o $WS/pw_wine_cwd_libc_srv.o || exit 1
+cd $B; rm -f server/mapping.o server/fd.o server/request.o server/thread.o server/main.o server/ptrace.o server/sock.o
+make -j$(nproc) server/mapping.o server/fd.o server/request.o server/thread.o server/main.o server/ptrace.o server/sock.o >/tmp/srv.make.log 2>&1 || { echo SRV FAIL; grep error /tmp/srv.make.log | head; exit 1; }
 clang --target=x86_64-pc-freebsd12-elf -fPIC -m64 -shared -Wl,-Bsymbolic -o $WS/wineserver.so server/*.o $SSUP $WF $LD 2>/tmp/srv.link.log || { echo SRVLINK FAIL; tail -5 /tmp/srv.link.log; exit 1; }
 rm -f $WS/wineserver.prx
 $cf -in=$WS/wineserver.so -out=/tmp/w.oelf --lib=$WS/wineserver.prx --paid 0x3800000000000011 >/dev/null 2>&1; python3 /tmp/patch_tls_dyn.py $WS/wineserver.prx >/dev/null

@@ -15,7 +15,9 @@ $CCW -I$P/wine/ps5 -c $ND/ntdll_desc.c -o $ND/ntdll_desc_loc.o 2>/tmp/nd.err || 
 llvm-objcopy --localize-symbol=module_start --localize-symbol=module_stop $ND/ntdll_desc_loc.o
 WRAPS=$(grep -oE "__wrap_[a-z_]+" "$P/wine/ps5/pw_wine_cwd_libc.c" | sed "s/__wrap_//" | sort -u); WF="-Wl,--wrap=pthread_sigmask -Wl,--wrap=pw_compat_pipe -Wl,--wrap=read -Wl,--wrap=pread"; for w in $WRAPS; do WF="$WF -Wl,--wrap=$w"; done
 LD="-nostartfiles -nodefaultlibs -fuse-ld=lld -Wl,--script=$TC/link_ps4mod.x $CRTLIB -L$TC/lib -L$COMPAT/build -Wl,--start-group -lorbis-compat -lc -lkernel -lc++ -lc++abi -lunwind -Wl,--end-group -Wl,--warn-unresolved-symbols"
-NSUP="$WS/ps4_tls_shim.o $ND/pw_wine_prx.o $ND/pw_wine_dl.o $ND/pw_wine_dl_libc.o $WS/pw_wine_compat.o $WS/pw_wine_compat_libc.o $W/pw_wine_cwd.o $WS/pw_wine_cwd_libc.o $W/pw_wine_sink.o $W/pw_wine_heap.o $W/pw_wine_heap_libc.o $ND/pw_wine_dmem_core.o $ND/pw_wine_dmem_ps4.o $ND/ps4_pipe_fallback.o $ND/ps4_pad_input.o $ND/ps4_preload.o $ND/ps4_sigmask.o $ND/ps4_entropy.o $ND/stubs_w.o $ND/ntdll_desc_loc.o"
+SRC=$(cd "$(dirname "$0")" && pwd)
+$CCW -I$P/wine/ps5 -I$P/src '-DPW_CLOSE_TAG="cli"' -c "$SRC/pw_wine_cwd_libc_ps4.c" -o "$WS/pw_wine_cwd_libc_cli.o" || exit 1
+NSUP="$WS/ps4_tls_shim.o $ND/pw_wine_prx.o $ND/pw_wine_dl.o $ND/pw_wine_dl_libc.o $WS/pw_wine_compat.o $WS/pw_wine_compat_libc.o $W/pw_wine_cwd.o $WS/pw_wine_cwd_libc_cli.o $W/pw_wine_sink.o $W/pw_wine_heap.o $W/pw_wine_heap_libc.o $ND/pw_wine_dmem_core.o $ND/pw_wine_dmem_ps4.o $ND/ps4_pipe_fallback.o $ND/ps4_pad_input.o $ND/ps4_preload.o $ND/ps4_sigmask.o $ND/ps4_entropy.o $ND/stubs_w.o $ND/ntdll_desc_loc.o"
 for o in $NSUP; do [ -f $o ] || { echo "missing $o"; exit 1; }; done
 cd $B; rm -f dlls/ntdll/ntdll.so
 make -j$(nproc) dlls/ntdll/ntdll.so LDFLAGS="$NSUP $WF $LD" >/tmp/ntdll.make.log 2>&1 || { echo NTDLL FAIL; grep error /tmp/ntdll.make.log|head; exit 1; }

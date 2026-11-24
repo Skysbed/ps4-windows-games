@@ -15,6 +15,7 @@ Small Windows programs that run on the PS4 through PCPS4 and write `result.txt` 
 | `memstress` | No data loss when memory is reused across Garlic and Onion |
 | `pooltest` | A large GPU pool filled with verified data |
 | `fastmem` | `ps4_fastmem.c` against reference loops, on the build host |
+| `fchdir` | A reused descriptor cannot move the working directory, on the build host |
 
 Build with `x86_64-w64-mingw32-gcc`, adding Mesa's `include` directory for the Vulkan headers. Vulkan tests must create a window before loading `winevulkan.dll`.
 

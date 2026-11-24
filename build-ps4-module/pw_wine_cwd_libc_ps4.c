@@ -26,6 +26,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -243,17 +244,69 @@ int __wrap_chdir(const char *path)
     return pw_cwd_set(folded);
 }
 
+#ifdef __PROSPERO__
+/* stat() by path returns device and inode 0 on the PS4, while fstat() returns the real ones, so compare two descriptors:
+ * the one being entered and a fresh open of its recorded path. Another module can close and reuse a number, and dup2 is
+ * not wrapped, so the recorded path alone proves nothing. wineserver calls fchdir for relative opens, so a verified
+ * descriptor, identity and path are remembered and only cost the fstat the caller already made. */
+static struct { dev_t dev; ino_t ino; uint64_t path; int valid; } fchdir_verified[256];
+static pthread_mutex_t fchdir_verified_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static uint64_t fchdir_path_hash(const char *path)
+{
+    uint64_t hash = 0xcbf29ce484222325ull;
+    for (; *path; path++) hash = (hash ^ (unsigned char)*path) * 0x100000001b3ull;
+    return hash;
+}
+
+static int fchdir_path_matches(int fd, const char *path, const struct stat *by_fd)
+{
+    const uint64_t hash = fchdir_path_hash(path);
+    const int slot = fd >= 0 && fd < (int)(sizeof(fchdir_verified) / sizeof(fchdir_verified[0]));
+    struct stat by_open;
+    int check, status, saved;
+
+    if (slot) {
+        pthread_mutex_lock(&fchdir_verified_lock);
+        status = fchdir_verified[fd].valid && fchdir_verified[fd].dev == by_fd->st_dev &&
+                 fchdir_verified[fd].ino == by_fd->st_ino && fchdir_verified[fd].path == hash;
+        pthread_mutex_unlock(&fchdir_verified_lock);
+        if (status) return 0;
+    }
+    if ((check = __real_open(path, O_RDONLY)) < 0) return -1;
+    status = fstat(check, &by_open);
+    saved = errno;
+    __real_close(check);
+    if (status) { errno = saved; return -1; }
+    if (by_open.st_dev != by_fd->st_dev || by_open.st_ino != by_fd->st_ino) { errno = EACCES; return -1; }
+    if (slot) {
+        pthread_mutex_lock(&fchdir_verified_lock);
+        fchdir_verified[fd].dev = by_fd->st_dev;
+        fchdir_verified[fd].ino = by_fd->st_ino;
+        fchdir_verified[fd].path = hash;
+        fchdir_verified[fd].valid = 1;
+        pthread_mutex_unlock(&fchdir_verified_lock);
+    }
+    return 0;
+}
+#endif
+
 int __wrap_fchdir(int fd)
 {
     char path[PW_CWD_PATH_MAX];
-    struct stat by_fd, by_path;
+    struct stat by_fd;
+#ifndef __PROSPERO__
+    struct stat by_path;
+#endif
 
     if (fstat(fd, &by_fd)) return -1;
     if (!S_ISDIR(by_fd.st_mode)) { errno = ENOTDIR; return -1; }
     /* Another module may have closed and reused the number: the path must
      * still name the descriptor's directory. */
     if (pw_cwd_fd_path(fd, path, sizeof(path))) { errno = EACCES; return -1; }
-#ifndef __PROSPERO__  /* PS4 sceKernel FS: path-stat vs fd-fstat dev/ino differ; tracked path is authoritative */
+#ifdef __PROSPERO__
+    if (fchdir_path_matches(fd, path, &by_fd)) return -1;
+#else
     if (__real_stat(path, &by_path) ||
         by_path.st_dev != by_fd.st_dev || by_path.st_ino != by_fd.st_ino) {
         errno = EACCES;
